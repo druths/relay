@@ -35,7 +35,7 @@ def get_all_statuses() -> dict[uuid.UUID, AgentHealth]:
 
 async def check_agent(agent: Agent) -> AgentHealth:
     """Test an agent's LLM provider with a minimal call."""
-    provider = get_provider(agent.llm_provider, agent.llm_base_url)
+    provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
     if provider is None:
         health = AgentHealth(
             status="error",

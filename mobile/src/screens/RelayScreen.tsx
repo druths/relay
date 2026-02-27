@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -8,15 +9,22 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { useRelay } from "../hooks/useRelay";
 import { StatusOrb } from "../components/StatusOrb";
 import { ConversationLog } from "../components/ConversationLog";
 import { InputBar } from "../components/InputBar";
 import { AgentSelector } from "../components/AgentSelector";
 import { SessionList } from "../components/SessionList";
+import { AgentManagement } from "../components/AgentManagement";
 
-export function RelayScreen() {
+interface Props {
+  onLogout?: () => void;
+}
+
+export function RelayScreen({ onLogout }: Props) {
   const relay = useRelay();
+  const [showSettings, setShowSettings] = useState(false);
 
   const handleAgentSelect = (agentName: string) => {
     relay.sendMessage(`connect me to ${agentName}`);
@@ -38,38 +46,34 @@ export function RelayScreen() {
               {inSession ? `Session with ${relay.activeAgentName}` : "Lobby"}
             </Text>
           </View>
-          <StatusOrb
-            activeSpeaker={relay.activeSpeaker}
-            status={relay.status}
-            connected={relay.connected}
-          />
-        </View>
-
-        {/* Connection / session controls */}
-        {!relay.connected ? (
-          <View style={styles.controlRow}>
-            <TouchableOpacity
-              style={styles.connectButton}
-              onPress={() => relay.connect()}
-            >
-              <Text style={styles.connectButtonText}>Connect</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.controlRow}>
-            {inSession && (
-              <TouchableOpacity
-                style={styles.lobbyButton}
-                onPress={() => relay.leaveSession()}
-              >
-                <Text style={styles.controlButtonText}>Back to Lobby</Text>
+          <View style={styles.headerRight}>
+            {onLogout && (
+              <TouchableOpacity onPress={onLogout} hitSlop={12}>
+                <Ionicons name="log-out-outline" size={20} color="#6b7280" />
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={styles.disconnectButton}
-              onPress={() => relay.disconnect()}
+              onPress={() => setShowSettings(true)}
+              hitSlop={12}
             >
-              <Text style={styles.controlButtonText}>Disconnect</Text>
+              <Ionicons name="settings-outline" size={20} color="#6b7280" />
+            </TouchableOpacity>
+            <StatusOrb
+              activeSpeaker={relay.activeSpeaker}
+              status={relay.status}
+              connected={relay.connected}
+            />
+          </View>
+        </View>
+
+        {/* Session controls */}
+        {relay.connected && inSession && (
+          <View style={styles.controlRow}>
+            <TouchableOpacity
+              style={styles.lobbyButton}
+              onPress={() => relay.leaveSession()}
+            >
+              <Text style={styles.controlButtonText}>Back to Lobby</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -114,8 +118,19 @@ export function RelayScreen() {
           sttAvailable={relay.sttAvailable}
           outputMode={relay.earpieceMode ? "earpiece" : "speaker"}
           onSetOutputMode={relay.setOutputMode}
+          silenceThresholdDb={relay.sttSettings?.stt_silence_threshold_db}
+          silenceTimeout={relay.sttSettings?.stt_silence_timeout_ms}
+          minDuration={relay.sttSettings?.stt_min_duration_ms}
+          sessionId={relay.activeSessionId}
         />
       </KeyboardAvoidingView>
+
+      <AgentManagement
+        agents={relay.agents}
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+        onAgentsChanged={relay.refreshAgents}
+      />
     </SafeAreaView>
   );
 }
@@ -140,6 +155,11 @@ const styles = StyleSheet.create({
   headerLeft: {
     gap: 2,
   },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   title: {
     fontSize: 20,
     fontWeight: "700",
@@ -156,28 +176,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  connectButton: {
-    flex: 1,
-    backgroundColor: "#2563eb",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  connectButtonText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
   lobbyButton: {
     flex: 1,
     backgroundColor: "#92400e",
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  disconnectButton: {
-    flex: 1,
-    backgroundColor: "#374151",
     borderRadius: 10,
     paddingVertical: 10,
     alignItems: "center",

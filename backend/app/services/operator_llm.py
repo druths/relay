@@ -131,15 +131,16 @@ async def call_operator(
     *,
     model: str = "gpt-4o-mini",
     base_url: str | None = None,
+    api_key: str | None = None,
 ) -> OperatorResult:
     """
     Call the Operator LLM. Returns an OperatorResult with either a text
     reply or a tool call to execute.
 
-    Accepts any OpenAI-compatible API via base_url. Model and base_url
-    are read from the Operator's Agent DB row by the caller.
+    Accepts any OpenAI-compatible API via base_url. Model, base_url, and
+    api_key are read from the Operator's Agent DB row by the caller.
     """
-    client = _get_client(base_url)
+    client = _get_client(base_url, api_key)
     if client is None:
         logger.warning("Operator LLM: No API key configured, falling back to keyword matching")
         return OperatorResult()  # Signals caller to fall back to keyword matching

@@ -7,8 +7,24 @@ export interface Agent {
   voice_settings: Record<string, number>;
   llm_provider: string;
   llm_model: string;
+  llm_base_url: string | null;
+  llm_api_key: string | null;
+  tts_api_key: string | null;
+  is_operator: boolean;
   status: "healthy" | "error" | "unknown";
   status_message: string;
+}
+
+export interface PlatformSettings {
+  stt_provider: string;
+  stt_api_key: string | null;
+  stt_silence_threshold_db: number;
+  stt_silence_timeout_ms: number;
+  stt_min_duration_ms: number;
+  stt_no_speech_threshold: number;
+  tts_default_provider: string;
+  tts_openai_api_key: string | null;
+  tts_elevenlabs_api_key: string | null;
 }
 
 export interface Session {

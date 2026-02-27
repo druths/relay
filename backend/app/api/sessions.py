@@ -15,7 +15,13 @@ from app.services.conversation_manager import (
     list_sessions,
 )
 
-router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
+from app.api.auth import get_current_user
+
+router = APIRouter(
+    prefix="/v1/sessions",
+    tags=["sessions"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class SessionOut(BaseModel):

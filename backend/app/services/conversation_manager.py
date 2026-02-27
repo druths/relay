@@ -38,10 +38,14 @@ from app.services.session_llm import generate_session_name, generate_session_sum
 
 # ── Operator config helper ──────────────────────────────────────────────
 
-async def _operator_llm_config(db: AsyncSession) -> tuple[str, str | None]:
-    """Return (model, base_url) from the Operator agent's DB row."""
+async def _operator_llm_config(db: AsyncSession) -> tuple[str, str | None, str | None]:
+    """Return (model, base_url, api_key) from the Operator agent's DB row."""
     op = await agent_manager.get_agent_by_name(db, "Operator")
-    return (op.llm_model if op else "gpt-4o-mini", op.llm_base_url if op else None)
+    return (
+        op.llm_model if op else "gpt-4o-mini",
+        op.llm_base_url if op else None,
+        op.llm_api_key if op else None,
+    )
 
 
 # ── Session CRUD ────────────────────────────────────────────────────────
@@ -139,9 +143,10 @@ async def pause_session(db: AsyncSession, session_id: uuid.UUID) -> None:
             if messages:
                 agent = await agent_manager.get_agent_by_id(db, session.agent_id)
                 agent_name = agent.name if agent else "Agent"
-                op_model, op_base_url = await _operator_llm_config(db)
+                op_model, op_base_url, op_api_key = await _operator_llm_config(db)
                 session.summary = await generate_session_summary(
-                    messages, agent_name, model=op_model, base_url=op_base_url,
+                    messages, agent_name,
+                    model=op_model, base_url=op_base_url, api_key=op_api_key,
                 )
         except Exception as exc:
             logger.warning("Failed to generate session summary: %s", exc)
@@ -176,12 +181,12 @@ async def handle_lobby_message(
         })
     sessions_ctx = await list_sessions(db, user_id)
 
-    op_model, op_base_url = await _operator_llm_config(db)
+    op_model, op_base_url, op_api_key = await _operator_llm_config(db)
 
     try:
         result = await call_operator(
             text, agents_ctx, sessions_ctx, lobby_history,
-            model=op_model, base_url=op_base_url,
+            model=op_model, base_url=op_base_url, api_key=op_api_key,
         )
     except Exception as exc:
         logger.exception("Operator LLM call failed, falling back to keyword matching: %s", exc)
@@ -370,10 +375,10 @@ async def handle_session_message(
     # Auto-name the session after the first user exchange
     if session.name is None:
         try:
-            op_model, op_base_url = await _operator_llm_config(db)
+            op_model, op_base_url, op_api_key = await _operator_llm_config(db)
             name = await generate_session_name(
                 text, response_text, agent.name,
-                model=op_model, base_url=op_base_url,
+                model=op_model, base_url=op_base_url, api_key=op_api_key,
             )
             session.name = name
             await db.commit()
@@ -455,10 +460,10 @@ async def handle_session_message_stream(
     # Auto-name the session after the first user exchange
     if session.name is None:
         try:
-            op_model, op_base_url = await _operator_llm_config(db)
+            op_model, op_base_url, op_api_key = await _operator_llm_config(db)
             name = await generate_session_name(
                 text, full_response, agent.name,
-                model=op_model, base_url=op_base_url,
+                model=op_model, base_url=op_base_url, api_key=op_api_key,
             )
             session.name = name
             await db.commit()

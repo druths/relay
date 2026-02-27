@@ -20,9 +20,10 @@ async def generate_session_name(
     *,
     model: str = "gpt-4o-mini",
     base_url: str | None = None,
+    api_key: str | None = None,
 ) -> str:
     """Generate a short 3-5 word title for a session from the first exchange."""
-    client = _get_client(base_url)
+    client = _get_client(base_url, api_key)
     if client is None:
         return _fallback_name(first_user_message)
 
@@ -69,9 +70,10 @@ async def generate_session_summary(
     *,
     model: str = "gpt-4o-mini",
     base_url: str | None = None,
+    api_key: str | None = None,
 ) -> str:
     """Generate a 1-2 sentence summary of the session conversation."""
-    client = _get_client(base_url)
+    client = _get_client(base_url, api_key)
     if client is None:
         return _fallback_summary(messages)
 

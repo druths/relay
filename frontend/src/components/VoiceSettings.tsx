@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Agent } from "../types";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from "../api";
 
 interface Voice {
   id: string;
@@ -36,7 +35,7 @@ export function VoiceSettings({ agents, onUpdate }: VoiceSettingsProps) {
       return;
     }
 
-    fetch(`${API_BASE}/v1/agents/tts/voices/${provider}`)
+    apiFetch(`/v1/agents/tts/voices/${provider}`)
       .then((r) => r.json())
       .then((data: Voice[]) => {
         voiceCacheRef.current[provider] = data;

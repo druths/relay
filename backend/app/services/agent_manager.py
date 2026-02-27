@@ -44,13 +44,25 @@ async def list_all_agents(db: AsyncSession) -> list[Agent]:
     return list(result.scalars().all())
 
 
+_VOICE_PREAMBLE = (
+    "This is a voice conversation. Keep responses short and conversational — "
+    "1-3 sentences unless the user asks for detail. Favor natural turn-taking "
+    "over long monologues. Do not use markdown, lists, or formatting.\n\n"
+)
+
+
+def _build_system_prompt(agent: Agent) -> str:
+    persona = agent.persona_prompt or f"You are {agent.name}, a helpful assistant."
+    return _VOICE_PREAMBLE + persona
+
+
 async def generate_response(agent: Agent, text: str, context: list[dict]) -> str:
     """Generate a text response from an agent using its configured LLM provider."""
     health = agent_health.get_status(agent.agent_id)
     if health.status == "error":
         return f"[{agent.name}] Agent is currently unavailable: {health.message}"
 
-    provider = get_provider(agent.llm_provider, agent.llm_base_url)
+    provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
     if provider is None:
         return (
             f"[{agent.name}] LLM provider '{agent.llm_provider}' is not configured. "
@@ -64,7 +76,7 @@ async def generate_response(agent: Agent, text: str, context: list[dict]) -> str
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": msg["text_content"]})
 
-    system_prompt = agent.persona_prompt or f"You are {agent.name}, a helpful assistant."
+    system_prompt = _build_system_prompt(agent)
 
     try:
         return await provider.generate(system_prompt, messages, agent.llm_model)
@@ -82,7 +94,7 @@ async def generate_response_stream(
         yield f"[{agent.name}] Agent is currently unavailable: {health.message}"
         return
 
-    provider = get_provider(agent.llm_provider, agent.llm_base_url)
+    provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
     if provider is None:
         yield (
             f"[{agent.name}] LLM provider '{agent.llm_provider}' is not configured. "
@@ -96,7 +108,7 @@ async def generate_response_stream(
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": msg["text_content"]})
 
-    system_prompt = agent.persona_prompt or f"You are {agent.name}, a helpful assistant."
+    system_prompt = _build_system_prompt(agent)
 
     try:
         async for chunk in provider.generate_stream(system_prompt, messages, agent.llm_model):

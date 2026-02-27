@@ -39,6 +39,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPERATOR_MODEL: ${OPERATOR_MODEL:-gpt-4o-mini}
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-changeme}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-relay-dev-secret-change-in-production}
     depends_on:
       postgres:
         condition: service_healthy

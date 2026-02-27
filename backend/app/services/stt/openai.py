@@ -12,20 +12,21 @@ from app.services.stt.base import STTProvider
 
 logger = logging.getLogger(__name__)
 
-_client: AsyncOpenAI | None = None
+_clients: dict[str, AsyncOpenAI] = {}
 
 
-def _get_client() -> AsyncOpenAI | None:
-    global _client
-    if not settings.openai_api_key:
+def _get_client(api_key: str | None = None) -> AsyncOpenAI | None:
+    effective_key = api_key or settings.openai_api_key
+    if not effective_key:
         return None
-    if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _client
+    if effective_key not in _clients:
+        _clients[effective_key] = AsyncOpenAI(api_key=effective_key)
+    return _clients[effective_key]
 
 
 class OpenAISTTProvider(STTProvider):
-    NO_SPEECH_THRESHOLD = 0.5
+    def __init__(self, api_key: str | None = None):
+        self._api_key = api_key
 
     # Whisper hallucinates these phrases on silence/noise
     HALLUCINATION_BLOCKLIST = {
@@ -46,12 +47,18 @@ class OpenAISTTProvider(STTProvider):
         "the end.",
     }
 
-    async def transcribe(self, audio_bytes: bytes, format: str = "webm") -> str:
-        client = _get_client()
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        format: str = "webm",
+        no_speech_threshold: float = 0.5,
+    ) -> str:
+        client = _get_client(self._api_key)
         if client is None:
             raise RuntimeError("OpenAI API key not configured")
 
-        logger.info("OpenAI STT: %d bytes, format=%s", len(audio_bytes), format)
+        logger.info("OpenAI STT: %d bytes, format=%s, no_speech_threshold=%.2f",
+                     len(audio_bytes), format, no_speech_threshold)
 
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = f"audio.{format}"
@@ -73,8 +80,8 @@ class OpenAISTTProvider(STTProvider):
                 "OpenAI STT segment: no_speech_prob=%.3f, text=%r",
                 prob, seg_text[:80],
             )
-            if prob >= self.NO_SPEECH_THRESHOLD:
-                logger.info("OpenAI STT: filtered (no_speech_prob >= %.1f)", self.NO_SPEECH_THRESHOLD)
+            if prob >= no_speech_threshold:
+                logger.info("OpenAI STT: filtered (no_speech_prob >= %.2f)", no_speech_threshold)
                 continue
             if seg_text.strip().lower() in self.HALLUCINATION_BLOCKLIST:
                 logger.info("OpenAI STT: filtered hallucination %r", seg_text.strip())

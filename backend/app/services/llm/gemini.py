@@ -12,19 +12,22 @@ from app.services.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-_client: genai.Client | None = None
+_clients: dict[str, genai.Client] = {}
 
 
-def _get_client() -> genai.Client | None:
-    global _client
-    if not settings.gemini_api_key:
+def _get_client(api_key: str | None = None) -> genai.Client | None:
+    effective_key = api_key or settings.gemini_api_key
+    if not effective_key:
         return None
-    if _client is None:
-        _client = genai.Client(api_key=settings.gemini_api_key)
-    return _client
+    if effective_key not in _clients:
+        _clients[effective_key] = genai.Client(api_key=effective_key)
+    return _clients[effective_key]
 
 
 class GeminiProvider(LLMProvider):
+    def __init__(self, api_key: str | None = None):
+        self._api_key = api_key
+
     def _build_contents(self, messages: list[dict]) -> list[types.Content]:
         """Convert messages to Gemini format (uses 'model' instead of 'assistant')."""
         contents = []
@@ -42,7 +45,7 @@ class GeminiProvider(LLMProvider):
         messages: list[dict],
         model: str,
     ) -> str:
-        client = _get_client()
+        client = _get_client(self._api_key)
         if client is None:
             raise RuntimeError("Gemini API key not configured")
 
@@ -61,7 +64,7 @@ class GeminiProvider(LLMProvider):
         return response.text or ""
 
     async def generate_stream(self, system_prompt, messages, model):
-        client = _get_client()
+        client = _get_client(self._api_key)
         if client is None:
             raise RuntimeError("Gemini API key not configured")
 

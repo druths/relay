@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Haptics from "expo-haptics";
 import { setAudioModeAsync } from "expo-audio";
-import type { Agent, Message, Session, WsEvent } from "../types";
+import type { Agent, Message, PlatformSettings, Session, WsEvent } from "../types";
 import { useAudioPlayer } from "./useAudioPlayer";
-import { API_BASE, WS_BASE } from "../config";
+import { apiFetch, getWsUrl } from "../apiFetch";
+import { playChime } from "../chime";
 
 export interface RelayState {
   connected: boolean;
@@ -16,6 +17,7 @@ export interface RelayState {
   agents: Agent[];
   sessions: Session[];
   sttAvailable: boolean;
+  sttSettings: PlatformSettings | null;
 }
 
 export function useRelay() {
@@ -35,20 +37,25 @@ export function useRelay() {
     agents: [],
     sessions: [],
     sttAvailable: false,
+    sttSettings: null,
   });
 
   // Fetch agent list
-  useEffect(() => {
-    fetch(`${API_BASE}/v1/agents?include_operator=true`)
+  const refreshAgents = useCallback(() => {
+    apiFetch("/v1/agents?include_operator=true")
       .then((r) => r.json())
       .then((agents: Agent[]) => setState((s) => ({ ...s, agents })))
       .catch(console.error);
   }, []);
 
+  useEffect(() => {
+    refreshAgents();
+  }, [refreshAgents]);
+
   // Fetch sessions list
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/v1/sessions`);
+      const res = await apiFetch("/v1/sessions");
       const sessions: Session[] = await res.json();
       setState((s) => ({ ...s, sessions }));
     } catch {
@@ -57,17 +64,25 @@ export function useRelay() {
   }, []);
 
   // Connect to lobby
-  const connect = useCallback(() => {
-    const socket = new WebSocket(`${WS_BASE}/v1/lobby`);
+  const connect = useCallback(async () => {
+    const wsUrl = await getWsUrl("/v1/lobby");
+    const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
       setState((s) => ({ ...s, connected: true }));
       fetchSessions();
       // Check STT availability
-      fetch(`${API_BASE}/v1/agents/stt/status`)
+      apiFetch("/v1/agents/stt/status")
         .then((r) => r.json())
         .then((data: { available: boolean }) =>
           setState((s) => ({ ...s, sttAvailable: data.available }))
+        )
+        .catch(() => {});
+      // Fetch STT platform settings for recorder tuning
+      apiFetch("/v1/platform/settings")
+        .then((r) => r.json())
+        .then((data: PlatformSettings) =>
+          setState((s) => ({ ...s, sttSettings: data }))
         )
         .catch(() => {});
     };
@@ -208,19 +223,23 @@ export function useRelay() {
           break;
 
         case "audio_start":
+          console.log(`[TTS][relay] audio_start from ${event.payload.speaker}`);
           audioPlayerRef.current.start();
           break;
 
         case "audio_chunk":
+          console.log(`[TTS][relay] audio_chunk seq=${event.payload.sequence} (${event.payload.data.length} b64 chars)`);
           audioPlayerRef.current.enqueue(event.payload.data, event.payload.sequence);
           break;
 
         case "audio_done":
+          console.log(`[TTS][relay] audio_done from ${event.payload.speaker}`);
           audioPlayerRef.current.done();
           break;
 
         case "transcription":
           console.log(`[STT] transcription received: "${event.payload.text}"`);
+          playChime();
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           setState((s) => {
             if (s.activeSessionId) {
@@ -251,6 +270,16 @@ export function useRelay() {
     ws.current = socket;
   }, [fetchSessions]);
 
+  // Auto-connect on mount, cleanup on unmount
+  useEffect(() => {
+    connect();
+    return () => {
+      audioPlayerRef.current.stop();
+      ws.current?.close();
+      ws.current = null;
+    };
+  }, [connect]);
+
   // Disconnect from lobby
   const disconnect = useCallback(() => {
     audioPlayerRef.current.stop();
@@ -273,6 +302,7 @@ export function useRelay() {
   const sendMessage = useCallback((text: string) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
 
+    playChime();
     setState((s) => {
       if (s.activeSessionId) {
         return {
@@ -318,9 +348,8 @@ export function useRelay() {
   // Update agent config
   const updateAgentConfig = useCallback(
     async (agentId: string, config: { voice_settings?: Record<string, number>; voice_id?: string; tts_provider?: string; persona_prompt?: string }) => {
-      const res = await fetch(`${API_BASE}/v1/agents/${agentId}/config`, {
+      const res = await apiFetch(`/v1/agents/${agentId}/config`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
       const updated: Agent = await res.json();
@@ -349,6 +378,7 @@ export function useRelay() {
     setAudioModeAsync({
       allowsRecording: isEarpiece,
       playsInSilentMode: true,
+      shouldPlayInBackground: true,
       interruptionMode: "doNotMix",
     }).catch(() => {});
   }, []);
@@ -363,6 +393,7 @@ export function useRelay() {
     resumeSession,
     updateAgentConfig,
     fetchSessions,
+    refreshAgents,
     stopAudio,
     muted: audioPlayer.muted,
     toggleMute,

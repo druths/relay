@@ -35,6 +35,9 @@ export function useAudioPlayer() {
         const item = queueRef.current.shift()!;
         nextSeqRef.current++;
 
+        // Skip empty chunks (from failed backend synthesis)
+        if (!item.data) continue;
+
         // Decode base64 → ArrayBuffer
         const binary = atob(item.data);
         const bytes = new Uint8Array(binary.length);

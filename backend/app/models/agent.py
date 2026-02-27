@@ -21,3 +21,5 @@ class Agent(Base):
     llm_provider: Mapped[str] = mapped_column(String(50), nullable=False, default="openai")
     llm_model: Mapped[str] = mapped_column(String(100), nullable=False, default="gpt-4o-mini")
     llm_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    llm_api_key: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    tts_api_key: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)

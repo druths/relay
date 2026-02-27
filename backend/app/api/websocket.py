@@ -9,7 +9,7 @@ import logging
 import re
 import uuid
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from app.services.conversation_manager import (
     get_session,
@@ -20,22 +20,32 @@ from app.services.conversation_manager import (
 )
 from app.services.operator import operator_greeting
 from app.services import agent_manager
-from app.services.stt import get_stt_provider
+from app.api.platform import _get_setting
+from app.api.auth import verify_ws_token
+from app.services.stt import get_stt_provider_from_db
 from app.services.tts import get_tts_provider
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Sentence-splitting regex: split after .!? followed by whitespace
-_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
+# Sentence-splitting regex: split after .!? followed by whitespace, or on newlines
+_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+|\n+')
+_MAX_CHUNK_WORDS = 20
 
 
 @router.websocket("/v1/lobby")
-async def lobby_ws(websocket: WebSocket):
+async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
+    # Verify JWT before accepting the connection
+    try:
+        verify_ws_token(token)
+    except ValueError:
+        await websocket.close(code=4001, reason="Authentication failed")
+        return
+
     await websocket.accept()
 
-    user_id = "default"  # future: extract from auth
+    user_id = "default"
     active_session_id: uuid.UUID | None = None
     lobby_history: list[dict] = []  # In-memory conversation history for the LLM Operator
 
@@ -74,7 +84,7 @@ async def lobby_ws(websocket: WebSocket):
                     audio_data_b64 = data["payload"]["data"]
                     audio_format = data["payload"].get("format", "webm")
 
-                    stt = get_stt_provider()
+                    stt = await get_stt_provider_from_db(db)
                     if not stt:
                         await websocket.send_json({
                             "type": "error",
@@ -84,7 +94,9 @@ async def lobby_ws(websocket: WebSocket):
 
                     try:
                         audio_bytes = base64.b64decode(audio_data_b64)
-                        text = await stt.transcribe(audio_bytes, audio_format)
+                        threshold_str = await _get_setting(db, "stt_no_speech_threshold")
+                        no_speech_threshold = float(threshold_str) if threshold_str else 0.5
+                        text = await stt.transcribe(audio_bytes, audio_format, no_speech_threshold=no_speech_threshold)
                     except Exception as exc:
                         logger.warning("STT transcription failed: %s", exc)
                         await websocket.send_json({
@@ -216,11 +228,22 @@ async def _handle_text(
             session = await get_session(db, active_session_id) if active_session_id else None
             if session:
                 tts_agent = await agent_manager.get_agent_by_id(db, session.agent_id)
-                tts_provider = get_tts_provider(tts_agent.tts_provider) if tts_agent else None
+                if tts_agent:
+                    logger.info(
+                        "Stream TTS resolve: agent=%s, tts_provider=%s, voice_id=%s, has_agent_key=%s",
+                        tts_agent.name, tts_agent.tts_provider, tts_agent.voice_id, bool(tts_agent.tts_api_key),
+                    )
+                    tts_key = tts_agent.tts_api_key
+                    if not tts_key:
+                        setting_key = f"tts_{tts_agent.tts_provider}_api_key"
+                        tts_key = await _get_setting(db, setting_key) or None
+                        logger.info("Stream TTS key fallback: setting=%s, found=%s", setting_key, bool(tts_key))
+                    tts_provider = get_tts_provider(tts_agent.tts_provider, tts_key)
             if tts_provider:
                 tts_buffer = ""
                 tts_seq = 0
                 tts_tasks = []
+                tts_semaphore = asyncio.Semaphore(2)
                 async with ws_lock:
                     await websocket.send_json({
                         "type": "audio_start",
@@ -234,7 +257,7 @@ async def _handle_text(
                 seq = tts_seq
                 tts_seq += 1
                 task = asyncio.create_task(
-                    _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, sentence, seq)
+                    _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, sentence, seq, tts_semaphore)
                 )
                 tts_tasks.append(task)
 
@@ -243,7 +266,7 @@ async def _handle_text(
                 seq = tts_seq
                 tts_seq += 1
                 task = asyncio.create_task(
-                    _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, tts_buffer, seq)
+                    _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, tts_buffer, seq, tts_semaphore)
                 )
                 tts_tasks.append(task)
             if tts_tasks:
@@ -260,13 +283,39 @@ async def _handle_text(
 
 
 def _extract_sentences(buffer: str) -> tuple[list[str], str]:
-    """Split buffer on sentence boundaries. Returns (complete_sentences, remaining_buffer)."""
+    """Split buffer on sentence/newline boundaries with a word-count fallback.
+
+    Returns (complete_chunks, remaining_buffer).
+    """
     parts = _SENTENCE_RE.split(buffer)
     if len(parts) <= 1:
-        return [], buffer  # No sentence boundary found yet
+        # No sentence/newline boundary — fall back to word count
+        words = buffer.split()
+        if len(words) > _MAX_CHUNK_WORDS:
+            cut = " ".join(words[:_MAX_CHUNK_WORDS])
+            remaining = " ".join(words[_MAX_CHUNK_WORDS:])
+            return [cut], remaining
+        return [], buffer
     sentences = parts[:-1]
     remaining = parts[-1]
-    return [s for s in sentences if s.strip()], remaining
+    chunks: list[str] = []
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        chunks.extend(_split_long(s))
+    return chunks, remaining
+
+
+def _split_long(text: str) -> list[str]:
+    """Break text exceeding _MAX_CHUNK_WORDS into sub-chunks."""
+    words = text.split()
+    if len(words) <= _MAX_CHUNK_WORDS:
+        return [text]
+    return [
+        " ".join(words[i : i + _MAX_CHUNK_WORDS])
+        for i in range(0, len(words), _MAX_CHUNK_WORDS)
+    ]
 
 
 async def _synth_and_send(
@@ -276,10 +325,17 @@ async def _synth_and_send(
     agent,
     text: str,
     seq: int,
+    semaphore: asyncio.Semaphore | None = None,
 ) -> None:
     """Synthesize a sentence and send the audio chunk over WebSocket."""
     try:
-        audio_bytes = await provider.synthesize(text, agent.voice_id, agent.voice_settings)
+        if semaphore:
+            await semaphore.acquire()
+        try:
+            audio_bytes = await provider.synthesize(text, agent.voice_id, agent.voice_settings)
+        finally:
+            if semaphore:
+                semaphore.release()
         data = base64.b64encode(audio_bytes).decode()
         async with lock:
             await websocket.send_json({
@@ -292,7 +348,21 @@ async def _synth_and_send(
                 },
             })
     except Exception as exc:
-        logger.warning("TTS synthesis failed for seq %d: %s", seq, exc)
+        logger.warning("TTS synthesis failed for seq %d (%d chars): %s", seq, len(text), exc, exc_info=True)
+        # Send an empty chunk so the frontend doesn't block on this sequence
+        try:
+            async with lock:
+                await websocket.send_json({
+                    "type": "audio_chunk",
+                    "payload": {
+                        "speaker": agent.name,
+                        "data": "",
+                        "format": "mp3",
+                        "sequence": seq,
+                    },
+                })
+        except Exception:
+            pass
 
 
 async def _tts_for_text(
@@ -304,9 +374,26 @@ async def _tts_for_text(
     """Synthesize TTS for a complete (non-streaming) text message."""
     agent = await agent_manager.get_agent_by_name(db, speaker_name)
     if not agent:
+        logger.debug("TTS: no agent found for speaker=%s", speaker_name)
         return
-    provider = get_tts_provider(agent.tts_provider)
+    logger.info(
+        "TTS resolve: speaker=%s, agent=%s, tts_provider=%s, voice_id=%s, has_agent_key=%s",
+        speaker_name, agent.name, agent.tts_provider, agent.voice_id, bool(agent.tts_api_key),
+    )
+    api_key = agent.tts_api_key
+    if not api_key:
+        setting_key = f"tts_{agent.tts_provider}_api_key"
+        api_key = await _get_setting(db, setting_key) or None
+        logger.info(
+            "TTS key fallback: setting=%s, found=%s",
+            setting_key, bool(api_key),
+        )
+    provider = get_tts_provider(agent.tts_provider, api_key)
     if not provider:
+        logger.warning(
+            "TTS: get_tts_provider returned None for provider=%s, has_key=%s",
+            agent.tts_provider, bool(api_key),
+        )
         return
 
     try:
@@ -316,6 +403,7 @@ async def _tts_for_text(
         })
 
         audio_bytes = await provider.synthesize(text, agent.voice_id, agent.voice_settings)
+        logger.info("TTS: synthesized %d bytes for speaker=%s", len(audio_bytes), speaker_name)
         data = base64.b64encode(audio_bytes).decode()
         await websocket.send_json({
             "type": "audio_chunk",

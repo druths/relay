@@ -23,6 +23,11 @@ interface InputBarProps {
   sttAvailable?: boolean;
   outputMode?: "speaker" | "earpiece";
   onSetOutputMode?: (mode: "speaker" | "earpiece") => void;
+  silenceThresholdDb?: number;
+  silenceTimeout?: number;
+  minDuration?: number;
+  /** Used to detect session changes and restart the recorder */
+  sessionId?: string | null;
 }
 
 const OUTPUT_OPTIONS: DeviceOption[] = [
@@ -40,6 +45,10 @@ export function InputBar({
   sttAvailable,
   outputMode = "speaker",
   onSetOutputMode,
+  silenceThresholdDb,
+  silenceTimeout,
+  minDuration,
+  sessionId,
 }: InputBarProps) {
   const [value, setValue] = useState("");
   const prevRecorderState = useRef<string>("idle");
@@ -56,6 +65,9 @@ export function InputBar({
       onSendAudio?.(audioBase64, format);
     },
     earpieceMode: outputMode === "earpiece",
+    ...(silenceThresholdDb !== undefined && { silenceThresholdDb }),
+    ...(silenceTimeout !== undefined && { silenceTimeout }),
+    ...(minDuration !== undefined && { minDuration }),
   });
 
   // Stop agent audio when user starts speaking
@@ -67,6 +79,32 @@ export function InputBar({
       onStopAudio?.();
     }
   }, [recorderState, onStopAudio]);
+
+  // Stop recorder when disconnected
+  useEffect(() => {
+    if (disabled && recorderState !== "idle") {
+      stopListening();
+    }
+  }, [disabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Restart recorder when session changes (lobby ↔ agent, or agent → agent)
+  // so the audio session is properly re-established.
+  // 4A: Properly await stopListening before restarting instead of setTimeout.
+  const prevSessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    if (prevSessionIdRef.current === sessionId) return;
+    prevSessionIdRef.current = sessionId;
+    if (recorderState === "listening" || recorderState === "recording") {
+      let cancelled = false;
+      (async () => {
+        await stopListening();
+        if (!cancelled) {
+          await startListening();
+        }
+      })().catch((e) => console.error("[InputBar] session restart failed:", e));
+      return () => { cancelled = true; };
+    }
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showMic = sttAvailable && onSendAudio;
 

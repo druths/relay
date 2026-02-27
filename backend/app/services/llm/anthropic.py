@@ -11,16 +11,16 @@ from app.services.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-_client: AsyncAnthropic | None = None
+_clients: dict[str, AsyncAnthropic] = {}
 
 
-def _get_client() -> AsyncAnthropic | None:
-    global _client
-    if not settings.anthropic_api_key:
+def _get_client(api_key: str | None = None) -> AsyncAnthropic | None:
+    effective_key = api_key or settings.anthropic_api_key
+    if not effective_key:
         return None
-    if _client is None:
-        _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-    return _client
+    if effective_key not in _clients:
+        _clients[effective_key] = AsyncAnthropic(api_key=effective_key)
+    return _clients[effective_key]
 
 
 def _ensure_alternation(messages: list[dict]) -> list[dict]:
@@ -43,13 +43,16 @@ def _ensure_alternation(messages: list[dict]) -> list[dict]:
 
 
 class AnthropicProvider(LLMProvider):
+    def __init__(self, api_key: str | None = None):
+        self._api_key = api_key
+
     async def generate(
         self,
         system_prompt: str,
         messages: list[dict],
         model: str,
     ) -> str:
-        client = _get_client()
+        client = _get_client(self._api_key)
         if client is None:
             raise RuntimeError("Anthropic API key not configured")
 
@@ -67,7 +70,7 @@ class AnthropicProvider(LLMProvider):
         return response.content[0].text
 
     async def generate_stream(self, system_prompt, messages, model):
-        client = _get_client()
+        client = _get_client(self._api_key)
         if client is None:
             raise RuntimeError("Anthropic API key not configured")
 

@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
+    elevenlabs_api_key: str = ""
+    auth_username: str = "admin"
+    auth_password: str = "changeme"
+    auth_jwt_secret: str = "relay-dev-secret-change-in-production"
 
     model_config = {"env_file": ".env"}
 

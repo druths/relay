@@ -11,19 +11,22 @@ from app.services.tts.base import TTSProvider
 
 logger = logging.getLogger(__name__)
 
-_client: AsyncOpenAI | None = None
+_clients: dict[str, AsyncOpenAI] = {}
 
 
-def _get_client() -> AsyncOpenAI | None:
-    global _client
-    if not settings.openai_api_key:
+def _get_client(api_key: str | None = None) -> AsyncOpenAI | None:
+    effective_key = api_key or settings.openai_api_key
+    if not effective_key:
         return None
-    if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _client
+    if effective_key not in _clients:
+        _clients[effective_key] = AsyncOpenAI(api_key=effective_key)
+    return _clients[effective_key]
 
 
 class OpenAITTSProvider(TTSProvider):
+    def __init__(self, api_key: str | None = None):
+        self._api_key = api_key
+
     @classmethod
     def available_voices(cls) -> list[dict]:
         return [
@@ -40,7 +43,7 @@ class OpenAITTSProvider(TTSProvider):
         ]
 
     async def synthesize(self, text: str, voice_id: str, voice_settings: dict) -> bytes:
-        client = _get_client()
+        client = _get_client(self._api_key)
         if client is None:
             raise RuntimeError("OpenAI API key not configured")
 

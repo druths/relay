@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Agent, Message, Session, WsEvent } from "../types";
 import { useAudioPlayer } from "./useAudioPlayer";
-
-const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch, getWsUrl } from "../api";
 
 export interface RelayState {
   connected: boolean;
@@ -38,17 +36,24 @@ export function useRelay() {
   });
 
   // Fetch agent list
-  useEffect(() => {
-    fetch(`${API_BASE}/v1/agents?include_operator=true`)
-      .then((r) => r.json())
-      .then((agents: Agent[]) => setState((s) => ({ ...s, agents })))
-      .catch(console.error);
+  const refreshAgents = useCallback(async () => {
+    try {
+      const res = await apiFetch("/v1/agents?include_operator=true");
+      const agents: Agent[] = await res.json();
+      setState((s) => ({ ...s, agents }));
+    } catch {
+      // ignore
+    }
   }, []);
+
+  useEffect(() => {
+    refreshAgents();
+  }, [refreshAgents]);
 
   // Fetch sessions list
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/v1/sessions`);
+      const res = await apiFetch("/v1/sessions");
       const sessions: Session[] = await res.json();
       setState((s) => ({ ...s, sessions }));
     } catch {
@@ -58,13 +63,13 @@ export function useRelay() {
 
   // Connect to lobby
   const connect = useCallback(() => {
-    const socket = new WebSocket(`${WS_BASE}/v1/lobby`);
+    const socket = new WebSocket(getWsUrl("/v1/lobby"));
 
     socket.onopen = () => {
       setState((s) => ({ ...s, connected: true }));
       fetchSessions();
       // Check STT availability
-      fetch(`${API_BASE}/v1/agents/stt/status`)
+      apiFetch("/v1/agents/stt/status")
         .then((r) => r.json())
         .then((data: { available: boolean }) =>
           setState((s) => ({ ...s, sttAvailable: data.available }))
@@ -251,6 +256,16 @@ export function useRelay() {
     ws.current = socket;
   }, [fetchSessions]);
 
+  // Auto-connect on mount, cleanup on unmount
+  useEffect(() => {
+    connect();
+    return () => {
+      audioPlayerRef.current.stop();
+      ws.current?.close();
+      ws.current = null;
+    };
+  }, [connect]);
+
   // Disconnect from lobby
   const disconnect = useCallback(() => {
     audioPlayerRef.current.stop();
@@ -319,9 +334,8 @@ export function useRelay() {
   // Update agent config
   const updateAgentConfig = useCallback(
     async (agentId: string, config: { voice_settings?: Record<string, number>; voice_id?: string; tts_provider?: string; persona_prompt?: string }) => {
-      const res = await fetch(`${API_BASE}/v1/agents/${agentId}/config`, {
+      const res = await apiFetch(`/v1/agents/${agentId}/config`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
       const updated: Agent = await res.json();
@@ -350,6 +364,7 @@ export function useRelay() {
     leaveSession,
     resumeSession,
     updateAgentConfig,
+    refreshAgents,
     fetchSessions,
     stopAudio,
     muted: audioPlayer.muted,
