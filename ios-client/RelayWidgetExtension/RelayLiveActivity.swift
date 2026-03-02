@@ -7,6 +7,7 @@ import WidgetKit
 struct RelayWidgetBundle: WidgetBundle {
     var body: some Widget {
         RelayLiveActivity()
+        RelayQuickLaunchWidget()
     }
 }
 

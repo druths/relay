@@ -12,6 +12,7 @@ struct AgentSelector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Spacer().frame(height: 4)
             Text("AGENTS")
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(1.5)
@@ -26,6 +27,7 @@ struct AgentSelector: View {
                 }
                 .padding(.horizontal, 16)
             }
+            Spacer().frame(height: 4)
         }
     }
 

@@ -4,6 +4,7 @@ import SwiftUI
 struct RelayView: View {
     let authService: AuthService
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var relay: RelayViewModel
     @State private var showSettings = false
     @State private var showMenu = false
@@ -30,6 +31,9 @@ struct RelayView: View {
                         Task { await relay.sendMessage("connect me to \(agent.name)") }
                     }
                 )
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Color.relayBorder).frame(height: 1)
+                }
             }
 
             ConversationLog(
@@ -55,11 +59,26 @@ struct RelayView: View {
         }
         .task { await relay.connect() }
         .onDisappear { Task { await relay.disconnect() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && !relay.connected {
+                Task { await relay.connect() }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .relayToggleMute)) { _ in
             relay.toggleMute()
         }
         .onReceive(NotificationCenter.default.publisher(for: .relayExitLive)) { _ in
             relay.exitLiveMode()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .relayEnterLive)) { _ in
+            if !relay.connected {
+                Task {
+                    await relay.connect()
+                    relay.enterLiveMode()
+                }
+            } else if !relay.isLiveMode {
+                relay.enterLiveMode()
+            }
         }
     }
 
@@ -80,17 +99,9 @@ struct RelayView: View {
                 compact: true
             )
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Relay")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Color.relayTextPrimary)
-
-                Text(relay.activeSessionId != nil
-                     ? (relay.activeAgentName ?? "Session")
-                     : "Lobby")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextTertiary)
-            }
+            Text(relay.activeAgentName ?? "Operator")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Color.relayTextPrimary)
 
             Spacer()
 
@@ -111,7 +122,7 @@ struct RelayView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.vertical, 10)
         .background(Color.relaySurface.ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.relayBorder).frame(height: 1)

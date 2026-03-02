@@ -73,6 +73,14 @@ actor AudioPlayerService {
         nextSeq = 0
     }
 
+    /// Returns once all queued audio (including pending) has finished playing.
+    /// If nothing is playing, returns immediately.
+    func waitUntilFinished() async {
+        while isDraining || pendingReset {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
     func setMuted(_ muted: Bool) {
         isMuted = muted
         if muted {

@@ -28,10 +28,6 @@ struct MessageBubble: View {
             if isUser { Spacer(minLength: 48) }
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                Text(roleLabel)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.relayTextQuaternary)
-
                 HStack(alignment: .bottom, spacing: 0) {
                     MarkdownText(text: message.textContent)
 

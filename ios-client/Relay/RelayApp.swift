@@ -17,6 +17,8 @@ struct RelayApp: App {
                         NotificationCenter.default.post(name: .relayToggleMute, object: nil)
                     case "exit-live":
                         NotificationCenter.default.post(name: .relayExitLive, object: nil)
+                    case "live":
+                        NotificationCenter.default.post(name: .relayEnterLive, object: nil)
                     default:
                         print("[DeepLink] Unknown URL: \(url)")
                     }

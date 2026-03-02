@@ -5,6 +5,7 @@ import Foundation
 extension Notification.Name {
     static let relayToggleMute = Notification.Name("relayToggleMute")
     static let relayExitLive = Notification.Name("relayExitLive")
+    static let relayEnterLive = Notification.Name("relayEnterLive")
 }
 
 struct ToggleMuteIntent: LiveActivityIntent {

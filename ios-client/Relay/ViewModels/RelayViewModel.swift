@@ -337,12 +337,24 @@ final class RelayViewModel {
             }
 
         case .sessionEntered(let payload):
-            activeSessionId = payload.sessionId
-            activeAgentName = payload.agentName
-            sessionMessages = []
-            audio.handleSessionChange(newSessionId: payload.sessionId)
-            if isLiveMode { updateLiveActivity() }
-            Task { await fetchSessions() }
+            if isLiveMode {
+                // Let the operator's audio finish before swapping to the session
+                Task {
+                    await audio.player.waitUntilFinished()
+                    activeSessionId = payload.sessionId
+                    activeAgentName = payload.agentName
+                    sessionMessages = []
+                    audio.handleSessionChange(newSessionId: payload.sessionId)
+                    updateLiveActivity()
+                    await fetchSessions()
+                }
+            } else {
+                activeSessionId = payload.sessionId
+                activeAgentName = payload.agentName
+                sessionMessages = []
+                audio.handleSessionChange(newSessionId: payload.sessionId)
+                Task { await fetchSessions() }
+            }
 
         case .sessionLeft:
             audio.stopAudio()
