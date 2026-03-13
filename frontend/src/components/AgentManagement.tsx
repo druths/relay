@@ -63,7 +63,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
           stt_silence_timeout_ms: String(data.stt_silence_timeout_ms),
           stt_min_duration_ms: String(data.stt_min_duration_ms),
           stt_no_speech_threshold: String(data.stt_no_speech_threshold),
-          tts_default_provider: (data as Record<string, unknown>).tts_default_provider as string ?? "none",
+          tts_default_provider: data.tts_default_provider ?? "none",
           tts_openai_api_key: "",
           tts_elevenlabs_api_key: "",
         });
@@ -290,7 +290,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
       setPlatform(updated);
       setPlatformForm((f) => ({
         ...f,
-        tts_default_provider: (updated as Record<string, unknown>).tts_default_provider as string ?? "none",
+        tts_default_provider: updated.tts_default_provider ?? "none",
         tts_openai_api_key: "",
         tts_elevenlabs_api_key: "",
       }));
@@ -679,8 +679,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                     setPlatformForm((f) => ({ ...f, tts_openai_api_key: e.target.value }))
                   }
                   placeholder={
-                    (platform as Record<string, unknown> | null)?.tts_openai_api_key
-                      ? `${(platform as Record<string, unknown>).tts_openai_api_key} (leave blank to keep)`
+                    platform?.tts_openai_api_key
+                      ? `${platform.tts_openai_api_key} (leave blank to keep)`
                       : "sk-… (falls back to env var)"
                   }
                   className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
@@ -705,8 +705,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                     setPlatformForm((f) => ({ ...f, tts_elevenlabs_api_key: e.target.value }))
                   }
                   placeholder={
-                    (platform as Record<string, unknown> | null)?.tts_elevenlabs_api_key
-                      ? `${(platform as Record<string, unknown>).tts_elevenlabs_api_key} (leave blank to keep)`
+                    platform?.tts_elevenlabs_api_key
+                      ? `${platform.tts_elevenlabs_api_key} (leave blank to keep)`
                       : "xi-… (falls back to env var)"
                   }
                   className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
