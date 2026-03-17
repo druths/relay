@@ -62,12 +62,10 @@ final class AudioViewModel {
 
         guard oldSessionId != newSessionId else { return }
 
-        if recorderState == .listening || recorderState == .recording {
-            Task {
-                await recorder.stopListening()
-                await recorder.startListening()
-            }
-        }
+        // Don't stop+start the recorder on session transitions — it briefly reconfigures the
+        // audio session to .playback (via cleanup), which clips the agent's first audio chunk.
+        // The recorder keeps running through session changes; VAD state is irrelevant here.
+        print("[STT][session] handleSessionChange: \(oldSessionId ?? "nil") → \(newSessionId ?? "nil") (recorder continues)")
     }
 
     func updateSettings(silenceThresholdDb: Float, silenceTimeoutMs: Int, minDurationMs: Int) {

@@ -8,6 +8,7 @@ Two entry points:
 
 from __future__ import annotations
 
+import difflib
 import logging
 import uuid
 from collections.abc import AsyncGenerator
@@ -296,10 +297,17 @@ async def _execute_handoff(
     db: AsyncSession, user_id: str, agent_name: str | None
 ) -> list[dict]:
     if not agent_name:
-        reply = "Which agent would you like to connect to?"
+        reply = "Which agent?"
         return [_lobby_state_event(), _text_event("operator", reply)]
 
     agent = await agent_manager.get_agent_by_name(db, agent_name)
+    if not agent:
+        # Fuzzy match — handles STT misspellings (e.g. "vanta" → "Vanto")
+        all_agents = await agent_manager.list_agents(db)
+        all_names = [a.name for a in all_agents if a.name.lower() != "operator"]
+        matches = difflib.get_close_matches(agent_name, all_names, n=1, cutoff=0.55)
+        if matches:
+            agent = next((a for a in all_agents if a.name == matches[0]), None)
     if not agent:
         reply = operator_not_found(agent_name)
         return [_lobby_state_event(), _text_event("operator", reply)]

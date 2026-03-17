@@ -1,7 +1,7 @@
 import Foundation
 
 enum AppConfig {
-    private static let defaultBase = "http://localhost:8000"
+    private static let defaultBase = "http://localhost:5051"
     private static let serverKey = "relay_server_url"
 
     /// The user-configured server URL, persisted in UserDefaults.

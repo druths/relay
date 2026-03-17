@@ -29,6 +29,12 @@ final class AgentManagementViewModel {
     var platformForm: [String: String] = [:]
     var isSavingPlatform = false
 
+    // Dirty state tracking
+    private var savedForm: [String: String] = [:]
+    private var savedPlatformForm: [String: String] = [:]
+    var isAgentFormDirty: Bool { form != savedForm }
+    var isPlatformFormDirty: Bool { platformForm != savedPlatformForm }
+
     private let apiClient: APIClient
 
     init(apiClient: APIClient) {
@@ -57,6 +63,7 @@ final class AgentManagementViewModel {
                 "tts_openai_api_key": "",
                 "tts_elevenlabs_api_key": "",
             ]
+            savedPlatformForm = platformForm
         } catch {
             print("[AgentMgmt] Failed to load platform settings: \(error)")
         }
@@ -81,6 +88,7 @@ final class AgentManagementViewModel {
             "stability": agent.voiceSettings["stability"]?.stringValue ?? "0.5",
             "similarity_boost": agent.voiceSettings["similarity_boost"]?.stringValue ?? "0.75",
         ]
+        savedForm = form
     }
 
     func startNewAgent() {
@@ -102,6 +110,7 @@ final class AgentManagementViewModel {
             "stability": "0.5",
             "similarity_boost": "0.75",
         ]
+        savedForm = form
     }
 
     // MARK: - Voices
@@ -149,6 +158,7 @@ final class AgentManagementViewModel {
             let created: Agent = try await apiClient.request("POST", path: "/v1/agents", body: AgentUpdateBody(values: body))
             isNewAgent = false
             selectedAgentId = created.agentId
+            savedForm = form
             return created.agentId
         } else if let agentId = selectedAgentId {
             let selected = agents.first { $0.agentId == agentId }
@@ -173,6 +183,7 @@ final class AgentManagementViewModel {
             }
 
             let _: Agent = try await apiClient.request("PATCH", path: "/v1/agents/\(agentId)/config", body: AgentUpdateBody(values: body))
+            savedForm = form
             return agentId
         }
 
@@ -235,6 +246,7 @@ final class AgentManagementViewModel {
         platformForm["tts_default_provider"] = updated.ttsDefaultProvider
         platformForm["tts_openai_api_key"] = ""
         platformForm["tts_elevenlabs_api_key"] = ""
+        savedPlatformForm = platformForm
     }
 
     // MARK: - Helpers

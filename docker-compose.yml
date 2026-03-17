@@ -30,7 +30,7 @@ services:
   backend:
     build: ./backend
     ports:
-      - "8000:8000"
+      - "5051:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://hub:hub_dev_password@postgres:5432/hub
       REDIS_URL: redis://redis:6379/0
@@ -55,8 +55,8 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_WS_URL: ws://localhost:8000
-      VITE_API_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:5051
+      VITE_API_URL: http://localhost:5051
     depends_on:
       - backend
     volumes:

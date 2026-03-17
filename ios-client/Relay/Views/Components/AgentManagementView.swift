@@ -9,6 +9,8 @@ struct AgentManagementView: View {
     @State private var vm: AgentManagementViewModel
     @State private var showDeleteConfirm = false
     @State private var errorMessage: String?
+    @State private var showUnsavedAlert = false
+    @State private var pendingAction: (() -> Void)?
 
     init(agents: [Agent], authService: AuthService, onChanged: @escaping () -> Void) {
         self.agents = agents
@@ -36,13 +38,24 @@ struct AgentManagementView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") { attemptAction { dismiss() } }
                 }
             }
             .alert("Error", isPresented: .init(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .confirmationDialog("Unsaved Changes", isPresented: $showUnsavedAlert, titleVisibility: .visible) {
+                Button("Discard Changes", role: .destructive) {
+                    pendingAction?()
+                    pendingAction = nil
+                }
+                Button("Keep Editing", role: .cancel) {
+                    pendingAction = nil
+                }
+            } message: {
+                Text("You have unsaved changes that will be lost.")
             }
         }
         .task {
@@ -58,7 +71,10 @@ struct AgentManagementView: View {
     private var tabBar: some View {
         HStack(spacing: 4) {
             ForEach(AgentManagementViewModel.Tab.allCases, id: \.self) { tab in
-                Button(action: { vm.selectedTab = tab }) {
+                Button(action: {
+                    guard vm.selectedTab != tab else { return }
+                    attemptAction { vm.selectedTab = tab }
+                }) {
                     Text(tab.rawValue)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(vm.selectedTab == tab ? Color.relayTextPrimary : Color.relayTextQuaternary)
@@ -606,6 +622,22 @@ struct AgentManagementView: View {
     }
 
     // MARK: - Helpers
+
+    private func hasUnsavedChanges() -> Bool {
+        switch vm.selectedTab {
+        case .agents: return vm.isAgentFormDirty
+        case .tts, .stt: return vm.isPlatformFormDirty
+        }
+    }
+
+    private func attemptAction(action: @escaping () -> Void) {
+        if hasUnsavedChanges() {
+            pendingAction = action
+            showUnsavedAlert = true
+        } else {
+            action()
+        }
+    }
 
     private func formBinding(_ key: String) -> Binding<String> {
         Binding(

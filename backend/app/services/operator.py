@@ -51,23 +51,22 @@ def parse_intent(text: str) -> ParsedIntent:
 
 
 def operator_greeting() -> str:
-    return "Hello, Operator here. How can I help you today?"
+    return "Operator here."
 
 
 def operator_connect_message(agent_name: str) -> str:
-    return f"Connecting you to {agent_name}."
+    return f"Connecting to {agent_name}."
 
 
 def operator_not_found(agent_name: str) -> str:
-    return f"I couldn't find an agent called '{agent_name}'. Would you like to see who's available?"
+    return f"Don't have a '{agent_name}' — who do you need?"
 
 
 def operator_list_agents(names: list[str]) -> str:
     if not names:
-        return "There are no agents registered yet."
-    listing = ", ".join(names)
-    return f"Here are the available agents: {listing}. Who would you like to talk to?"
+        return "No agents available."
+    return "Available: " + ", ".join(names) + "."
 
 
 def operator_disconnect_message() -> str:
-    return "You're back with the Operator. What can I do for you?"
+    return "Operator here."

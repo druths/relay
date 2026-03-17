@@ -35,6 +35,24 @@ final class RelayViewModel {
     private var eventTask: Task<Void, Never>?
     private var currentActivity: Activity<RelayActivityAttributes>?
 
+    // Pending session — set immediately on sessionEntered so events route correctly
+    // before the live-mode audio wait completes and the UI swaps.
+    private var pendingSessionId: String?
+    private var pendingAgentName: String?
+
+    // Agent audio that arrives while waiting for operator audio to finish.
+    // Flushed to the player only after the UI has swapped to the session view.
+    private var pendingAudioHasStart = false
+    private var pendingAudioChunks: [(data: String, sequence: Int)] = []
+    private var pendingAudioHasDone = false
+
+    // Suppress the operator greeting sent on every fresh WebSocket connection.
+    private var suppressNextGreeting = false
+
+    private var isInSession: Bool {
+        activeSessionId != nil || pendingSessionId != nil
+    }
+
     var useLocalStt: Bool {
         UserDefaults.standard.string(forKey: "stt_local_provider") == "apple"
     }
@@ -95,6 +113,11 @@ final class RelayViewModel {
         sessions = []
         status = "idle"
         activeSpeaker = "operator"
+    }
+
+    func reconnect() async {
+        suppressNextGreeting = true
+        await connect()
     }
 
     // MARK: - Actions
@@ -323,9 +346,13 @@ final class RelayViewModel {
             if isLiveMode { updateLiveActivity() }
 
         case .text(let payload):
+            if suppressNextGreeting && payload.speaker == "operator" {
+                if !isLiveMode { suppressNextGreeting = false }
+                break
+            }
             let role: Message.MessageRole = payload.speaker == "operator" ? .operator : .agent
             let msg = Message(role: role, textContent: payload.text)
-            if activeSessionId != nil {
+            if isInSession {
                 sessionMessages.append(msg)
             } else {
                 lobbyMessages.append(msg)
@@ -338,14 +365,34 @@ final class RelayViewModel {
 
         case .sessionEntered(let payload):
             if isLiveMode {
-                // Let the operator's audio finish before swapping to the session
+                // Stage the session immediately so incoming events route to sessionMessages.
+                // The UI swap (activeSessionId) waits for operator audio to finish.
+                pendingSessionId = payload.sessionId
+                pendingAgentName = payload.agentName
+                sessionMessages = []
                 Task {
                     await audio.player.waitUntilFinished()
-                    activeSessionId = payload.sessionId
-                    activeAgentName = payload.agentName
-                    sessionMessages = []
+                    guard pendingSessionId != nil else { return }  // session was cancelled
+                    ChimeGenerator.play()
+                    activeSessionId = pendingSessionId
+                    activeAgentName = pendingAgentName
+                    pendingSessionId = nil
+                    pendingAgentName = nil
                     audio.handleSessionChange(newSessionId: payload.sessionId)
                     updateLiveActivity()
+                    // Flush any agent audio that arrived during the operator audio wait
+                    if pendingAudioHasStart {
+                        await audio.player.start()
+                        pendingAudioHasStart = false
+                    }
+                    for chunk in pendingAudioChunks {
+                        await audio.player.enqueue(data: chunk.data, sequence: chunk.sequence)
+                    }
+                    pendingAudioChunks = []
+                    if pendingAudioHasDone {
+                        await audio.player.done()
+                        pendingAudioHasDone = false
+                    }
                     await fetchSessions()
                 }
             } else {
@@ -359,6 +406,11 @@ final class RelayViewModel {
         case .sessionLeft:
             audio.stopAudio()
             let oldSessionId = activeSessionId
+            pendingSessionId = nil
+            pendingAgentName = nil
+            pendingAudioHasStart = false
+            pendingAudioChunks = []
+            pendingAudioHasDone = false
             activeSessionId = nil
             activeAgentName = nil
             sessionMessages = []
@@ -377,19 +429,20 @@ final class RelayViewModel {
             }
 
         case .textStart(let payload):
-            guard activeSessionId != nil else { break }
+            if suppressNextGreeting && payload.speaker == "operator" { break }
+            guard isInSession else { break }
             let role: Message.MessageRole = payload.speaker == "operator" ? .operator : .agent
             sessionMessages.append(Message(role: role, textContent: "", isStreaming: true))
 
         case .textDelta(let payload):
-            guard activeSessionId != nil, !sessionMessages.isEmpty else { break }
+            guard isInSession, !sessionMessages.isEmpty else { break }
             let lastIdx = sessionMessages.count - 1
             if sessionMessages[lastIdx].isStreaming {
                 sessionMessages[lastIdx].textContent += payload.delta
             }
 
         case .textDone(let payload):
-            guard activeSessionId != nil, !sessionMessages.isEmpty else { break }
+            guard isInSession, !sessionMessages.isEmpty else { break }
             let lastIdx = sessionMessages.count - 1
             if sessionMessages[lastIdx].isStreaming {
                 sessionMessages[lastIdx].textContent = payload.text
@@ -398,16 +451,34 @@ final class RelayViewModel {
 
         case .audioStart(let payload):
             guard isLiveMode else { break }
+            if suppressNextGreeting { break }
+            if pendingSessionId != nil {
+                pendingAudioHasStart = true
+                break
+            }
             print("[TTS][relay] audio_start from \(payload.speaker)")
             Task { await audio.player.start() }
 
         case .audioChunk(let payload):
             guard isLiveMode else { break }
+            if suppressNextGreeting { break }
+            if pendingSessionId != nil {
+                pendingAudioChunks.append((data: payload.data, sequence: payload.sequence))
+                break
+            }
             print("[TTS][relay] audio_chunk seq=\(payload.sequence) (\(payload.data.count) b64 chars)")
             Task { await audio.player.enqueue(data: payload.data, sequence: payload.sequence) }
 
         case .audioDone(let payload):
             guard isLiveMode else { break }
+            if suppressNextGreeting {
+                suppressNextGreeting = false
+                break
+            }
+            if pendingSessionId != nil {
+                pendingAudioHasDone = true
+                break
+            }
             print("[TTS][relay] audio_done from \(payload.speaker)")
             Task { await audio.player.done() }
 
@@ -416,7 +487,7 @@ final class RelayViewModel {
             ChimeGenerator.play()
             HapticService.impact(.light)
             let msg = Message(role: .user, textContent: payload.text)
-            if activeSessionId != nil {
+            if isInSession {
                 sessionMessages.append(msg)
             } else {
                 lobbyMessages.append(msg)

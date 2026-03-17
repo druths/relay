@@ -32,6 +32,7 @@ actor AudioRecorderService {
 
     private var recorder: AVAudioRecorder?
     private var meteringTask: Task<Void, Never>?
+    private var interruptionObserver: NSObjectProtocol?
     private var isActive = false
     private var isStopping = false
     private var speechDetected = false
@@ -40,14 +41,16 @@ actor AudioRecorderService {
     private var preferredInput: AVAudioSessionPortDescription?
     private var meteringTick = 0
     private var deadInputTicks = 0
+    private var stoppedRecorderTicks = 0
 
     private let deadInputThreshold: Float = -100
     private let deadInputTickLimit = 5
+    private let stoppedRecorderTickLimit = 3  // ~300ms before recovery
 
     // MARK: - Public API
 
     func startListening() async {
-        print("[STT][lifecycle] startListening called")
+        print("[STT][lifecycle] startListening called (stopping=\(isStopping), active=\(isActive), state=\(state), recorder=\(recorder != nil))")
         await cleanup()
 
         // Request microphone permission
@@ -90,12 +93,13 @@ actor AudioRecorderService {
         isStopping = false
         isContinuousRestart = true  // session already configured above
 
+        registerInterruptionObserver()
         print("[STT][lifecycle] startListening → startNewRecording")
         await startNewRecording()
     }
 
     func stopListening() async {
-        print("[STT][lifecycle] stopListening called (speech=\(speechDetected), recorder=\(recorder != nil))")
+        print("[STT][lifecycle] stopListening called (speech=\(speechDetected), recorder=\(recorder != nil), stopping=\(isStopping), active=\(isActive), state=\(state))")
         isStopping = true
         isActive = false
         stopMeteringPoll()
@@ -152,7 +156,7 @@ actor AudioRecorderService {
     private var isContinuousRestart = false
 
     private func startNewRecording() async {
-        print("[STT][lifecycle] startNewRecording called (active=\(isActive), continuous=\(isContinuousRestart))")
+        print("[STT][lifecycle] startNewRecording called (active=\(isActive), continuous=\(isContinuousRestart), stopping=\(isStopping), recorder=\(recorder != nil))")
         guard isActive else {
             print("[STT][lifecycle] startNewRecording: bailing — not active")
             return
@@ -208,7 +212,7 @@ actor AudioRecorderService {
     private func processRecording(_ rec: AVAudioRecorder) async {
         let duration = recordStart.map { ContinuousClock.now - $0 } ?? .zero
         let durationMs = Int(duration.components.seconds * 1000 + Int64(duration.components.attoseconds / 1_000_000_000_000_000))
-        print("[STT][lifecycle] processRecording called (duration=\(durationMs)ms, stopping=\(isStopping))")
+        print("[STT][lifecycle] processRecording called (duration=\(durationMs)ms, stopping=\(isStopping), active=\(isActive), continuous=\(isContinuousRestart))")
         stopMeteringPoll()
 
         // Stop recording and get the file URL
@@ -242,18 +246,21 @@ actor AudioRecorderService {
             let data = try Data(contentsOf: url)
             let base64 = data.base64EncodedString()
             print("[STT][lifecycle] sending recording (\(durationMs)ms, \(base64.count) b64 chars)")
+            print("[STT][lifecycle] PRE-SUSPEND flags: stopping=\(isStopping) active=\(isActive) continuous=\(isContinuousRestart) recorder=\(recorder != nil)")
             await onRecordingComplete?(base64, "m4a", url)
+            print("[STT][lifecycle] POST-SUSPEND flags: stopping=\(isStopping) active=\(isActive) continuous=\(isContinuousRestart) recorder=\(recorder != nil)")
         } catch {
             print("[STT] Failed to read recording: \(error)")
             try? FileManager.default.removeItem(at: url)
         }
 
+        print("[STT][lifecycle] processRecording decision: stopping=\(isStopping) active=\(isActive) recorder=\(recorder != nil)")
         if isStopping {
             print("[STT][lifecycle] processed + stopping → cleanup")
             await cleanup()
         } else {
             // Continuous mode: restart
-            print("[STT][lifecycle] processed + continuous → restarting")
+            print("[STT][lifecycle] processed + continuous → restarting (recorder=\(recorder != nil))")
             isActive = true
             isContinuousRestart = true
             await startNewRecording()
@@ -261,7 +268,8 @@ actor AudioRecorderService {
     }
 
     private func cleanup() async {
-        print("[STT][lifecycle] cleanup called")
+        print("[STT][lifecycle] cleanup called (stopping=\(isStopping), active=\(isActive), state=\(state), recorder=\(recorder != nil))")
+        removeInterruptionObserver()
         isActive = false
         isStopping = false
         speechDetected = false
@@ -303,10 +311,107 @@ actor AudioRecorderService {
         meteringTask = nil
     }
 
+    // MARK: - Audio Session Interruption
+
+    private func registerInterruptionObserver() {
+        guard interruptionObserver == nil else { return }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: nil
+        ) { [weak self] notification in
+            guard let self else { return }
+            // Extract Sendable UInt values synchronously before crossing the concurrency boundary.
+            let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let optionsValue = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            Task { await self.handleAudioInterruption(typeValue: typeValue, optionsValue: optionsValue) }
+        }
+    }
+
+    private func removeInterruptionObserver() {
+        if let obs = interruptionObserver {
+            NotificationCenter.default.removeObserver(obs)
+            interruptionObserver = nil
+        }
+    }
+
+    private func handleAudioInterruption(typeValue: UInt?, optionsValue: UInt) async {
+        guard let typeValue, let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+
+        switch type {
+        case .began:
+            print("[STT][interruption] Audio session interrupted — stopping metering poll")
+            stopMeteringPoll()
+            // AVFoundation stops the recorder automatically; nil our reference and discard the file
+            if let rec = recorder {
+                let url = rec.url
+                rec.stop()
+                self.recorder = nil
+                try? FileManager.default.removeItem(at: url)
+            }
+            // Leave isActive=true so the .ended handler restarts recording
+
+        case .ended:
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
+            print("[STT][interruption] Interruption ended (shouldResume=\(shouldResume), isActive=\(isActive))")
+            guard isActive else { return }
+
+            AudioSessionManager.deactivate()
+            try? await Task.sleep(for: .milliseconds(200))
+            do {
+                try AudioSessionManager.configure(earpieceMode ? .earpiece : .playAndRecord)
+            } catch {
+                print("[STT][interruption] Failed to reconfigure after interruption: \(error)")
+                isActive = false
+                await setState(.idle)
+                return
+            }
+            isContinuousRestart = true
+            await startNewRecording()
+
+        @unknown default:
+            break
+        }
+    }
+
     private func handleMeteringTick() async {
-        guard isActive, let recorder, recorder.isRecording else {
+        guard isActive else { return }
+        guard let recorder else {
+            print("[STT][health] tick: isActive=true but recorder=nil — stale state")
             return
         }
+        guard recorder.isRecording else {
+            stoppedRecorderTicks += 1
+            if stoppedRecorderTicks == 1 {
+                print("[STT][health] recorder.isRecording=false while active — tick \(stoppedRecorderTicks)/\(stoppedRecorderTickLimit)")
+            }
+            if stoppedRecorderTicks >= stoppedRecorderTickLimit {
+                print("[STT][recovery] recorder stopped for \(stoppedRecorderTicks) ticks — reconfiguring session (no deactivate, TTS may be playing)")
+                stoppedRecorderTicks = 0
+                stopMeteringPoll()
+                let deadRecorder = recorder
+                self.recorder = nil
+                deadRecorder.stop()
+                try? FileManager.default.removeItem(at: deadRecorder.url)
+
+                // Reconfigure without deactivating so TTS playback continues uninterrupted.
+                // setCategory+setActive(true) re-applies playAndRecord while keeping the session live.
+                // If this fails (e.g. session is mid-interruption), the interruptionNotification
+                // .ended handler will recover — leave isActive=true so it fires correctly.
+                do {
+                    try AudioSessionManager.configure(earpieceMode ? .earpiece : .playAndRecord)
+                } catch {
+                    print("[STT][recovery] Configure failed (may be mid-interruption, notification will recover): \(error)")
+                    return
+                }
+
+                isActive = true
+                isContinuousRestart = true
+                await startNewRecording()
+            }
+            return
+        }
+        stoppedRecorderTicks = 0
 
         recorder.updateMeters()
         let metering = recorder.averagePower(forChannel: 0)
