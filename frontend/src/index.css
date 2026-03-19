@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+@keyframes dotPulse {
+  0%, 100% { transform: scale(0.5); opacity: 0.3; }
+  50%       { transform: scale(1.0); opacity: 1.0; }
+}

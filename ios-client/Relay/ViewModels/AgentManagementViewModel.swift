@@ -124,10 +124,18 @@ final class AgentManagementViewModel {
 
         let apiKey = form["tts_api_key"] ?? ""
         let isRealKey = !apiKey.isEmpty && !apiKey.contains("\u{2022}")
-        let keyParam = isRealKey ? "?api_key=\(apiKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" : ""
+
+        var params: [String] = []
+        if isRealKey, let encoded = apiKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            params.append("api_key=\(encoded)")
+        }
+        if provider == "elevenlabs", let modelId = form["model_id"], !modelId.isEmpty {
+            params.append("model_id=\(modelId)")
+        }
+        let qs = params.isEmpty ? "" : "?\(params.joined(separator: "&"))"
 
         do {
-            let fetched: [Voice] = try await apiClient.request("GET", path: "/v1/agents/tts/voices/\(provider)\(keyParam)")
+            let fetched: [Voice] = try await apiClient.request("GET", path: "/v1/agents/tts/voices/\(provider)\(qs)")
             voices = fetched
         } catch {
             voices = []

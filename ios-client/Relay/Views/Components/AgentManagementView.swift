@@ -516,7 +516,10 @@ struct AgentManagementView: View {
     private func pickerMenu(_ key: String, options: [(String, String)]) -> some View {
         Menu {
             ForEach(options, id: \.0) { option in
-                Button(option.1) { vm.form[key] = option.0 }
+                Button(option.1) {
+                    vm.form[key] = option.0
+                    if key == "model_id" { Task { await vm.fetchVoices() } }
+                }
             }
         } label: {
             HStack {

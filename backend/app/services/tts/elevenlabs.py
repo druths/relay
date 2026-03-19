@@ -51,8 +51,8 @@ class ElevenLabsTTSProvider(TTSProvider):
         return []
 
     @classmethod
-    async def fetch_voices(cls, api_key: str) -> list[dict]:
-        """Fetch voices from the ElevenLabs API."""
+    async def fetch_voices(cls, api_key: str, model_id: str | None = None) -> list[dict]:
+        """Fetch voices from the ElevenLabs API, optionally filtered by model compatibility."""
         client = _get_client(api_key)
         if client is None:
             return []
@@ -62,6 +62,11 @@ class ElevenLabsTTSProvider(TTSProvider):
             data = resp.json()
             voices = []
             for v in data.get("voices", []):
+                # Filter by model compatibility if requested
+                if model_id:
+                    supported = v.get("high_quality_base_model_ids", [])
+                    if supported and model_id not in supported:
+                        continue
                 labels = v.get("labels", {})
                 desc = ", ".join(labels.values()) if labels else ""
                 voices.append({

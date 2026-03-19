@@ -49,7 +49,7 @@ def get_available_voices(provider_name: str) -> list[dict]:
     return []
 
 
-async def fetch_voices_async(provider_name: str, api_key: str) -> list[dict]:
+async def fetch_voices_async(provider_name: str, api_key: str, model_id: str | None = None) -> list[dict]:
     """Fetch voices asynchronously (for providers that need API calls)."""
     if provider_name == "openai":
         from app.services.tts.openai import OpenAITTSProvider
@@ -59,6 +59,6 @@ async def fetch_voices_async(provider_name: str, api_key: str) -> list[dict]:
     if provider_name == "elevenlabs":
         from app.services.tts.elevenlabs import ElevenLabsTTSProvider
 
-        return await ElevenLabsTTSProvider.fetch_voices(api_key)
+        return await ElevenLabsTTSProvider.fetch_voices(api_key, model_id=model_id)
 
     return []

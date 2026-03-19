@@ -241,6 +241,7 @@ final class RelayViewModel {
         audio.stopAudio()
         endLiveActivity()
         Task { await SilentKeepAlive.shared.stop() }
+        Task { await ThinkingToneService.shared.stop() }
     }
 
     func stopAudio() {
@@ -344,6 +345,14 @@ final class RelayViewModel {
             activeSpeaker = payload.activeSpeaker
             status = payload.status
             if isLiveMode { updateLiveActivity() }
+            if isLiveMode {
+                if payload.status == "processing" {
+                    print("[ThinkingTone] status=processing → start")
+                    Task { await ThinkingToneService.shared.start() }
+                } else {
+                    Task { await ThinkingToneService.shared.stop() }
+                }
+            }
 
         case .text(let payload):
             if suppressNextGreeting && payload.speaker == "operator" {
@@ -452,6 +461,7 @@ final class RelayViewModel {
         case .audioStart(let payload):
             guard isLiveMode else { break }
             if suppressNextGreeting { break }
+            Task { await ThinkingToneService.shared.stop() }
             if pendingSessionId != nil {
                 pendingAudioHasStart = true
                 break

@@ -3,7 +3,7 @@ import SwiftUI
 struct MessageBubble: View {
     let message: Message
 
-    @State private var cursorVisible = true
+    @State private var animating = false
 
     private var isUser: Bool { message.role == .user }
 
@@ -28,14 +28,26 @@ struct MessageBubble: View {
             if isUser { Spacer(minLength: 48) }
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                HStack(alignment: .bottom, spacing: 0) {
+                HStack(alignment: .bottom, spacing: 6) {
                     MarkdownText(text: message.textContent)
 
                     if message.isStreaming {
-                        Rectangle()
-                            .fill(Color.relaySuccess)
-                            .frame(width: 2, height: 14)
-                            .opacity(cursorVisible ? 1 : 0)
+                        HStack(spacing: 3) {
+                            ForEach(0..<3, id: \.self) { i in
+                                Circle()
+                                    .fill(Color.relayTextTertiary)
+                                    .frame(width: 5, height: 5)
+                                    .scaleEffect(animating ? 1.0 : 0.5)
+                                    .opacity(animating ? 1.0 : 0.3)
+                                    .animation(
+                                        .easeInOut(duration: 0.45)
+                                            .repeatForever(autoreverses: true)
+                                            .delay(Double(i) * 0.15),
+                                        value: animating
+                                    )
+                            }
+                        }
+                        .padding(.bottom, 3)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -47,20 +59,10 @@ struct MessageBubble: View {
             if !isUser { Spacer(minLength: 48) }
         }
         .onAppear {
-            if message.isStreaming {
-                startCursorBlink()
-            }
+            animating = message.isStreaming
         }
         .onChange(of: message.isStreaming) { _, streaming in
-            if streaming {
-                startCursorBlink()
-            }
-        }
-    }
-
-    private func startCursorBlink() {
-        withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
-            cursorVisible.toggle()
+            animating = streaming
         }
     }
 }

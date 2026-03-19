@@ -14,11 +14,6 @@ const ROLE_STYLES: Record<string, string> = {
   agent: "bg-emerald-900/40 mr-12",
 };
 
-const ROLE_LABELS: Record<string, string> = {
-  user: "You",
-  operator: "Operator",
-  agent: "Agent",
-};
 
 export function ConversationLog({
   lobbyMessages,
@@ -57,13 +52,21 @@ export function ConversationLog({
             ROLE_STYLES[msg.role] || ROLE_STYLES.agent
           }`}
         >
-          <div className="text-xs text-gray-500 mb-1 font-medium">
-            {ROLE_LABELS[msg.role] || msg.role}
-          </div>
           <div className="whitespace-pre-wrap">
             {msg.text_content}
             {msg.streaming && (
-              <span className="inline-block w-2 h-4 ml-0.5 bg-emerald-400 animate-pulse rounded-sm" />
+              <span className="inline-flex items-end gap-0.5 ml-1.5 mb-0.5">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="block w-1.5 h-1.5 rounded-full bg-gray-400"
+                    style={{
+                      animation: "dotPulse 0.9s ease-in-out infinite",
+                      animationDelay: `${i * 0.15}s`,
+                    }}
+                  />
+                ))}
+              </span>
             )}
           </div>
         </div>

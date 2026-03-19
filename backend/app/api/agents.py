@@ -161,6 +161,7 @@ async def delete_agent(
 async def get_tts_voices(
     provider: str,
     api_key: str | None = None,
+    model_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     effective_key = api_key
@@ -175,7 +176,7 @@ async def get_tts_voices(
     if not effective_key and provider == "openai":
         from app.config import settings
         effective_key = settings.openai_api_key or None
-    return await fetch_voices_async(provider, effective_key or "")
+    return await fetch_voices_async(provider, effective_key or "", model_id=model_id)
 
 
 @router.get("/stt/status")
@@ -222,9 +223,10 @@ async def update_agent_config(
     await db.commit()
     await db.refresh(agent)
 
-    # Re-check health if LLM config changed
+    # Re-check health if LLM config changed (fire-and-forget so save returns immediately)
     if any(v is not None for v in (body.llm_provider, body.llm_model, body.llm_base_url, body.llm_api_key)):
         from app.services.agent_health import check_agent
-        await check_agent(agent)
+        import asyncio
+        asyncio.ensure_future(check_agent(agent))
 
     return _agent_out(agent)

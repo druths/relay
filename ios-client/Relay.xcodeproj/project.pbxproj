@@ -48,6 +48,7 @@
 		AF13179EAA0E12FA34792437 /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */; };
 		B81D27BE882F438441283A47 /* RelayQuickLaunchWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38FE2FDAE86B55169328875B /* RelayQuickLaunchWidget.swift */; };
 		BD7FCA963D970827354C10EC /* RelayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DA7A3FBBC3B11BBD35A15B /* RelayView.swift */; };
+		BEDCE5B68A34E5661B0F6C6B /* ThinkingToneService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */; };
 		CD4CA122ED73A6E61C256435 /* AudioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 909727E85D2D35F4161B5F24 /* AudioViewModel.swift */; };
 		D542B8D8116E090123CE96ED /* WebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36867E74E2DB4F0F89C17EE2 /* WebSocketService.swift */; };
 		D758AFFBFBC56A617A0C3043 /* HapticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20F1A7CF1C37E5D68F02F84B /* HapticService.swift */; };
@@ -85,6 +86,7 @@
 		071718BDCBB8F15D92597F38 /* WebSocketEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketEvent.swift; sourceTree = "<group>"; };
 		0EB4DDCF19266F408F07CFD1 /* InputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBar.swift; sourceTree = "<group>"; };
 		1A668E4C226B3C74D17F6F2D /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingToneService.swift; sourceTree = "<group>"; };
 		20F1A7CF1C37E5D68F02F84B /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
 		2F86BB5CB1497564A48F5733 /* RelayWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RelayWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		31CE01E4F023808B5ED73D41 /* RelayViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayViewModel.swift; sourceTree = "<group>"; };
@@ -161,6 +163,7 @@
 				79719ECC3D01B1F82B573722 /* KeychainService.swift */,
 				912432D794E9D1FE7165651C /* SilentKeepAlive.swift */,
 				7CBE41AF5C080E5DED126546 /* SpeechRecognitionService.swift */,
+				1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */,
 				36867E74E2DB4F0F89C17EE2 /* WebSocketService.swift */,
 			);
 			path = Services;
@@ -416,6 +419,7 @@
 				EBEF3DA54A41FE4B33D7210D /* SoundWaveView.swift in Sources */,
 				1EFFDE00EC63BC6944634598 /* SpeechRecognitionService.swift in Sources */,
 				4727621A68E27C6972481B87 /* StatusOrb.swift in Sources */,
+				BEDCE5B68A34E5661B0F6C6B /* ThinkingToneService.swift in Sources */,
 				2ADD40A2159E60D16579813F /* WebSocketEvent.swift in Sources */,
 				D542B8D8116E090123CE96ED /* WebSocketService.swift in Sources */,
 			);

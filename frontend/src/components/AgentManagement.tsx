@@ -111,9 +111,10 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     setConfirmDelete(false);
   }, [selectedId, isNew, selected?.agent_id]);
 
-  // Fetch voices when TTS provider or API key changes
+  // Fetch voices when TTS provider, API key, or model changes
   const ttsProvider = form.tts_provider ?? "none";
   const ttsFormKey = form.tts_api_key ?? "";
+  const ttsModelId = form.model_id ?? "";
   useEffect(() => {
     if (ttsProvider === "none") {
       setVoices([]);
@@ -121,15 +122,18 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     }
     // Pass the agent's per-agent key if it's a real key (not masked "••••…")
     const isRealKey = ttsFormKey && !ttsFormKey.includes("\u2022");
-    const keyParam = isRealKey ? `?api_key=${encodeURIComponent(ttsFormKey)}` : "";
+    const params = new URLSearchParams();
+    if (isRealKey) params.set("api_key", ttsFormKey);
+    if (ttsProvider === "elevenlabs" && ttsModelId) params.set("model_id", ttsModelId);
+    const qs = params.size ? `?${params.toString()}` : "";
     const timer = setTimeout(() => {
-      apiFetch(`/v1/agents/tts/voices/${ttsProvider}${keyParam}`)
+      apiFetch(`/v1/agents/tts/voices/${ttsProvider}${qs}`)
         .then((r) => r.json())
         .then((data: Voice[]) => setVoices(data))
         .catch(() => setVoices([]));
     }, 300);
     return () => clearTimeout(timer);
-  }, [ttsProvider, ttsFormKey]);
+  }, [ttsProvider, ttsFormKey, ttsModelId]);
 
   const setField = (key: string, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
