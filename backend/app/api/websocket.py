@@ -31,7 +31,20 @@ router = APIRouter()
 
 # Sentence-splitting regex: split after .!? followed by whitespace, or on newlines
 _SENTENCE_RE = re.compile(r'(?<=[.!?])\s+|\n+')
-_MAX_CHUNK_WORDS = 20
+
+# Pre-compiled regex constants for TTS text normalization
+_TTS_FENCED_CODE_RE = re.compile(r'```[\s\S]*?```')
+_TTS_HEADING_RE = re.compile(r'^#{1,6}\s+', re.MULTILINE)
+_TTS_LIST_RE = re.compile(r'^\s*(?:[-•*]|\d+\.)\s+', re.MULTILINE)
+_TTS_BOLD_RE = re.compile(r'\*\*([^*]+)\*\*')
+_TTS_ITALIC_RE = re.compile(r'(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!\w)_([^_\n]+)_(?!\w)')
+_TTS_INLINE_CODE_RE = re.compile(r'`([^`]+)`')
+_TTS_URL_RE = re.compile(r'https?://\S+')
+_TTS_ELLIPSIS_RE = re.compile(r'\.{2,}|\u2026')
+_TTS_EMOJI_RE = re.compile(
+    r'[\U0001F300-\U0001F9FF\U00002600-\U000027FF\U00002300-\U000023FF\U0000FE00-\U0000FEFF]'
+)
+_TTS_TRAILING_PUNCT_RE = re.compile(r'[.,;:]+$')
 
 
 @router.websocket("/v1/lobby")
@@ -69,84 +82,135 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
             })
             await _tts_for_text(websocket, db, greeting, "operator")
 
-            while True:
-                raw = await websocket.receive_text()
-                data = json.loads(raw)
-                msg_type = data.get("type")
+            # Concurrent message loop: races incoming WS messages against active
+            # processing so that "interrupt" messages can cancel in-flight LLM/TTS turns.
+            active_task: asyncio.Task | None = None
+            recv_task: asyncio.Task = asyncio.create_task(websocket.receive_text())
 
-                if msg_type == "text_input":
-                    text = data["payload"]["text"]
-                    active_session_id = await _handle_text(
-                        websocket, db, user_id, text, active_session_id, lobby_history
-                    )
+            try:
+                while True:
+                    watch = {recv_task}
+                    if active_task and not active_task.done():
+                        watch.add(active_task)
 
-                elif msg_type == "audio_input":
-                    audio_data_b64 = data["payload"]["data"]
-                    audio_format = data["payload"].get("format", "webm")
+                    done, _ = await asyncio.wait(watch, return_when=asyncio.FIRST_COMPLETED)
 
-                    stt = await get_stt_provider_from_db(db)
-                    if not stt:
-                        await websocket.send_json({
-                            "type": "error",
-                            "payload": {"message": "No STT provider available"},
-                        })
+                    # Processing task finished — capture updated active_session_id
+                    if active_task in done:
+                        try:
+                            active_session_id = active_task.result()
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            logger.error("Processing task failed: %s", e)
+                        active_task = None
+
+                    # No new message — loop back to wait again
+                    if recv_task not in done:
                         continue
 
-                    try:
-                        audio_bytes = base64.b64decode(audio_data_b64)
-                        threshold_str = await _get_setting(db, "stt_no_speech_threshold")
-                        no_speech_threshold = float(threshold_str) if threshold_str else 0.5
-                        text = await stt.transcribe(audio_bytes, audio_format, no_speech_threshold=no_speech_threshold)
-                    except Exception as exc:
-                        logger.warning("STT transcription failed: %s", exc)
-                        await websocket.send_json({
-                            "type": "error",
-                            "payload": {"message": f"Transcription failed: {exc}"},
-                        })
-                        continue
+                    # New message arrived; re-raise any transport errors (e.g. WebSocketDisconnect)
+                    raw = recv_task.result()
+                    recv_task = asyncio.create_task(websocket.receive_text())
+                    data = json.loads(raw)
+                    msg_type = data.get("type")
 
-                    if not text.strip():
-                        continue
-
-                    # Send transcription back so the UI shows what was heard
-                    await websocket.send_json({
-                        "type": "transcription",
-                        "payload": {"text": text},
-                    })
-
-                    active_session_id = await _handle_text(
-                        websocket, db, user_id, text, active_session_id, lobby_history
-                    )
-
-                elif msg_type == "leave_session":
-                    if active_session_id:
-                        await pause_session(db, active_session_id)
-                        active_session_id = None
-                        await websocket.send_json({
-                            "type": "session_left",
-                            "payload": {"session_id": None},
-                        })
+                    if msg_type == "interrupt":
+                        logger.info("[WS] interrupt received — cancelling active task")
+                        await _cancel_active_task(active_task)
+                        active_task = None
                         await websocket.send_json({
                             "type": "state_update",
                             "payload": {
-                                "active_speaker": "operator",
+                                "active_speaker": "user",
                                 "status": "ready",
-                                "session_id": None,
+                                "session_id": str(active_session_id) if active_session_id else None,
                             },
                         })
-                        reply = "You're back with the Operator. What can I do for you?"
-                        lobby_history.append({"role": "assistant", "content": reply})
-                        await websocket.send_json({
-                            "type": "text",
-                            "payload": {"speaker": "operator", "text": reply},
-                        })
-                        await _tts_for_text(websocket, db, reply, "operator")
 
-                elif msg_type == "resume_session":
-                    target_sid = uuid.UUID(data["payload"]["session_id"])
-                    active_session_id = await _do_resume(
-                        websocket, db, user_id, target_sid, active_session_id
-                    )
+                    elif msg_type == "text_input":
+                        await _cancel_active_task(active_task)
+                        text = data["payload"]["text"]
+                        active_task = asyncio.create_task(
+                            _handle_text(websocket, db, user_id, text, active_session_id, lobby_history)
+                        )
+
+                    elif msg_type == "audio_input":
+                        audio_data_b64 = data["payload"]["data"]
+                        audio_format = data["payload"].get("format", "webm")
+
+                        stt = await get_stt_provider_from_db(db)
+                        if not stt:
+                            await websocket.send_json({
+                                "type": "error",
+                                "payload": {"message": "No STT provider available"},
+                            })
+                            continue
+
+                        try:
+                            audio_bytes = base64.b64decode(audio_data_b64)
+                            threshold_str = await _get_setting(db, "stt_no_speech_threshold")
+                            no_speech_threshold = float(threshold_str) if threshold_str else 0.5
+                            text = await stt.transcribe(audio_bytes, audio_format, no_speech_threshold=no_speech_threshold)
+                        except Exception as exc:
+                            logger.warning("STT transcription failed: %s", exc)
+                            await websocket.send_json({
+                                "type": "error",
+                                "payload": {"message": f"Transcription failed: {exc}"},
+                            })
+                            continue
+
+                        if not text.strip():
+                            continue
+
+                        # Send transcription back so the UI shows what was heard
+                        await websocket.send_json({
+                            "type": "transcription",
+                            "payload": {"text": text},
+                        })
+
+                        await _cancel_active_task(active_task)
+                        active_task = asyncio.create_task(
+                            _handle_text(websocket, db, user_id, text, active_session_id, lobby_history)
+                        )
+
+                    elif msg_type == "leave_session":
+                        await _cancel_active_task(active_task)
+                        active_task = None
+                        if active_session_id:
+                            await pause_session(db, active_session_id)
+                            active_session_id = None
+                            await websocket.send_json({
+                                "type": "session_left",
+                                "payload": {"session_id": None},
+                            })
+                            await websocket.send_json({
+                                "type": "state_update",
+                                "payload": {
+                                    "active_speaker": "operator",
+                                    "status": "ready",
+                                    "session_id": None,
+                                },
+                            })
+                            reply = "You're back with the Operator. What can I do for you?"
+                            lobby_history.append({"role": "assistant", "content": reply})
+                            await websocket.send_json({
+                                "type": "text",
+                                "payload": {"speaker": "operator", "text": reply},
+                            })
+                            await _tts_for_text(websocket, db, reply, "operator")
+
+                    elif msg_type == "resume_session":
+                        target_sid = uuid.UUID(data["payload"]["session_id"])
+                        active_session_id = await _do_resume(
+                            websocket, db, user_id, target_sid, active_session_id
+                        )
+
+            finally:
+                # Clean up on disconnect or error
+                if active_task and not active_task.done():
+                    active_task.cancel()
+                recv_task.cancel()
 
     except WebSocketDisconnect:
         if active_session_id:
@@ -161,6 +225,16 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                 {"type": "error", "payload": {"message": str(e)}}
             )
         except Exception:
+            pass
+
+
+async def _cancel_active_task(active_task: asyncio.Task | None) -> None:
+    """Cancel an in-flight processing task and wait for it to finish."""
+    if active_task and not active_task.done():
+        active_task.cancel()
+        try:
+            await active_task
+        except (asyncio.CancelledError, Exception):
             pass
 
 
@@ -199,123 +273,130 @@ async def _handle_text(
     tts_seq = 0
     tts_tasks: list[asyncio.Task] = []
 
-    async for event in handle_session_message_stream(db, active_session_id, text):
-        etype = event["type"]
+    try:
+        async for event in handle_session_message_stream(db, active_session_id, text):
+            etype = event["type"]
 
-        if etype == "session_left":
-            active_session_id = None
-            await websocket.send_json(event)
-        elif etype == "lobby_redirect":
-            redirect_text = event["payload"]["text"]
-            lobby_history.append({"role": "user", "content": redirect_text})
-            redirect_events = await handle_lobby_message(
-                db, user_id, redirect_text, lobby_history
-            )
-            active_session_id = await _dispatch_events(
-                websocket, db, user_id, redirect_events, active_session_id, lobby_history
-            )
-        elif etype == "text":
-            speaker = event["payload"].get("speaker", "")
-            if active_session_id is None and speaker == "operator":
-                lobby_history.append({"role": "assistant", "content": event["payload"]["text"]})
-            await websocket.send_json(event)
-            await _tts_for_text(websocket, db, event["payload"]["text"], speaker)
-        else:
-            await websocket.send_json(event)
+            if etype == "session_left":
+                active_session_id = None
+                await websocket.send_json(event)
+            elif etype == "lobby_redirect":
+                redirect_text = event["payload"]["text"]
+                lobby_history.append({"role": "user", "content": redirect_text})
+                redirect_events = await handle_lobby_message(
+                    db, user_id, redirect_text, lobby_history
+                )
+                active_session_id = await _dispatch_events(
+                    websocket, db, user_id, redirect_events, active_session_id, lobby_history
+                )
+            elif etype == "text":
+                speaker = event["payload"].get("speaker", "")
+                if active_session_id is None and speaker == "operator":
+                    lobby_history.append({"role": "assistant", "content": event["payload"]["text"]})
+                await websocket.send_json(event)
+                await _tts_for_text(websocket, db, event["payload"]["text"], speaker)
+            else:
+                await websocket.send_json(event)
 
-        # ── TTS orchestration ──
-        if etype == "text_start":
-            session = await get_session(db, active_session_id) if active_session_id else None
-            if session:
-                tts_agent = await agent_manager.get_agent_by_id(db, session.agent_id)
-                if tts_agent:
-                    logger.info(
-                        "Stream TTS resolve: agent=%s, tts_provider=%s, voice_id=%s, has_agent_key=%s",
-                        tts_agent.name, tts_agent.tts_provider, tts_agent.voice_id, bool(tts_agent.tts_api_key),
+            # ── TTS orchestration ──
+            if etype == "text_start":
+                session = await get_session(db, active_session_id) if active_session_id else None
+                if session:
+                    tts_agent = await agent_manager.get_agent_by_id(db, session.agent_id)
+                    if tts_agent:
+                        logger.info(
+                            "Stream TTS resolve: agent=%s, tts_provider=%s, voice_id=%s, has_agent_key=%s",
+                            tts_agent.name, tts_agent.tts_provider, tts_agent.voice_id, bool(tts_agent.tts_api_key),
+                        )
+                        tts_key = tts_agent.tts_api_key
+                        if not tts_key:
+                            setting_key = f"tts_{tts_agent.tts_provider}_api_key"
+                            tts_key = await _get_setting(db, setting_key) or None
+                            logger.info("Stream TTS key fallback: setting=%s, found=%s", setting_key, bool(tts_key))
+                        tts_provider = get_tts_provider(tts_agent.tts_provider, tts_key)
+                if tts_provider:
+                    tts_buffer = ""
+                    tts_seq = 0
+                    tts_tasks = []
+                    tts_semaphore = asyncio.Semaphore(2)
+                    async with ws_lock:
+                        await websocket.send_json({
+                            "type": "audio_start",
+                            "payload": {"speaker": event["payload"]["speaker"]},
+                        })
+
+            elif etype == "text_delta" and tts_provider and tts_agent:
+                tts_buffer += event["payload"]["delta"]
+                sentences, tts_buffer = _extract_sentences(tts_buffer)
+                for sentence in sentences:
+                    seq = tts_seq
+                    tts_seq += 1
+                    task = asyncio.create_task(
+                        _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, sentence, seq, tts_semaphore)
                     )
-                    tts_key = tts_agent.tts_api_key
-                    if not tts_key:
-                        setting_key = f"tts_{tts_agent.tts_provider}_api_key"
-                        tts_key = await _get_setting(db, setting_key) or None
-                        logger.info("Stream TTS key fallback: setting=%s, found=%s", setting_key, bool(tts_key))
-                    tts_provider = get_tts_provider(tts_agent.tts_provider, tts_key)
-            if tts_provider:
-                tts_buffer = ""
-                tts_seq = 0
-                tts_tasks = []
-                tts_semaphore = asyncio.Semaphore(2)
+                    tts_tasks.append(task)
+
+            elif etype == "text_done" and tts_provider and tts_agent:
+                if tts_buffer.strip():
+                    seq = tts_seq
+                    tts_seq += 1
+                    task = asyncio.create_task(
+                        _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, tts_buffer, seq, tts_semaphore)
+                    )
+                    tts_tasks.append(task)
+                if tts_tasks:
+                    await asyncio.gather(*tts_tasks)
                 async with ws_lock:
                     await websocket.send_json({
-                        "type": "audio_start",
+                        "type": "audio_done",
                         "payload": {"speaker": event["payload"]["speaker"]},
                     })
+                tts_provider = None
+                tts_agent = None
 
-        elif etype == "text_delta" and tts_provider and tts_agent:
-            tts_buffer += event["payload"]["delta"]
-            sentences, tts_buffer = _extract_sentences(tts_buffer)
-            for sentence in sentences:
-                seq = tts_seq
-                tts_seq += 1
-                task = asyncio.create_task(
-                    _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, sentence, seq, tts_semaphore)
-                )
-                tts_tasks.append(task)
-
-        elif etype == "text_done" and tts_provider and tts_agent:
-            if tts_buffer.strip():
-                seq = tts_seq
-                tts_seq += 1
-                task = asyncio.create_task(
-                    _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, tts_buffer, seq, tts_semaphore)
-                )
-                tts_tasks.append(task)
-            if tts_tasks:
-                await asyncio.gather(*tts_tasks)
-            async with ws_lock:
-                await websocket.send_json({
-                    "type": "audio_done",
-                    "payload": {"speaker": event["payload"]["speaker"]},
-                })
-            tts_provider = None
-            tts_agent = None
+    except asyncio.CancelledError:
+        # Cancelled mid-turn — clean up in-flight TTS tasks silently
+        logger.info("[WS] _handle_text cancelled — cleaning up %d TTS tasks", len(tts_tasks))
+        for t in tts_tasks:
+            t.cancel()
+        if tts_tasks:
+            await asyncio.gather(*tts_tasks, return_exceptions=True)
+        raise
 
     return active_session_id
 
 
 def _extract_sentences(buffer: str) -> tuple[list[str], str]:
-    """Split buffer on sentence/newline boundaries with a word-count fallback.
+    """Split buffer on sentence/newline boundaries.
 
     Returns (complete_chunks, remaining_buffer).
     """
     parts = _SENTENCE_RE.split(buffer)
     if len(parts) <= 1:
-        # No sentence/newline boundary — fall back to word count
-        words = buffer.split()
-        if len(words) > _MAX_CHUNK_WORDS:
-            cut = " ".join(words[:_MAX_CHUNK_WORDS])
-            remaining = " ".join(words[_MAX_CHUNK_WORDS:])
-            return [cut], remaining
         return [], buffer
-    sentences = parts[:-1]
-    remaining = parts[-1]
-    chunks: list[str] = []
-    for s in sentences:
-        s = s.strip()
-        if not s:
-            continue
-        chunks.extend(_split_long(s))
-    return chunks, remaining
+    chunks = [s.strip() for s in parts[:-1] if s.strip()]
+    return chunks, parts[-1]
 
 
-def _split_long(text: str) -> list[str]:
-    """Break text exceeding _MAX_CHUNK_WORDS into sub-chunks."""
-    words = text.split()
-    if len(words) <= _MAX_CHUNK_WORDS:
-        return [text]
-    return [
-        " ".join(words[i : i + _MAX_CHUNK_WORDS])
-        for i in range(0, len(words), _MAX_CHUNK_WORDS)
-    ]
+def _clean_for_tts(text: str) -> str:
+    """Strip markdown and formatting artifacts before TTS synthesis.
+
+    List item prefixes are stripped; newlines remain so streaming chunks
+    (already split per-line by _extract_sentences) sound natural, and
+    _tts_for_text benefits from provider-level newline pauses.
+    """
+    text = _TTS_FENCED_CODE_RE.sub('', text)
+    text = _TTS_HEADING_RE.sub('', text)
+    text = _TTS_LIST_RE.sub('', text)
+    text = _TTS_BOLD_RE.sub(r'\1', text)
+    text = _TTS_ITALIC_RE.sub(lambda m: m.group(1) or m.group(2) or '', text)
+    text = _TTS_INLINE_CODE_RE.sub(r'\1', text)
+    text = _TTS_URL_RE.sub('', text)
+    text = _TTS_ELLIPSIS_RE.sub(',', text)
+    text = _TTS_EMOJI_RE.sub('', text)
+    text = re.sub(r' {2,}', ' ', text)
+    text = _TTS_TRAILING_PUNCT_RE.sub('', text)
+    return text.strip()
 
 
 async def _synth_and_send(
@@ -328,11 +409,15 @@ async def _synth_and_send(
     semaphore: asyncio.Semaphore | None = None,
 ) -> None:
     """Synthesize a sentence and send the audio chunk over WebSocket."""
+    clean = _clean_for_tts(text)
+    if not clean:
+        return
+
     try:
         if semaphore:
             await semaphore.acquire()
         try:
-            audio_bytes = await provider.synthesize(text, agent.voice_id, agent.voice_settings)
+            audio_bytes = await provider.synthesize(clean, agent.voice_id, agent.voice_settings)
         finally:
             if semaphore:
                 semaphore.release()
@@ -396,13 +481,17 @@ async def _tts_for_text(
         )
         return
 
+    clean = _clean_for_tts(text)
+    if not clean:
+        return
+
     try:
         await websocket.send_json({
             "type": "audio_start",
             "payload": {"speaker": speaker_name},
         })
 
-        audio_bytes = await provider.synthesize(text, agent.voice_id, agent.voice_settings)
+        audio_bytes = await provider.synthesize(clean, agent.voice_id, agent.voice_settings)
         logger.info("TTS: synthesized %d bytes for speaker=%s", len(audio_bytes), speaker_name)
         data = base64.b64encode(audio_bytes).decode()
         await websocket.send_json({

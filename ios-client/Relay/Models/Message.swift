@@ -6,6 +6,7 @@ struct Message: Identifiable, Equatable {
     var textContent: String
     var createdAt: Date?
     var isStreaming: Bool
+    var isInterrupted: Bool
 
     enum MessageRole: String {
         case user
@@ -13,12 +14,13 @@ struct Message: Identifiable, Equatable {
         case agent
     }
 
-    init(role: MessageRole, textContent: String, createdAt: Date? = nil, isStreaming: Bool = false) {
+    init(role: MessageRole, textContent: String, createdAt: Date? = nil, isStreaming: Bool = false, isInterrupted: Bool = false) {
         self.id = UUID()
         self.role = role
         self.textContent = textContent
         self.createdAt = createdAt
         self.isStreaming = isStreaming
+        self.isInterrupted = isInterrupted
     }
 }
 

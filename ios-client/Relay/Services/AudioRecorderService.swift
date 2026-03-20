@@ -16,6 +16,7 @@ actor AudioRecorderService {
     var silenceThresholdDb: Float = -35
     var silenceTimeoutMs: Int = 1500
     var minDurationMs: Int = 400
+    var attackDebounceMs: Int = 300
     var earpieceMode: Bool = false
 
     // MARK: - Callbacks
@@ -42,6 +43,7 @@ actor AudioRecorderService {
     private var meteringTick = 0
     private var deadInputTicks = 0
     private var stoppedRecorderTicks = 0
+    private var attackTicks = 0
 
     private let deadInputThreshold: Float = -100
     private let deadInputTickLimit = 5
@@ -166,6 +168,7 @@ actor AudioRecorderService {
         silenceStart = nil
         meteringTick = 0
         deadInputTicks = 0
+        attackTicks = 0
         currentMeteringLevel = -160
         await setState(.listening)
 
@@ -458,24 +461,34 @@ actor AudioRecorderService {
         }
 
         if metering > silenceThresholdDb {
-            // Sound detected
+            // Sound above threshold
             silenceStart = nil
             if !speechDetected {
-                print("[STT] speech detected (metering=\(String(format: "%.1f", metering))dB)")
-                speechDetected = true
-                recordStart = .now
-                await setState(.recording)
+                // Attack debounce: require sustained signal before declaring speech
+                let requiredTicks = max(1, attackDebounceMs / 100)
+                attackTicks += 1
+                if attackTicks >= requiredTicks {
+                    print("[STT] speech detected (metering=\(String(format: "%.1f", metering))dB, sustained \(attackTicks) ticks)")
+                    speechDetected = true
+                    attackTicks = 0
+                    recordStart = .now
+                    await setState(.recording)
+                }
             }
-        } else if speechDetected {
-            // Silence after speech
-            if silenceStart == nil {
-                silenceStart = .now
-            } else if let start = silenceStart {
-                let elapsed = ContinuousClock.now - start
-                if elapsed > .milliseconds(silenceTimeoutMs) {
-                    print("[STT] silence timeout, processing recording")
-                    isActive = false
-                    await processRecording(recorder)
+        } else {
+            // Below threshold — reset attack counter
+            attackTicks = 0
+            if speechDetected {
+                // Silence after confirmed speech
+                if silenceStart == nil {
+                    silenceStart = .now
+                } else if let start = silenceStart {
+                    let elapsed = ContinuousClock.now - start
+                    if elapsed > .milliseconds(silenceTimeoutMs) {
+                        print("[STT] silence timeout, processing recording")
+                        isActive = false
+                        await processRecording(recorder)
+                    }
                 }
             }
         }

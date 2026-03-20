@@ -26,6 +26,7 @@ _DEFAULTS = {
     "stt_silence_timeout_ms": "500",
     "stt_min_duration_ms": "400",
     "stt_no_speech_threshold": "0.5",
+    "stt_attack_debounce_ms": "300",
     "tts_default_provider": "openai",
 }
 
@@ -37,6 +38,7 @@ class PlatformSettingsOut(BaseModel):
     stt_silence_timeout_ms: int
     stt_min_duration_ms: int
     stt_no_speech_threshold: float
+    stt_attack_debounce_ms: int
     tts_default_provider: str
     tts_openai_api_key: str | None
     tts_elevenlabs_api_key: str | None
@@ -49,6 +51,7 @@ class PlatformSettingsUpdate(BaseModel):
     stt_silence_timeout_ms: int | None = None
     stt_min_duration_ms: int | None = None
     stt_no_speech_threshold: float | None = None
+    stt_attack_debounce_ms: int | None = None
     tts_default_provider: str | None = None
     tts_openai_api_key: str | None = None
     tts_elevenlabs_api_key: str | None = None
@@ -80,6 +83,7 @@ async def _build_response(db: AsyncSession) -> PlatformSettingsOut:
     silence_ms = await _get_setting(db, "stt_silence_timeout_ms")
     min_dur = await _get_setting(db, "stt_min_duration_ms")
     no_speech = await _get_setting(db, "stt_no_speech_threshold")
+    attack_ms = await _get_setting(db, "stt_attack_debounce_ms")
     tts_default = await _get_setting(db, "tts_default_provider")
     tts_openai_key = await _get_setting(db, "tts_openai_api_key")
     tts_el_key = await _get_setting(db, "tts_elevenlabs_api_key")
@@ -90,6 +94,7 @@ async def _build_response(db: AsyncSession) -> PlatformSettingsOut:
         stt_silence_timeout_ms=int(silence_ms or _DEFAULTS["stt_silence_timeout_ms"]),
         stt_min_duration_ms=int(min_dur or _DEFAULTS["stt_min_duration_ms"]),
         stt_no_speech_threshold=float(no_speech or _DEFAULTS["stt_no_speech_threshold"]),
+        stt_attack_debounce_ms=int(attack_ms or _DEFAULTS["stt_attack_debounce_ms"]),
         tts_default_provider=tts_default or _DEFAULTS["tts_default_provider"],
         tts_openai_api_key=mask_api_key(tts_openai_key) if tts_openai_key else None,
         tts_elevenlabs_api_key=mask_api_key(tts_el_key) if tts_el_key else None,
@@ -118,6 +123,8 @@ async def update_platform_settings(
         await _set_setting(db, "stt_min_duration_ms", str(body.stt_min_duration_ms))
     if body.stt_no_speech_threshold is not None:
         await _set_setting(db, "stt_no_speech_threshold", str(body.stt_no_speech_threshold))
+    if body.stt_attack_debounce_ms is not None:
+        await _set_setting(db, "stt_attack_debounce_ms", str(body.stt_attack_debounce_ms))
     if body.tts_default_provider is not None:
         await _set_setting(db, "tts_default_provider", body.tts_default_provider)
     if body.tts_openai_api_key is not None:

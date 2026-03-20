@@ -249,6 +249,7 @@ enum ClientEvent {
     case audioInput(data: String, format: String)
     case leaveSession
     case resumeSession(sessionId: String)
+    case interrupt
 
     func toJSON() -> String? {
         let dict: [String: Any]
@@ -261,6 +262,8 @@ enum ClientEvent {
             dict = ["type": "leave_session"]
         case .resumeSession(let sessionId):
             dict = ["type": "resume_session", "payload": ["session_id": sessionId]]
+        case .interrupt:
+            dict = ["type": "interrupt", "payload": [:]]
         }
         guard let jsonData = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
         return String(data: jsonData, encoding: .utf8)

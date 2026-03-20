@@ -59,6 +59,7 @@ final class AgentManagementViewModel {
                 "stt_silence_timeout_ms": String(settings.sttSilenceTimeoutMs),
                 "stt_min_duration_ms": String(settings.sttMinDurationMs),
                 "stt_no_speech_threshold": String(settings.sttNoSpeechThreshold),
+                "stt_attack_debounce_ms": String(settings.sttAttackDebounceMs),
                 "tts_default_provider": settings.ttsDefaultProvider,
                 "tts_openai_api_key": "",
                 "tts_elevenlabs_api_key": "",
@@ -233,6 +234,7 @@ final class AgentManagementViewModel {
         body["stt_silence_timeout_ms"] = .int(Int(Double(platformForm["stt_silence_timeout_ms"] ?? "500") ?? 500))
         body["stt_min_duration_ms"] = .int(Int(Double(platformForm["stt_min_duration_ms"] ?? "400") ?? 400))
         body["stt_no_speech_threshold"] = .double(Double(platformForm["stt_no_speech_threshold"] ?? "0.5") ?? 0.5)
+        body["stt_attack_debounce_ms"] = .int(Int(Double(platformForm["stt_attack_debounce_ms"] ?? "300") ?? 300))
 
         if let provider = platformForm["tts_default_provider"] {
             body["tts_default_provider"] = .string(provider)
@@ -251,6 +253,7 @@ final class AgentManagementViewModel {
         platformForm["stt_silence_timeout_ms"] = String(updated.sttSilenceTimeoutMs)
         platformForm["stt_min_duration_ms"] = String(updated.sttMinDurationMs)
         platformForm["stt_no_speech_threshold"] = String(updated.sttNoSpeechThreshold)
+        platformForm["stt_attack_debounce_ms"] = String(updated.sttAttackDebounceMs)
         platformForm["tts_default_provider"] = updated.ttsDefaultProvider
         platformForm["tts_openai_api_key"] = ""
         platformForm["tts_elevenlabs_api_key"] = ""

@@ -11,7 +11,10 @@ final class AudioViewModel {
 
     private var previousSessionId: String?
 
-    func setup(onRecordingComplete: @escaping @Sendable (String, String, URL) async -> Void) {
+    func setup(
+        onRecordingComplete: @escaping @Sendable (String, String, URL) async -> Void,
+        onSpeechStarted: (@Sendable () async -> Void)? = nil
+    ) {
         let player = self.player
         Task {
             await recorder.set(onRecordingComplete: onRecordingComplete)
@@ -19,9 +22,10 @@ final class AudioViewModel {
                 await MainActor.run {
                     self?.recorderState = state
                 }
-                // Stop TTS playback when user starts speaking
+                // Stop TTS playback and notify when user starts speaking
                 if state == .recording {
                     await player.stop()
+                    await onSpeechStarted?()
                 }
             })
             await recorder.set(onMeteringUpdate: { [weak self] level in
@@ -68,11 +72,12 @@ final class AudioViewModel {
         print("[STT][session] handleSessionChange: \(oldSessionId ?? "nil") → \(newSessionId ?? "nil") (recorder continues)")
     }
 
-    func updateSettings(silenceThresholdDb: Float, silenceTimeoutMs: Int, minDurationMs: Int) {
+    func updateSettings(silenceThresholdDb: Float, silenceTimeoutMs: Int, minDurationMs: Int, attackDebounceMs: Int) {
         Task {
             await recorder.set(silenceThresholdDb: silenceThresholdDb)
             await recorder.set(silenceTimeoutMs: silenceTimeoutMs)
             await recorder.set(minDurationMs: minDurationMs)
+            await recorder.set(attackDebounceMs: attackDebounceMs)
         }
     }
 
@@ -113,6 +118,10 @@ extension AudioRecorderService {
 
     func set(minDurationMs: Int) {
         self.minDurationMs = minDurationMs
+    }
+
+    func set(attackDebounceMs: Int) {
+        self.attackDebounceMs = attackDebounceMs
     }
 
     func set(earpieceMode: Bool) {

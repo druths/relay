@@ -6,24 +6,32 @@ actor ThinkingToneService {
     static let shared = ThinkingToneService()
 
     private var player: AVAudioPlayer?
+    private var pendingStart: Task<Void, Never>?
 
     func start() {
-        guard player == nil else { return }
+        guard player == nil, pendingStart == nil else { return }
 
-        let wavData = generateTone()
-        do {
-            let p = try AVAudioPlayer(data: wavData)
-            p.numberOfLoops = -1
-            p.volume = 1.0  // amplitude is baked low in the PCM data
-            p.play()
-            player = p
-            print("[ThinkingTone] Started")
-        } catch {
-            print("[ThinkingTone] Failed to start: \(error)")
+        pendingStart = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            let wavData = generateTone()
+            do {
+                let p = try AVAudioPlayer(data: wavData)
+                p.numberOfLoops = -1
+                p.volume = 1.0  // amplitude is baked low in the PCM data
+                p.play()
+                player = p
+                print("[ThinkingTone] Started")
+            } catch {
+                print("[ThinkingTone] Failed to start: \(error)")
+            }
+            pendingStart = nil
         }
     }
 
     func stop() {
+        pendingStart?.cancel()
+        pendingStart = nil
         guard player != nil else { return }
         player?.stop()
         player = nil
@@ -32,9 +40,9 @@ actor ThinkingToneService {
 
     // MARK: - WAV Generation
 
-    /// 3-second loop: a single soft sine pulse (330 Hz) with a raised-cosine amplitude
-    /// envelope — rises from silence, peaks at 1.5s, falls back to silence.
-    /// Amplitude ≈ 5% of full scale so it's a very quiet background cue.
+    /// 3-second loop: a soft sine pulse at A2 (110 Hz) with a gentle perfect-fifth
+    /// overtone (165 Hz) and slow FM vibrato for an organic, living quality.
+    /// All frequencies chosen so the loop boundary is seamless (whole-cycle counts).
     private func generateTone() -> Data {
         let sampleRate: UInt32 = 8000
         let numSamples: UInt32 = sampleRate * 3  // 3-second loop
@@ -67,18 +75,34 @@ actor ThinkingToneService {
             writeStr(ptr, 36, "data")
             writeU32(ptr, 40, dataSize)
 
-            // PCM samples: one gentle sine pulse over 3 seconds
-            let freq = 220.0          // Hz — low A, warm and ambient
-            let maxAmp = 6553.0       // ~20% of Int16.max (32767)
-            let total = Double(numSamples)
-            let twoPi = 2.0 * Double.pi
+            // PCM samples
+            //   Fundamental : 110 Hz (A2) — deep, warm
+            //   Vibrato      : FM with β=5, rate=1/3 Hz → ±1.7 Hz deviation; completes
+            //                  exactly one cycle in 3 s so the loop is phase-seamless
+            //   Overtone     : 165 Hz (E3, perfect fifth) at 15% — adds warmth/organicness
+            //   Envelope     : raised-cosine sin(πt), silent at both ends of the loop
+            //   Amplitude    : ~20% of Int16.max so it stays a quiet background cue
+            let freq    = 110.0   // Hz
+            let maxAmp  = 6000.0
+            let total   = Double(numSamples)
+            let twoPi   = 2.0 * Double.pi
+            let sr      = Double(sampleRate)
 
             for i in 0..<Int(numSamples) {
-                let t = Double(i) / total  // 0 → 1 over the full loop
-                // Raised-cosine envelope: 0 at edges, 1 at centre (t=0.5)
-                let envelope = sin(Double.pi * t)
-                let tone = sin(twoPi * freq * Double(i) / Double(sampleRate))
-                var sample = Int16(maxAmp * envelope * tone).littleEndian
+                let t    = Double(i) / total        // 0 → 1 (envelope position)
+                let tSec = Double(i) / sr           // time in seconds
+
+                let envelope    = sin(Double.pi * t)
+
+                // Fundamental with gentle vibrato (FM synthesis)
+                let vibrato     = 5.0 * sin(twoPi * (1.0 / 3.0) * tSec)
+                let fundamental = sin(twoPi * freq * tSec + vibrato)
+
+                // Soft perfect-fifth partial for organic warmth
+                let fifth       = 0.15 * sin(twoPi * (freq * 1.5) * tSec)
+
+                let mixed       = (fundamental + fifth) / 1.15
+                var sample = Int16(maxAmp * envelope * mixed).littleEndian
                 withUnsafeBytes(of: &sample) {
                     ptr.advanced(by: 44 + i * 2).copyMemory(from: $0.baseAddress!, byteCount: 2)
                 }

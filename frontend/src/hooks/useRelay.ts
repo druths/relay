@@ -86,11 +86,23 @@ export function useRelay() {
 
       switch (event.type) {
         case "state_update":
-          setState((s) => ({
-            ...s,
-            activeSpeaker: event.payload.active_speaker,
-            status: event.payload.status,
-          }));
+          setState((s) => {
+            const next: typeof s = {
+              ...s,
+              activeSpeaker: event.payload.active_speaker,
+              status: event.payload.status,
+            };
+            // If we were streaming and the turn ended without text_done, mark interrupted
+            if (event.payload.status !== "processing") {
+              const msgs = [...s.sessionMessages];
+              const last = msgs[msgs.length - 1];
+              if (last?.streaming) {
+                msgs[msgs.length - 1] = { ...last, streaming: false, interrupted: true };
+                next.sessionMessages = msgs;
+              }
+            }
+            return next;
+          });
           break;
 
         case "text":

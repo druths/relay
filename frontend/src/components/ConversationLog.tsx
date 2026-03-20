@@ -68,6 +68,13 @@ export function ConversationLog({
                 ))}
               </span>
             )}
+            {msg.interrupted && (
+              <span className="inline-flex items-center ml-1.5 opacity-40" title="interrupted">
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" className="text-gray-400">
+                  <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1ZM2 8a6 6 0 1 1 12 0A6 6 0 0 1 2 8Zm8.78-2.78a.75.75 0 0 0-1.06 0L8 6.94 6.28 5.22a.75.75 0 0 0-1.06 1.06L6.94 8l-1.72 1.72a.75.75 0 1 0 1.06 1.06L8 9.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L9.06 8l1.72-1.72a.75.75 0 0 0 0-1.06Z"/>
+                </svg>
+              </span>
+            )}
           </div>
         </div>
       ))}

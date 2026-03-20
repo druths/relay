@@ -44,6 +44,7 @@ export interface Message {
   text_content: string;
   created_at?: string;
   streaming?: boolean;
+  interrupted?: boolean;
 }
 
 // WebSocket event types

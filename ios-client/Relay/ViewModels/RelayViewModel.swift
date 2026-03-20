@@ -49,6 +49,9 @@ final class RelayViewModel {
     // Suppress the operator greeting sent on every fresh WebSocket connection.
     private var suppressNextGreeting = false
 
+    // Gap detection: fires the thinking tone if no audio_chunk arrives within 300 ms.
+    private var audioGapTask: Task<Void, Never>?
+
     private var isInSession: Bool {
         activeSessionId != nil || pendingSessionId != nil
     }
@@ -62,9 +65,29 @@ final class RelayViewModel {
         self.apiClient = APIClient(authService: authService)
 
         // Wire audio recording completion → send audio or transcribe locally
-        audio.setup { [weak self] base64, format, fileURL in
-            await self?.handleRecordingComplete(base64: base64, format: format, fileURL: fileURL)
-        }
+        audio.setup(
+            onRecordingComplete: { [weak self] base64, format, fileURL in
+                await self?.handleRecordingComplete(base64: base64, format: format, fileURL: fileURL)
+            },
+            onSpeechStarted: { [weak self] in
+                guard let self else { return }
+                guard await self.isLiveMode else { return }
+                // Cancel gap timer and mark any in-progress streaming message as interrupted
+                await MainActor.run {
+                    self.audioGapTask?.cancel()
+                    self.audioGapTask = nil
+                    if let idx = self.sessionMessages.indices.last,
+                       self.sessionMessages[idx].isStreaming {
+                        self.sessionMessages[idx].isStreaming = false
+                        self.sessionMessages[idx].isInterrupted = true
+                    }
+                }
+                Task { await ThinkingToneService.shared.stop() }
+                // Signal backend to cancel the current agent turn
+                print("[Relay] speech detected — sending interrupt")
+                try? await self.webSocketService.send(.interrupt)
+            }
+        )
     }
 
     // MARK: - Connection
@@ -237,6 +260,8 @@ final class RelayViewModel {
 
     func exitLiveMode() {
         isLiveMode = false
+        audioGapTask?.cancel()
+        audioGapTask = nil
         audio.stopListening()
         audio.stopAudio()
         endLiveActivity()
@@ -323,7 +348,7 @@ final class RelayViewModel {
         }
     }
 
-    private func fetchPlatformSettings() async {
+    func fetchPlatformSettings() async {
         do {
             let settings: PlatformSettings = try await apiClient.request("GET", path: "/v1/platform/settings")
             sttSettings = settings
@@ -332,7 +357,8 @@ final class RelayViewModel {
             audio.updateSettings(
                 silenceThresholdDb: Float(settings.sttSilenceThresholdDb),
                 silenceTimeoutMs: settings.sttSilenceTimeoutMs,
-                minDurationMs: settings.sttMinDurationMs
+                minDurationMs: settings.sttMinDurationMs,
+                attackDebounceMs: settings.sttAttackDebounceMs
             )
         } catch {
             print("[Relay] Failed to fetch platform settings: \(error)")
@@ -414,6 +440,8 @@ final class RelayViewModel {
 
         case .sessionLeft:
             audio.stopAudio()
+            audioGapTask?.cancel()
+            audioGapTask = nil
             let oldSessionId = activeSessionId
             pendingSessionId = nil
             pendingAgentName = nil
@@ -461,7 +489,6 @@ final class RelayViewModel {
         case .audioStart(let payload):
             guard isLiveMode else { break }
             if suppressNextGreeting { break }
-            Task { await ThinkingToneService.shared.stop() }
             if pendingSessionId != nil {
                 pendingAudioHasStart = true
                 break
@@ -472,12 +499,23 @@ final class RelayViewModel {
         case .audioChunk(let payload):
             guard isLiveMode else { break }
             if suppressNextGreeting { break }
+            // Cancel any pending gap timer and stop thinking tone — real audio is arriving.
+            audioGapTask?.cancel()
+            audioGapTask = nil
+            Task { await ThinkingToneService.shared.stop() }
             if pendingSessionId != nil {
                 pendingAudioChunks.append((data: payload.data, sequence: payload.sequence))
                 break
             }
             print("[TTS][relay] audio_chunk seq=\(payload.sequence) (\(payload.data.count) b64 chars)")
             Task { await audio.player.enqueue(data: payload.data, sequence: payload.sequence) }
+            // Start gap timer: if no chunk arrives within 300 ms, re-arm the thinking tone.
+            audioGapTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                audioGapTask = nil
+                Task { await ThinkingToneService.shared.start() }
+            }
 
         case .audioDone(let payload):
             guard isLiveMode else { break }
@@ -489,6 +527,9 @@ final class RelayViewModel {
                 pendingAudioHasDone = true
                 break
             }
+            // Turn is fully done — cancel gap timer so thinking tone doesn't re-arm.
+            audioGapTask?.cancel()
+            audioGapTask = nil
             print("[TTS][relay] audio_done from \(payload.speaker)")
             Task { await audio.player.done() }
 

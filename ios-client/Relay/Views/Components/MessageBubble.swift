@@ -48,6 +48,11 @@ struct MessageBubble: View {
                             }
                         }
                         .padding(.bottom, 3)
+                    } else if message.isInterrupted {
+                        Image(systemName: "waveform.badge.xmark")
+                            .font(.caption)
+                            .foregroundStyle(Color.relayTextQuaternary)
+                            .padding(.bottom, 2)
                     }
                 }
                 .padding(.horizontal, 12)

@@ -54,6 +54,9 @@ struct RelayView: View {
                 onChanged: { Task { await relay.refreshAgents() } }
             )
         }
+        .onChange(of: showSettings) { _, isShowing in
+            if !isShowing { Task { await relay.fetchPlatformSettings() } }
+        }
         .fullScreenCover(isPresented: $showMenu) {
             menuSheet
         }

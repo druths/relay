@@ -406,6 +406,9 @@ struct AgentManagementView: View {
                 platformSlider("Min Duration", key: "stt_min_duration_ms", range: 200...1000, step: 50, unit: " ms")
                 hintText("Recordings shorter than this are discarded.")
 
+                platformSlider("Attack Debounce", key: "stt_attack_debounce_ms", range: 0...600, step: 100, unit: " ms")
+                hintText("How long a sound must be sustained before speech is detected. Filters sharp transients like claps or door slams.")
+
                 if sttProvider == "openai" {
                     platformSlider("No-Speech Filter", key: "stt_no_speech_threshold", range: 0.1...0.9, step: 0.05, unit: "", format: "%.2f")
                     hintText("Whisper segments with no-speech probability above this are filtered.")
