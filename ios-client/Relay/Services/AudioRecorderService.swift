@@ -18,6 +18,8 @@ actor AudioRecorderService {
     var minDurationMs: Int = 400
     var attackDebounceMs: Int = 300
     var earpieceMode: Bool = false
+    /// When true, VAD speech detection is suppressed (TTS is playing and AEC is unavailable).
+    var suppressVAD: Bool = false
 
     // MARK: - Callbacks
 
@@ -118,6 +120,26 @@ actor AudioRecorderService {
             print("[STT][lifecycle] stopListening: no recorder → cleanup")
             await cleanup()
         }
+    }
+
+    /// Discard the accumulated recording buffer and start fresh.
+    /// Call this after TTS playback ends to discard echo captured during playback.
+    func discardAndRestartRecording() async {
+        guard isActive else { return }
+        print("[STT][echo-flush] discarding echo buffer, restarting recorder")
+        stopMeteringPoll()
+        if let rec = recorder {
+            let url = rec.url
+            rec.stop()
+            self.recorder = nil
+            try? FileManager.default.removeItem(at: url)
+        }
+        speechDetected = false
+        silenceStart = nil
+        attackTicks = 0
+        suppressVAD = false
+        isContinuousRestart = true
+        await startNewRecording()
     }
 
     func setPreferredInput(_ port: AVAudioSessionPortDescription) {
@@ -277,6 +299,7 @@ actor AudioRecorderService {
         isStopping = false
         speechDetected = false
         silenceStart = nil
+        suppressVAD = false
         currentMeteringLevel = -160
         stopMeteringPoll()
 
@@ -464,15 +487,20 @@ actor AudioRecorderService {
             // Sound above threshold
             silenceStart = nil
             if !speechDetected {
-                // Attack debounce: require sustained signal before declaring speech
-                let requiredTicks = max(1, attackDebounceMs / 100)
-                attackTicks += 1
-                if attackTicks >= requiredTicks {
-                    print("[STT] speech detected (metering=\(String(format: "%.1f", metering))dB, sustained \(attackTicks) ticks)")
-                    speechDetected = true
+                if suppressVAD {
+                    // TTS is playing and hardware AEC is unavailable — ignore echo
                     attackTicks = 0
-                    recordStart = .now
-                    await setState(.recording)
+                } else {
+                    // Attack debounce: require sustained signal before declaring speech
+                    let requiredTicks = max(1, attackDebounceMs / 100)
+                    attackTicks += 1
+                    if attackTicks >= requiredTicks {
+                        print("[STT] speech detected (metering=\(String(format: "%.1f", metering))dB, sustained \(attackTicks) ticks)")
+                        speechDetected = true
+                        attackTicks = 0
+                        recordStart = .now
+                        await setState(.recording)
+                    }
                 }
             }
         } else {

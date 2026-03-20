@@ -1,4 +1,5 @@
 import ActivityKit
+import AVFoundation
 import Foundation
 
 @Observable
@@ -54,6 +55,14 @@ final class RelayViewModel {
 
     private var isInSession: Bool {
         activeSessionId != nil || pendingSessionId != nil
+    }
+
+    /// True only when audio is routed to the built-in speaker (open-air echo risk).
+    /// Bluetooth/wired headsets have no acoustic echo path so don't need suppression.
+    private var isUsingBuiltInSpeaker: Bool {
+        AVAudioSession.sharedInstance().currentRoute.outputs.contains {
+            $0.portType == .builtInSpeaker
+        }
     }
 
     var useLocalStt: Bool {
@@ -440,6 +449,9 @@ final class RelayViewModel {
 
         case .sessionLeft:
             audio.stopAudio()
+            if isUsingBuiltInSpeaker {
+                Task { await audio.recorder.discardAndRestartRecording() }
+            }
             audioGapTask?.cancel()
             audioGapTask = nil
             let oldSessionId = activeSessionId
@@ -495,6 +507,11 @@ final class RelayViewModel {
             }
             print("[TTS][relay] audio_start from \(payload.speaker)")
             Task { await audio.player.start() }
+            // Suppress VAD only when audio routes to the built-in speaker (open-air echo risk).
+            // Bluetooth/wired headsets isolate the speaker from the mic — no suppression needed.
+            if isUsingBuiltInSpeaker {
+                Task { await audio.recorder.set(suppressVAD: true) }
+            }
 
         case .audioChunk(let payload):
             guard isLiveMode else { break }
@@ -531,7 +548,16 @@ final class RelayViewModel {
             audioGapTask?.cancel()
             audioGapTask = nil
             print("[TTS][relay] audio_done from \(payload.speaker)")
-            Task { await audio.player.done() }
+            let flushOnDone = isUsingBuiltInSpeaker
+            Task {
+                await audio.player.done()
+                await audio.player.waitUntilFinished()
+                // Speaker mode: discard echo-contaminated buffer and restart fresh.
+                // Earpiece mode: .voiceChat AEC handles echo; barge-in audio must be preserved.
+                if flushOnDone {
+                    await audio.recorder.discardAndRestartRecording()
+                }
+            }
 
         case .transcription(let payload):
             print("[STT] transcription received: \"\(payload.text)\"")

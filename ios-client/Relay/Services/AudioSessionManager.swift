@@ -28,7 +28,11 @@ enum AudioSessionManager {
                 try session.setPrefersEchoCancelledInput(true)
             }
             try session.setActive(true)
-            print("[AudioSession] Configured: playAndRecord (speaker, AEC=on)")
+            if #available(iOS 18.2, *) {
+                print("[AudioSession] Configured: playAndRecord (speaker, AEC=\(session.prefersEchoCancelledInput))")
+            } else {
+                print("[AudioSession] Configured: playAndRecord (speaker, AEC=unavailable)")
+            }
 
         case .earpiece:
             try session.setCategory(
