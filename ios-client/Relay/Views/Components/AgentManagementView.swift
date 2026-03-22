@@ -103,6 +103,8 @@ struct AgentManagementView: View {
             ttsTab
         case .stt:
             sttTab
+        case .account:
+            accountTab
         }
     }
 
@@ -627,12 +629,59 @@ struct AgentManagementView: View {
         .opacity(vm.isSavingPlatform ? 0.5 : 1)
     }
 
+    // MARK: - Account Tab
+
+    private var accountTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                let account = AccountStore.shared.currentAccount
+
+                sectionTitle("SERVER")
+                Text(account?.serverURL ?? AppConfig.serverBase)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.relayTextSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.relayElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                sectionTitle("USERNAME")
+                Text(account?.username ?? "—")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.relayTextSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.relayElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                Button(action: {
+                    AccountStore.shared.clearCurrentAccount()
+                    authService.logout()
+                    dismiss()
+                }) {
+                    Text("Sign Out")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.relayError)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(Color.relayBorder)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .padding(.top, 24)
+            }
+            .padding(16)
+        }
+    }
+
     // MARK: - Helpers
 
     private func hasUnsavedChanges() -> Bool {
         switch vm.selectedTab {
         case .agents: return vm.isAgentFormDirty
         case .tts, .stt: return vm.isPlatformFormDirty
+        case .account: return false
         }
     }
 

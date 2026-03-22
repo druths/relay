@@ -31,6 +31,7 @@
 		45E17BA3AD68410A2FC2E05A /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AEEB07DBA1DF0CDC1A99B74 /* AudioSessionManager.swift */; };
 		4727621A68E27C6972481B87 /* StatusOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361BF127CF429820121827A5 /* StatusOrb.swift */; };
 		5537BF2868592255AAF0F670 /* RelayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948EF6B3DA85FF1BA8CFC6EE /* RelayApp.swift */; };
+		5F50790D164B3A0797AFC1B3 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C249E903D59B7D654EA775C5 /* AccountStore.swift */; };
 		604F6C89F33E6C1080964919 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99230868B22A5498D4052BB /* Session.swift */; };
 		67153BF0B97E26F1F5CCCA5A /* RelayViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CE01E4F023808B5ED73D41 /* RelayViewModel.swift */; };
 		807F6D93F5DB6F23C9A7A528 /* ChimeGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC8B3E22C7703A96B3B4494 /* ChimeGenerator.swift */; };
@@ -124,6 +125,7 @@
 		A807EC3870D8644C1B4DD413 /* LiveActivityIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityIntents.swift; sourceTree = "<group>"; };
 		B2640FB004F58617990C7498 /* Relay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Relay.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B6D4C97F298DF8083BE24410 /* RelayActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayActivityAttributes.swift; sourceTree = "<group>"; };
+		C249E903D59B7D654EA775C5 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManagementView.swift; sourceTree = "<group>"; };
 		CB134658D8D2BA7B62B343A1 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
 		E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
@@ -154,6 +156,7 @@
 		1319B1D1BE7799A591A09064 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				C249E903D59B7D654EA775C5 /* AccountStore.swift */,
 				6B1F2A24DC524D9098334350 /* APIClient.swift */,
 				6A54EAB298182DB707F0D36A /* AudioPlayerService.swift */,
 				E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */,
@@ -381,6 +384,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9996E5FB3AB7CA3D363AFC02 /* APIClient.swift in Sources */,
+				5F50790D164B3A0797AFC1B3 /* AccountStore.swift in Sources */,
 				3EC69077C140DED12C6E435F /* Agent.swift in Sources */,
 				3030079E872051F3413460F7 /* AgentManagementView.swift in Sources */,
 				901CFC9A32A9F29842303390 /* AgentManagementViewModel.swift in Sources */,

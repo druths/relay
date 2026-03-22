@@ -128,10 +128,6 @@ extension AudioRecorderService {
         self.earpieceMode = earpieceMode
     }
 
-    func set(suppressVAD: Bool) {
-        self.suppressVAD = suppressVAD
-    }
-
     func set(onMeteringUpdate: @escaping @Sendable (Float) async -> Void) {
         self.onMeteringUpdate = onMeteringUpdate
     }

@@ -13,6 +13,7 @@ final class AgentManagementViewModel {
         case agents = "Agents"
         case tts = "Text to Speech"
         case stt = "Speech to Text"
+        case account = "Account"
     }
 
     var selectedTab: Tab = .agents

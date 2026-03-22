@@ -67,6 +67,11 @@ struct RelayView: View {
                 Task { await relay.reconnect() }
             }
         }
+        .onChange(of: relay.connected) { _, isConnected in
+            if !isConnected && scenePhase == .active {
+                Task { await relay.reconnect() }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .relayToggleMute)) { _ in
             relay.toggleMute()
         }
