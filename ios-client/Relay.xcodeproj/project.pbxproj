@@ -20,10 +20,12 @@
 		1EFFDE00EC63BC6944634598 /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBE41AF5C080E5DED126546 /* SpeechRecognitionService.swift */; };
 		2048A53811C9D508B316978D /* Message.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB134658D8D2BA7B62B343A1 /* Message.swift */; };
 		283437E21EA7160F42795ECB /* AudioPlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A54EAB298182DB707F0D36A /* AudioPlayerService.swift */; };
+		2973FB0270D7410A3122FA14 /* live_end_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69AE7D992CD3BE725117CEB7 /* live_end_1.wav */; };
 		2ADD40A2159E60D16579813F /* WebSocketEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 071718BDCBB8F15D92597F38 /* WebSocketEvent.swift */; };
 		2E2D6803F353C124CFB03BAE /* PlatformSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61FD94630C73BA584916A9DB /* PlatformSettings.swift */; };
 		3030079E872051F3413460F7 /* AgentManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */; };
 		31DD5B4F7A11B45E892A15EF /* Base64Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AFF15BA8C95399F13ABAA39 /* Base64Extensions.swift */; };
+		3237E4F8E080FA8E456255E9 /* response_received_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = EE9CCA9FD1A8B0C89D7D7944 /* response_received_1.wav */; };
 		3546C7E1FB742933D480C0A6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABCA07E8AD78F33997BE464 /* ContentView.swift */; };
 		3650DE77A0CA3311BF3C42E8 /* DevicePickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */; };
 		3C261BCD405BCBF02C13013B /* RelayActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D4C97F298DF8083BE24410 /* RelayActivityAttributes.swift */; };
@@ -31,6 +33,8 @@
 		45E17BA3AD68410A2FC2E05A /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AEEB07DBA1DF0CDC1A99B74 /* AudioSessionManager.swift */; };
 		4727621A68E27C6972481B87 /* StatusOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361BF127CF429820121827A5 /* StatusOrb.swift */; };
 		5537BF2868592255AAF0F670 /* RelayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948EF6B3DA85FF1BA8CFC6EE /* RelayApp.swift */; };
+		5550A6B2CF4052B1F564AE69 /* thinking_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 3644EB5E1C3E31588DA8D14B /* thinking_1.wav */; };
+		55A6DB951D19BD6889B77075 /* live_start_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = D5AEC3C080AB67D402F85445 /* live_start_1.wav */; };
 		5F50790D164B3A0797AFC1B3 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C249E903D59B7D654EA775C5 /* AccountStore.swift */; };
 		604F6C89F33E6C1080964919 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99230868B22A5498D4052BB /* Session.swift */; };
 		67153BF0B97E26F1F5CCCA5A /* RelayViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CE01E4F023808B5ED73D41 /* RelayViewModel.swift */; };
@@ -93,6 +97,7 @@
 		31CE01E4F023808B5ED73D41 /* RelayViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayViewModel.swift; sourceTree = "<group>"; };
 		359767A5465051721E7F2076 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		361BF127CF429820121827A5 /* StatusOrb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusOrb.swift; sourceTree = "<group>"; };
+		3644EB5E1C3E31588DA8D14B /* thinking_1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = thinking_1.wav; sourceTree = "<group>"; };
 		36867E74E2DB4F0F89C17EE2 /* WebSocketService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketService.swift; sourceTree = "<group>"; };
 		38FE2FDAE86B55169328875B /* RelayQuickLaunchWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayQuickLaunchWidget.swift; sourceTree = "<group>"; };
 		39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundWaveView.swift; sourceTree = "<group>"; };
@@ -108,6 +113,7 @@
 		5D7EEAE95CA2B4222A6B2C85 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		61FD94630C73BA584916A9DB /* PlatformSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformSettings.swift; sourceTree = "<group>"; };
 		692688A835BFFA0EC6600223 /* ConversationLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationLog.swift; sourceTree = "<group>"; };
+		69AE7D992CD3BE725117CEB7 /* live_end_1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = live_end_1.wav; sourceTree = "<group>"; };
 		6A54EAB298182DB707F0D36A /* AudioPlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerService.swift; sourceTree = "<group>"; };
 		6B1F2A24DC524D9098334350 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		6E3E6922C9E8819987A2C44C /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
@@ -128,10 +134,12 @@
 		C249E903D59B7D654EA775C5 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManagementView.swift; sourceTree = "<group>"; };
 		CB134658D8D2BA7B62B343A1 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
+		D5AEC3C080AB67D402F85445 /* live_start_1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = live_start_1.wav; sourceTree = "<group>"; };
 		E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
 		E587D02A8BB568FC7933144B /* AgentSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSelector.swift; sourceTree = "<group>"; };
 		E99230868B22A5498D4052BB /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		EACEBD78D17A8220B9722E73 /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
+		EE9CCA9FD1A8B0C89D7D7944 /* response_received_1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = response_received_1.wav; sourceTree = "<group>"; };
 		FE22E0410CA4D69AE33B8575 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -170,6 +178,17 @@
 				36867E74E2DB4F0F89C17EE2 /* WebSocketService.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		194E573EADDEEC723630B078 /* Sounds */ = {
+			isa = PBXGroup;
+			children = (
+				69AE7D992CD3BE725117CEB7 /* live_end_1.wav */,
+				D5AEC3C080AB67D402F85445 /* live_start_1.wav */,
+				EE9CCA9FD1A8B0C89D7D7944 /* response_received_1.wav */,
+				3644EB5E1C3E31588DA8D14B /* thinking_1.wav */,
+			);
+			path = Sounds;
 			sourceTree = "<group>";
 		};
 		1D9E70D4122A3A976AE2EF46 /* Views */ = {
@@ -264,6 +283,7 @@
 				E6A076981CC7D751B62556B7 /* Config */,
 				D64A893C997412DDB0E7BF87 /* Models */,
 				1319B1D1BE7799A591A09064 /* Services */,
+				194E573EADDEEC723630B078 /* Sounds */,
 				2B77ADFC65B8C1C8902CE65D /* Utilities */,
 				D4D9616F9CBA877B40C0A35E /* ViewModels */,
 				1D9E70D4122A3A976AE2EF46 /* Views */,
@@ -354,6 +374,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				83A8BA29AC759A450A261572 /* Assets.xcassets in Resources */,
+				2973FB0270D7410A3122FA14 /* live_end_1.wav in Resources */,
+				55A6DB951D19BD6889B77075 /* live_start_1.wav in Resources */,
+				3237E4F8E080FA8E456255E9 /* response_received_1.wav in Resources */,
+				5550A6B2CF4052B1F564AE69 /* thinking_1.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

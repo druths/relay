@@ -64,6 +64,7 @@ final class AgentManagementViewModel {
                 "tts_default_provider": settings.ttsDefaultProvider,
                 "tts_openai_api_key": "",
                 "tts_elevenlabs_api_key": "",
+                "voice_mode_instructions": settings.voiceModeInstructions,
             ]
             savedPlatformForm = platformForm
         } catch {
@@ -246,6 +247,9 @@ final class AgentManagementViewModel {
         if let key = platformForm["tts_elevenlabs_api_key"], !key.isEmpty {
             body["tts_elevenlabs_api_key"] = .string(key)
         }
+        if let instructions = platformForm["voice_mode_instructions"] {
+            body["voice_mode_instructions"] = .string(instructions)
+        }
 
         let updated: PlatformSettings = try await apiClient.request("PATCH", path: "/v1/platform/settings", body: AgentUpdateBody(values: body))
         platform = updated
@@ -258,6 +262,7 @@ final class AgentManagementViewModel {
         platformForm["tts_default_provider"] = updated.ttsDefaultProvider
         platformForm["tts_openai_api_key"] = ""
         platformForm["tts_elevenlabs_api_key"] = ""
+        platformForm["voice_mode_instructions"] = updated.voiceModeInstructions
         savedPlatformForm = platformForm
     }
 

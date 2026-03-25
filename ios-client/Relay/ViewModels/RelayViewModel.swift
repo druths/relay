@@ -262,12 +262,15 @@ final class RelayViewModel {
 
     func enterLiveMode() {
         isLiveMode = true
+        ChimeGenerator.playLiveStart()
         audio.startListening()
         startLiveActivity()
+        Task { try? await webSocketService.send(.setLiveMode(enabled: true)) }
     }
 
     func exitLiveMode() {
         isLiveMode = false
+        ChimeGenerator.playLiveEnd()
         audioGapTask?.cancel()
         audioGapTask = nil
         audio.stopListening()
@@ -275,6 +278,7 @@ final class RelayViewModel {
         endLiveActivity()
         Task { await SilentKeepAlive.shared.stop() }
         Task { await ThinkingToneService.shared.stop() }
+        Task { try? await webSocketService.send(.setLiveMode(enabled: false)) }
     }
 
     func stopAudio() {

@@ -250,6 +250,7 @@ enum ClientEvent {
     case leaveSession
     case resumeSession(sessionId: String)
     case interrupt
+    case setLiveMode(enabled: Bool)
 
     func toJSON() -> String? {
         let dict: [String: Any]
@@ -264,6 +265,8 @@ enum ClientEvent {
             dict = ["type": "resume_session", "payload": ["session_id": sessionId]]
         case .interrupt:
             dict = ["type": "interrupt", "payload": [:]]
+        case .setLiveMode(let enabled):
+            dict = ["type": "set_live_mode", "payload": ["enabled": enabled]]
         }
         guard let jsonData = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
         return String(data: jsonData, encoding: .utf8)

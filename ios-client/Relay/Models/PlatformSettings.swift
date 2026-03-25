@@ -11,6 +11,7 @@ struct PlatformSettings: Codable, Equatable {
     var ttsDefaultProvider: String
     var ttsOpenaiApiKey: String?
     var ttsElevenlabsApiKey: String?
+    var voiceModeInstructions: String
 
     enum CodingKeys: String, CodingKey {
         case sttProvider = "stt_provider"
@@ -23,5 +24,6 @@ struct PlatformSettings: Codable, Equatable {
         case ttsDefaultProvider = "tts_default_provider"
         case ttsOpenaiApiKey = "tts_openai_api_key"
         case ttsElevenlabsApiKey = "tts_elevenlabs_api_key"
+        case voiceModeInstructions = "voice_mode_instructions"
     }
 }

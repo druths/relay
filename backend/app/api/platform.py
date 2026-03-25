@@ -28,6 +28,13 @@ _DEFAULTS = {
     "stt_no_speech_threshold": "0.5",
     "stt_attack_debounce_ms": "300",
     "tts_default_provider": "openai",
+    "voice_mode_instructions": (
+        "You are in a live voice conversation. Keep all responses short and "
+        "conversational — 1 to 3 sentences unless the user explicitly asks for "
+        "more detail. Never use markdown, bullet points, headers, code blocks, "
+        "numbered lists, or any text formatting. Speak naturally and directly, "
+        "as if talking to someone in person."
+    ),
 }
 
 
@@ -42,6 +49,7 @@ class PlatformSettingsOut(BaseModel):
     tts_default_provider: str
     tts_openai_api_key: str | None
     tts_elevenlabs_api_key: str | None
+    voice_mode_instructions: str
 
 
 class PlatformSettingsUpdate(BaseModel):
@@ -55,6 +63,7 @@ class PlatformSettingsUpdate(BaseModel):
     tts_default_provider: str | None = None
     tts_openai_api_key: str | None = None
     tts_elevenlabs_api_key: str | None = None
+    voice_mode_instructions: str | None = None
 
 
 async def _get_setting(db: AsyncSession, key: str) -> str:
@@ -87,6 +96,7 @@ async def _build_response(db: AsyncSession) -> PlatformSettingsOut:
     tts_default = await _get_setting(db, "tts_default_provider")
     tts_openai_key = await _get_setting(db, "tts_openai_api_key")
     tts_el_key = await _get_setting(db, "tts_elevenlabs_api_key")
+    voice_instructions = await _get_setting(db, "voice_mode_instructions")
     return PlatformSettingsOut(
         stt_provider=stt_provider or _DEFAULTS["stt_provider"],
         stt_api_key=mask_api_key(stt_api_key) if stt_api_key else None,
@@ -98,6 +108,7 @@ async def _build_response(db: AsyncSession) -> PlatformSettingsOut:
         tts_default_provider=tts_default or _DEFAULTS["tts_default_provider"],
         tts_openai_api_key=mask_api_key(tts_openai_key) if tts_openai_key else None,
         tts_elevenlabs_api_key=mask_api_key(tts_el_key) if tts_el_key else None,
+        voice_mode_instructions=voice_instructions or _DEFAULTS["voice_mode_instructions"],
     )
 
 
@@ -131,6 +142,8 @@ async def update_platform_settings(
         await _set_setting(db, "tts_openai_api_key", body.tts_openai_api_key)
     if body.tts_elevenlabs_api_key is not None:
         await _set_setting(db, "tts_elevenlabs_api_key", body.tts_elevenlabs_api_key)
+    if body.voice_mode_instructions is not None:
+        await _set_setting(db, "voice_mode_instructions", body.voice_mode_instructions)
 
     await db.commit()
     return await _build_response(db)

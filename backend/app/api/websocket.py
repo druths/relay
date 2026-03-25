@@ -61,6 +61,8 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
     user_id = "default"
     active_session_id: uuid.UUID | None = None
     lobby_history: list[dict] = []  # In-memory conversation history for the LLM Operator
+    is_live_mode = False
+    voice_mode_instructions: str | None = None
 
     try:
         async with websocket.app.state.db_session() as db:
@@ -128,11 +130,21 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                             },
                         })
 
+                    elif msg_type == "set_live_mode":
+                        is_live_mode = data["payload"].get("enabled", False)
+                        if is_live_mode:
+                            raw = await _get_setting(db, "voice_mode_instructions")
+                            voice_mode_instructions = raw or None
+                        else:
+                            voice_mode_instructions = None
+                        logger.info("[WS] set_live_mode=%s", is_live_mode)
+
                     elif msg_type == "text_input":
                         await _cancel_active_task(active_task)
                         text = data["payload"]["text"]
                         active_task = asyncio.create_task(
-                            _handle_text(websocket, db, user_id, text, active_session_id, lobby_history)
+                            _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
+                                         voice_mode_instructions if is_live_mode else None)
                         )
 
                     elif msg_type == "audio_input":
@@ -171,7 +183,8 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
 
                         await _cancel_active_task(active_task)
                         active_task = asyncio.create_task(
-                            _handle_text(websocket, db, user_id, text, active_session_id, lobby_history)
+                            _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
+                                         voice_mode_instructions if is_live_mode else None)
                         )
 
                     elif msg_type == "leave_session":
@@ -245,6 +258,7 @@ async def _handle_text(
     text: str,
     active_session_id: uuid.UUID | None,
     lobby_history: list[dict],
+    voice_mode_instructions: str | None = None,
 ) -> uuid.UUID | None:
     """Process user text (from typing or STT). Returns updated active_session_id."""
     # Processing indicator
@@ -274,7 +288,7 @@ async def _handle_text(
     tts_tasks: list[asyncio.Task] = []
 
     try:
-        async for event in handle_session_message_stream(db, active_session_id, text):
+        async for event in handle_session_message_stream(db, active_session_id, text, voice_mode_instructions):
             etype = event["type"]
 
             if etype == "session_left":

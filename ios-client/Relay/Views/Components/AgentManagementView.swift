@@ -364,6 +364,19 @@ struct AgentManagementView: View {
                 platformTextField("tts_elevenlabs_api_key", placeholder: "xi-... (falls back to env var)", secure: true)
                 hintText("Platform-wide ElevenLabs API key for text-to-speech.")
 
+                separator
+                sectionTitle("LIVE VOICE MODE")
+                sectionLabel("Voice Instructions")
+                hintText("Injected into the agent system prompt when live mode is active. Use this to encourage concise, conversational responses without markdown.")
+                TextEditor(text: platformBinding("voice_mode_instructions"))
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.relayTextSecondary)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 120)
+                    .padding(8)
+                    .background(Color.relayElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
                 savePlatformButton
                     .padding(.top, 20)
             }

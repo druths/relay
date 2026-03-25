@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent import Agent
 from app.services import agent_health
 from app.services.llm import get_provider
+from app.services.llm.openclaw import OpenClawProvider
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +52,30 @@ _VOICE_PREAMBLE = (
 )
 
 
-def _build_system_prompt(agent: Agent) -> str:
+def _build_system_prompt(agent: Agent, voice_instructions: str | None = None) -> str:
     persona = agent.persona_prompt or f"You are {agent.name}, a helpful assistant."
-    return _VOICE_PREAMBLE + persona
+    preamble = (voice_instructions.strip() + "\n\n") if voice_instructions else _VOICE_PREAMBLE
+    return preamble + persona
 
 
-async def generate_response(agent: Agent, text: str, context: list[dict]) -> str:
+def _append_voice_note(messages: list[dict], voice_instructions: str) -> list[dict]:
+    """Append a style note to the last user message in-memory (not persisted).
+
+    Used for providers like OpenClaw that manage their own system prompt — we
+    can't override their context, so we nudge the model via the user turn instead.
+    """
+    modified = list(messages)
+    for i in range(len(modified) - 1, -1, -1):
+        if modified[i]["role"] == "user":
+            modified[i] = {
+                **modified[i],
+                "content": modified[i]["content"] + f"\n\n[Style note: {voice_instructions}]",
+            }
+            return modified
+    return modified
+
+
+async def generate_response(agent: Agent, text: str, context: list[dict], voice_instructions: str | None = None) -> str:
     """Generate a text response from an agent using its configured LLM provider."""
     health = agent_health.get_status(agent.agent_id)
     if health.status == "error":
@@ -76,7 +95,12 @@ async def generate_response(agent: Agent, text: str, context: list[dict]) -> str
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": msg["text_content"]})
 
-    system_prompt = _build_system_prompt(agent)
+    if voice_instructions and isinstance(provider, OpenClawProvider):
+        # OpenClaw manages its own system prompt — inject via user message instead
+        messages = _append_voice_note(messages, voice_instructions)
+        system_prompt = _build_system_prompt(agent)
+    else:
+        system_prompt = _build_system_prompt(agent, voice_instructions)
 
     try:
         return await provider.generate(system_prompt, messages, agent.llm_model)
@@ -86,7 +110,8 @@ async def generate_response(agent: Agent, text: str, context: list[dict]) -> str
 
 
 async def generate_response_stream(
-    agent: Agent, text: str, context: list[dict]
+    agent: Agent, text: str, context: list[dict],
+    voice_instructions: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream a text response from an agent using its configured LLM provider."""
     health = agent_health.get_status(agent.agent_id)
@@ -108,7 +133,12 @@ async def generate_response_stream(
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": msg["text_content"]})
 
-    system_prompt = _build_system_prompt(agent)
+    if voice_instructions and isinstance(provider, OpenClawProvider):
+        # OpenClaw manages its own system prompt — inject via user message instead
+        messages = _append_voice_note(messages, voice_instructions)
+        system_prompt = _build_system_prompt(agent)
+    else:
+        system_prompt = _build_system_prompt(agent, voice_instructions)
 
     try:
         async for chunk in provider.generate_stream(system_prompt, messages, agent.llm_model):

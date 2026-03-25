@@ -339,7 +339,8 @@ async def _execute_handoff(
 # ── Agent session message handling ──────────────────────────────────────
 
 async def handle_session_message(
-    db: AsyncSession, session_id: uuid.UUID, text: str
+    db: AsyncSession, session_id: uuid.UUID, text: str,
+    voice_instructions: str | None = None,
 ) -> list[dict]:
     """Process a message inside an agent session. Messages are persisted."""
     session = await get_session(db, session_id)
@@ -376,7 +377,7 @@ async def handle_session_message(
         return [{"type": "error", "payload": {"message": "Agent not found"}}]
 
     context = await get_session_messages(db, session_id)
-    response_text = await agent_manager.generate_response(agent, text, context)
+    response_text = await agent_manager.generate_response(agent, text, context, voice_instructions)
     await _persist_message(db, session_id, "agent", response_text)
     await invalidate_session_cache(str(session_id))
 
@@ -413,7 +414,8 @@ async def handle_session_message(
 # ── Streaming agent session message handling ───────────────────────────
 
 async def handle_session_message_stream(
-    db: AsyncSession, session_id: uuid.UUID, text: str
+    db: AsyncSession, session_id: uuid.UUID, text: str,
+    voice_instructions: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Process a message inside an agent session, streaming the response."""
     session = await get_session(db, session_id)
@@ -454,7 +456,7 @@ async def handle_session_message_stream(
     yield {"type": "text_start", "payload": {"speaker": agent.name}}
 
     full_response = ""
-    async for chunk in agent_manager.generate_response_stream(agent, text, context):
+    async for chunk in agent_manager.generate_response_stream(agent, text, context, voice_instructions):
         full_response += chunk
         yield {"type": "text_delta", "payload": {"speaker": agent.name, "delta": chunk}}
 

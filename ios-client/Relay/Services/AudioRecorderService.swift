@@ -173,13 +173,8 @@ actor AudioRecorderService {
 
             let newEngine = AVAudioEngine()
 
-            // Enable voice processing (NS + AEC) before starting the engine
-            do {
-                try newEngine.inputNode.setVoiceProcessingEnabled(true)
-                print("[STT] Voice processing enabled")
-            } catch {
-                print("[STT] Voice processing unavailable: \(error)")
-            }
+            // Enable voice processing (NS + AEC) — must be called before prepare()
+            try? newEngine.inputNode.setVoiceProcessingEnabled(true)
 
             newEngine.prepare()
             try newEngine.start()
@@ -286,7 +281,6 @@ actor AudioRecorderService {
                     silenceStart = .now
                 } else if ContinuousClock.now - silenceStart! >= .milliseconds(silenceTimeoutMs) {
                     print("[STT] silence timeout, processing recording")
-                    isActive = false
                     await processRecording()
                 }
             }
@@ -301,31 +295,59 @@ actor AudioRecorderService {
         } else {
             durationMs = 0
         }
-        print("[STT][lifecycle] processRecording (duration=\(durationMs)ms, stopping=\(isStopping))")
-        stopMeteringPoll()
+        let hadSpeech = speechDetected
+        print("[STT][lifecycle] processRecording (duration=\(durationMs)ms, stopping=\(isStopping), hadSpeech=\(hadSpeech))")
 
-        // Stop tap and close file (all synchronous — no new tap callbacks after removeTap)
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        engine = nil
-        audioFile = nil  // closes and flushes AVAudioFile
+        if isStopping {
+            // Full teardown — engine stops here
+            stopMeteringPoll()
+            engine?.inputNode.removeTap(onBus: 0)
+            engine?.stop()
+            engine = nil
+            audioFile = nil
+            let url = audioFileURL
+            audioFileURL = nil
 
-        guard let url = audioFileURL else {
+            if hadSpeech && durationMs >= minDurationMs, let url {
+                await setState(.processing)
+                await MainActor.run { HapticService.impact(.light) }
+                do {
+                    let data = try Data(contentsOf: url)
+                    let base64 = data.base64EncodedString()
+                    print("[STT][lifecycle] sending recording (\(durationMs)ms, \(base64.count) b64 chars)")
+                    await onRecordingComplete?(base64, "wav", url)
+                } catch {
+                    print("[STT] Failed to read recording: \(error)")
+                    try? FileManager.default.removeItem(at: url)
+                }
+            } else if let url {
+                print("[STT] discarded: \(!hadSpeech ? "no speech" : "too short (\(durationMs)ms)")")
+                try? FileManager.default.removeItem(at: url)
+            }
             await cleanup()
             return
         }
-        audioFileURL = nil
 
-        if !speechDetected || durationMs < minDurationMs {
-            print("[STT] discarded: \(!speechDetected ? "no speech" : "too short (\(durationMs)ms)")")
+        // Continuous mode: rotate the audio file, keep engine and tap running.
+        // All file operations are synchronous (no await) so the tap sees a valid
+        // audioFile the next time handleTapData runs on the actor.
+        let oldURL = audioFileURL
+        audioFile = nil        // flushes and closes the AVAudioFile on disk
+        audioFileURL = nil
+        openNewAudioFile()     // new file ready before any queued tap tasks run
+
+        // Reset VAD state for the next utterance
+        speechDetected = false
+        silenceStart = nil
+        attackStart = nil
+        recordStart = nil
+        await setState(.listening)
+
+        guard let url = oldURL else { return }
+
+        if !hadSpeech || durationMs < minDurationMs {
+            print("[STT] discarded: \(!hadSpeech ? "no speech" : "too short (\(durationMs)ms)")")
             try? FileManager.default.removeItem(at: url)
-            if isStopping {
-                await cleanup()
-            } else {
-                isActive = true
-                isContinuousRestart = true
-                await startEngine()
-            }
             return
         }
 
@@ -342,12 +364,31 @@ actor AudioRecorderService {
             try? FileManager.default.removeItem(at: url)
         }
 
-        if isStopping {
-            await cleanup()
-        } else {
-            isActive = true
-            isContinuousRestart = true
-            await startEngine()
+        await setState(.listening)
+    }
+
+    private func openNewAudioFile() {
+        guard let tapFormat else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("relay_recording_\(UUID().uuidString).wav")
+        let wavSettings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: tapFormat.sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+        ]
+        do {
+            audioFile = try AVAudioFile(
+                forWriting: url,
+                settings: wavSettings,
+                commonFormat: .pcmFormatFloat32,
+                interleaved: false
+            )
+            audioFileURL = url
+        } catch {
+            print("[STT] Failed to open new audio file: \(error)")
         }
     }
 
