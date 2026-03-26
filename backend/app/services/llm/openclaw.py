@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from openai import AsyncOpenAI
 
@@ -27,6 +28,15 @@ def _get_client(base_url: str, api_key: str | None = None) -> AsyncOpenAI:
             base_url=effective_url,
         )
     return _clients[cache_key]
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_OPEN_TAG = "<think>"
+_CLOSE_TAG = "</think>"
+
+
+def _strip_thinking(text: str) -> str:
+    return _THINK_RE.sub("", text).strip()
 
 
 class OpenClawProvider(LLMProvider):
@@ -55,7 +65,7 @@ class OpenClawProvider(LLMProvider):
             model=oc_model,
             messages=llm_messages,
         )
-        return response.choices[0].message.content or ""
+        return _strip_thinking(response.choices[0].message.content or "")
 
     async def generate_stream(self, system_prompt, messages, model):
         client = _get_client(self._base_url, self._api_key)
@@ -72,7 +82,35 @@ class OpenClawProvider(LLMProvider):
             messages=llm_messages,
             stream=True,
         )
+        buf = ""
+        in_think = False
         async for chunk in response:
             delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+            if not delta:
+                continue
+            buf += delta
+            while True:
+                if in_think:
+                    end = buf.find(_CLOSE_TAG)
+                    if end >= 0:
+                        buf = buf[end + len(_CLOSE_TAG):]
+                        in_think = False
+                    else:
+                        buf = ""
+                        break
+                else:
+                    start = buf.find(_OPEN_TAG)
+                    if start >= 0:
+                        if start > 0:
+                            yield buf[:start]
+                        buf = buf[start + len(_OPEN_TAG):]
+                        in_think = True
+                    else:
+                        # Hold back enough chars to detect a tag spanning a chunk boundary
+                        hold = len(_OPEN_TAG) - 1
+                        if len(buf) > hold:
+                            yield buf[:-hold]
+                            buf = buf[-hold:]
+                        break
+        if buf and not in_think:
+            yield buf

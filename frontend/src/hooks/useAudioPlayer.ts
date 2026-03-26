@@ -11,8 +11,8 @@ export function useAudioPlayer() {
   const queueRef = useRef<QueueItem[]>([]);
   const nextSeqRef = useRef(0);
   const drainingRef = useRef(false);
-  const [muted, setMuted] = useState(false);
-  const mutedRef = useRef(false);
+  const [muted, setMuted] = useState(true);
+  const mutedRef = useRef(true);
 
   // Keep ref in sync with state so callbacks see current value
   const updateMuted = useCallback((value: boolean) => {
