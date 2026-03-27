@@ -1,116 +1,97 @@
-"""OpenClaw LLM provider — talks to an OpenClaw gateway via its OpenAI-compatible API."""
+"""OpenClaw LLM provider — uses the /v1/responses endpoint for clean output (no think/action blocks)."""
 
 from __future__ import annotations
 
+import json
 import logging
-import re
+from typing import Any
 
-from openai import AsyncOpenAI
+import httpx
 
 from app.services.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-# Cache clients by (api_key, base_url) tuple
-_clients: dict[tuple[str | None, str], AsyncOpenAI] = {}
+
+def _agent_id(model: str) -> str:
+    """Extract the bare agent ID from an optional 'openclaw:<id>' prefix."""
+    if model.startswith("openclaw:"):
+        return model[len("openclaw:"):]
+    return model
 
 
-def _get_client(base_url: str, api_key: str | None = None) -> AsyncOpenAI:
-    """Return a cached AsyncOpenAI client pointed at the OpenClaw gateway."""
-    effective_url = base_url.rstrip("/")
-    if not effective_url.endswith("/v1"):
-        effective_url += "/v1"
-
-    cache_key = (api_key, effective_url)
-    if cache_key not in _clients:
-        _clients[cache_key] = AsyncOpenAI(
-            api_key=api_key or "not-needed",
-            base_url=effective_url,
-        )
-    return _clients[cache_key]
-
-
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-_OPEN_TAG = "<think>"
-_CLOSE_TAG = "</think>"
-
-
-def _strip_thinking(text: str) -> str:
-    return _THINK_RE.sub("", text).strip()
+def _build_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert Chat Completions message dicts to Responses API input items."""
+    return [{"type": "message", "role": m["role"], "content": m["content"]} for m in messages]
 
 
 class OpenClawProvider(LLMProvider):
     def __init__(self, base_url: str, api_key: str | None = None):
-        self._base_url = base_url
+        base = base_url.rstrip("/")
+        # Responses API lives at /v1/responses (not /v1/chat/completions)
+        self._responses_url = f"{base}/v1/responses"
         self._api_key = api_key
 
-    @staticmethod
-    def _model_name(agent_id: str) -> str:
-        """Ensure the model field uses the ``openclaw:<agentId>`` format."""
-        if agent_id.startswith("openclaw:"):
-            return agent_id
-        return f"openclaw:{agent_id}"
+    def _headers(self, agent_id: str) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._api_key or 'not-needed'}",
+            "Content-Type": "application/json",
+            "x-openclaw-agent-id": agent_id,
+        }
 
     async def generate(self, system_prompt, messages, model):
-        client = _get_client(self._base_url, self._api_key)
-        oc_model = self._model_name(model)
+        agent_id = _agent_id(model)
+        logger.info("OpenClaw generate: agent=%s, %d messages", agent_id, len(messages))
 
-        llm_messages = [{"role": "system", "content": system_prompt}]
-        llm_messages.extend(messages)
+        payload: dict[str, Any] = {
+            "model": "openclaw",
+            "input": _build_input(messages),
+        }
+        if system_prompt:
+            payload["instructions"] = system_prompt
 
-        logger.info("OpenClaw generate: gateway=%s agent=%s, %d messages",
-                     self._base_url, oc_model, len(llm_messages))
-
-        response = await client.chat.completions.create(
-            model=oc_model,
-            messages=llm_messages,
-        )
-        return _strip_thinking(response.choices[0].message.content or "")
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(self._responses_url, headers=self._headers(agent_id), json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            # Extract text from output items
+            for item in data.get("output", []):
+                if item.get("type") == "message":
+                    for part in item.get("content", []):
+                        if part.get("type") == "output_text":
+                            return part.get("text", "")
+            return ""
 
     async def generate_stream(self, system_prompt, messages, model):
-        client = _get_client(self._base_url, self._api_key)
-        oc_model = self._model_name(model)
+        agent_id = _agent_id(model)
+        logger.info("OpenClaw stream: agent=%s, %d messages", agent_id, len(messages))
 
-        llm_messages = [{"role": "system", "content": system_prompt}]
-        llm_messages.extend(messages)
+        payload: dict[str, Any] = {
+            "model": "openclaw",
+            "input": _build_input(messages),
+            "stream": True,
+        }
+        if system_prompt:
+            payload["instructions"] = system_prompt
 
-        logger.info("OpenClaw stream: gateway=%s agent=%s, %d messages",
-                     self._base_url, oc_model, len(llm_messages))
-
-        response = await client.chat.completions.create(
-            model=oc_model,
-            messages=llm_messages,
-            stream=True,
-        )
-        buf = ""
-        in_think = False
-        async for chunk in response:
-            delta = chunk.choices[0].delta.content
-            if not delta:
-                continue
-            buf += delta
-            while True:
-                if in_think:
-                    end = buf.find(_CLOSE_TAG)
-                    if end >= 0:
-                        buf = buf[end + len(_CLOSE_TAG):]
-                        in_think = False
-                    else:
-                        buf = ""
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream(
+                "POST", self._responses_url,
+                headers=self._headers(agent_id),
+                json=payload,
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str == "[DONE]":
                         break
-                else:
-                    start = buf.find(_OPEN_TAG)
-                    if start >= 0:
-                        if start > 0:
-                            yield buf[:start]
-                        buf = buf[start + len(_OPEN_TAG):]
-                        in_think = True
-                    else:
-                        # Hold back enough chars to detect a tag spanning a chunk boundary
-                        hold = len(_OPEN_TAG) - 1
-                        if len(buf) > hold:
-                            yield buf[:-hold]
-                            buf = buf[-hold:]
-                        break
-        if buf and not in_think:
-            yield buf
+                    try:
+                        event = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") == "response.output_text.delta":
+                        delta = event.get("delta", "")
+                        if delta:
+                            yield delta
