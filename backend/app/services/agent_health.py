@@ -61,7 +61,9 @@ async def check_agent(agent: Agent) -> AgentHealth:
         logger.warning("Health check %s exception: %r", agent.name, exc, exc_info=True)
         error_msg = str(exc)
         # Extract useful part of common API errors
-        if "401" in error_msg or "Unauthorized" in error_msg:
+        if not error_msg or "ReadTimeout" in type(exc).__name__ or "Timeout" in type(exc).__name__:
+            error_msg = "Request timed out"
+        elif "401" in error_msg or "Unauthorized" in error_msg:
             error_msg = "Invalid API key"
         elif "403" in error_msg or "Forbidden" in error_msg:
             error_msg = "API key lacks permission"

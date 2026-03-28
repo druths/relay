@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.redis import cache_session_context, get_cached_context, invalidate_session_cache
@@ -56,6 +56,18 @@ async def get_session(db: AsyncSession, session_id: uuid.UUID) -> Session | None
         select(Session).where(Session.session_id == session_id)
     )
     return result.scalar_one_or_none()
+
+
+async def delete_session(db: AsyncSession, session_id: uuid.UUID) -> bool:
+    """Delete a session and all its messages. Returns True if found and deleted."""
+    session = await get_session(db, session_id)
+    if not session:
+        return False
+    await db.execute(delete(Message).where(Message.session_id == session_id))
+    await db.delete(session)
+    await db.commit()
+    await invalidate_session_cache(session_id)
+    return True
 
 
 async def list_sessions(db: AsyncSession, user_id: str = "default") -> list[dict]:

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.services.conversation_manager import (
+    delete_session,
     get_session,
     get_session_messages,
     list_sessions,
@@ -48,6 +49,15 @@ async def get_sessions(
 ):
     sessions = await list_sessions(db, user_id)
     return [SessionOut(**s) for s in sessions]
+
+
+@router.delete("/{session_id}", status_code=204)
+async def delete_session_endpoint(
+    session_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+):
+    found = await delete_session(db, session_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Session not found")
 
 
 @router.get("/{session_id}/messages", response_model=list[MessageOut])

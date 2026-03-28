@@ -21,6 +21,7 @@ function App() {
 function RelayApp({ onLogout }: { onLogout: () => void }) {
   const relay = useRelay();
   const [showSettings, setShowSettings] = useState(false);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
 
   const handleAgentSelect = (agentName: string) => {
     relay.sendMessage(`connect me to ${agentName}`);
@@ -88,22 +89,54 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             </h3>
             <div className="space-y-1">
               {relay.sessions.map((s) => (
-                <button
-                  key={s.session_id}
-                  onClick={() => relay.resumeSession(s.session_id)}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm
-                             hover:bg-gray-800 text-gray-300 transition-colors"
-                >
-                  <div className="font-medium">{s.name || s.agent_name}</div>
-                  <div className="text-xs text-gray-500">
-                    {s.agent_name} &middot; {s.status}
-                  </div>
-                  {s.summary && (
-                    <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">
-                      {s.summary}
+                <div key={s.session_id} className="group relative">
+                  <button
+                    onClick={() => { setConfirmingDeleteId(null); relay.resumeSession(s.session_id); }}
+                    className="w-full text-left px-3 py-2 pr-8 rounded-lg text-sm
+                               hover:bg-gray-800 text-gray-300 transition-colors"
+                  >
+                    <div className="font-medium">{s.name || s.agent_name}</div>
+                    <div className="text-xs text-gray-500">
+                      {s.agent_name} &middot; {s.status}
                     </div>
+                    {s.summary && (
+                      <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">
+                        {s.summary}
+                      </div>
+                    )}
+                  </button>
+                  {confirmingDeleteId === s.session_id ? (
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          relay.deleteSession(s.session_id);
+                          setConfirmingDeleteId(null);
+                        }}
+                        className="text-xs text-red-400 hover:text-red-300 font-medium px-1"
+                        title="Confirm delete"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => setConfirmingDeleteId(null)}
+                        className="text-xs text-gray-500 hover:text-gray-300 px-1"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(s.session_id); }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2
+                                 opacity-0 group-hover:opacity-100 transition-opacity
+                                 text-gray-600 hover:text-gray-400 p-0.5 rounded"
+                      title="Delete session"
+                    >
+                      ✕
+                    </button>
                   )}
-                </button>
+                </div>
               ))}
             </div>
           </div>

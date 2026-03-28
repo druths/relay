@@ -343,6 +343,15 @@ export function useRelay() {
     );
   }, []);
 
+  // Delete a session by ID
+  const deleteSession = useCallback(async (sessionId: string) => {
+    await apiFetch(`/v1/sessions/${sessionId}`, { method: "DELETE" });
+    setState((s) => ({
+      ...s,
+      sessions: s.sessions.filter((sess) => sess.session_id !== sessionId),
+    }));
+  }, []);
+
   // Update agent config
   const updateAgentConfig = useCallback(
     async (agentId: string, config: { voice_settings?: Record<string, number>; voice_id?: string; tts_provider?: string; persona_prompt?: string }) => {
@@ -375,6 +384,7 @@ export function useRelay() {
     sendAudio,
     leaveSession,
     resumeSession,
+    deleteSession,
     updateAgentConfig,
     refreshAgents,
     fetchSessions,

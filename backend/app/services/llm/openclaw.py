@@ -50,7 +50,7 @@ class OpenClawProvider(LLMProvider):
         if system_prompt:
             payload["instructions"] = system_prompt
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(self._responses_url, headers=self._headers(agent_id), json=payload)
             resp.raise_for_status()
             data = resp.json()
