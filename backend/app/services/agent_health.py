@@ -58,6 +58,7 @@ async def check_agent(agent: Agent) -> AgentHealth:
             checked_at=datetime.now(timezone.utc),
         )
     except Exception as exc:
+        logger.warning("Health check %s exception: %r", agent.name, exc, exc_info=True)
         error_msg = str(exc)
         # Extract useful part of common API errors
         if "401" in error_msg or "Unauthorized" in error_msg:

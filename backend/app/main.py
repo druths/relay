@@ -86,9 +86,11 @@ async def _seed_platform_settings() -> None:
 # ── App lifecycle ───────────────────────────────────────────────────────
 
 async def _periodic_health_check() -> None:
-    """Re-check agent health every 5 minutes."""
+    """Re-check agent health every 30s when any agent is unhealthy, 60s when all are healthy."""
     while True:
-        await asyncio.sleep(300)
+        statuses = agent_health.get_all_statuses()
+        all_healthy = all(h.status == "healthy" for h in statuses.values()) if statuses else True
+        await asyncio.sleep(60 if all_healthy else 30)
         try:
             async with async_session() as db:
                 result = await db.execute(select(Agent))
