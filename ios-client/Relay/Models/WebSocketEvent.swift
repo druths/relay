@@ -10,6 +10,9 @@ enum WebSocketEvent {
     case sessionLeft
     case sessionHistory(SessionHistoryPayload)
     case sessionNamed(SessionNamedPayload)
+    case sessionRenamed(SessionRenamedPayload)
+    case sessionLabelsUpdated(SessionLabelsUpdatedPayload)
+    case sessionDeleted(SessionDeletedPayload)
     case textStart(TextStartPayload)
     case textDelta(TextDeltaPayload)
     case textDone(TextDonePayload)
@@ -51,10 +54,19 @@ struct HandoffPayload: Codable {
 struct SessionEnteredPayload: Codable {
     let sessionId: String
     let agentName: String
+    let labels: [String]
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case agentName = "agent_name"
+        case labels
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        agentName = try container.decode(String.self, forKey: .agentName)
+        labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
     }
 }
 
@@ -69,6 +81,34 @@ struct SessionNamedPayload: Codable {
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case name
+    }
+}
+
+struct SessionRenamedPayload: Codable {
+    let sessionId: String
+    let name: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case name
+    }
+}
+
+struct SessionLabelsUpdatedPayload: Codable {
+    let sessionId: String
+    let labels: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case labels
+    }
+}
+
+struct SessionDeletedPayload: Codable {
+    let sessionId: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
     }
 }
 
@@ -155,6 +195,12 @@ extension WebSocketEvent {
                 return .sessionHistory(try decoder.decode(SessionHistoryPayload.self, from: payloadData))
             case "session_named":
                 return .sessionNamed(try decoder.decode(SessionNamedPayload.self, from: payloadData))
+            case "session_renamed":
+                return .sessionRenamed(try decoder.decode(SessionRenamedPayload.self, from: payloadData))
+            case "session_labels_updated":
+                return .sessionLabelsUpdated(try decoder.decode(SessionLabelsUpdatedPayload.self, from: payloadData))
+            case "session_deleted":
+                return .sessionDeleted(try decoder.decode(SessionDeletedPayload.self, from: payloadData))
             case "text_start":
                 return .textStart(try decoder.decode(TextStartPayload.self, from: payloadData))
             case "text_delta":
@@ -251,6 +297,8 @@ enum ClientEvent {
     case resumeSession(sessionId: String)
     case interrupt
     case setLiveMode(enabled: Bool)
+    case renameSession(sessionId: String, name: String)
+    case updateSessionLabels(sessionId: String, labels: [String])
 
     func toJSON() -> String? {
         let dict: [String: Any]
@@ -267,6 +315,10 @@ enum ClientEvent {
             dict = ["type": "interrupt", "payload": [:]]
         case .setLiveMode(let enabled):
             dict = ["type": "set_live_mode", "payload": ["enabled": enabled]]
+        case .renameSession(let sessionId, let name):
+            dict = ["type": "rename_session", "payload": ["session_id": sessionId, "name": name]]
+        case .updateSessionLabels(let sessionId, let labels):
+            dict = ["type": "update_session_labels", "payload": ["session_id": sessionId, "labels": labels]]
         }
         guard let jsonData = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
         return String(data: jsonData, encoding: .utf8)

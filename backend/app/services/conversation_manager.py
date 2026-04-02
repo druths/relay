@@ -16,13 +16,14 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.redis import cache_session_context, get_cached_context, invalidate_session_cache
 from app.models.agent import Agent
 from app.models.message import Message
 from app.models.session import Session
+from app.models.session_label import Label, SessionLabel
 from app.services import agent_manager
 from app.services.operator import (
     Intent,
@@ -39,10 +40,11 @@ from app.services.session_llm import generate_session_name, generate_session_sum
 
 # ── Operator config helper ──────────────────────────────────────────────
 
-async def _operator_llm_config(db: AsyncSession) -> tuple[str, str | None, str | None]:
-    """Return (model, base_url, api_key) from the Operator agent's DB row."""
+async def _operator_llm_config(db: AsyncSession) -> tuple[str, str, str | None, str | None]:
+    """Return (provider, model, base_url, api_key) from the Operator agent's DB row."""
     op = await agent_manager.get_agent_by_name(db, "Operator")
     return (
+        op.llm_provider if op else "openai",
         op.llm_model if op else "gpt-4o-mini",
         op.llm_base_url if op else None,
         op.llm_api_key if op else None,
@@ -70,17 +72,112 @@ async def delete_session(db: AsyncSession, session_id: uuid.UUID) -> bool:
     return True
 
 
-async def list_sessions(db: AsyncSession, user_id: str = "default") -> list[dict]:
-    """Return sessions with agent names for display."""
+async def rename_session(
+    db: AsyncSession, session_id: uuid.UUID, new_name: str
+) -> Session | None:
+    """Rename a session. Returns the session if found."""
+    session = await get_session(db, session_id)
+    if not session:
+        return None
+    session.name = new_name
+    await db.commit()
+    return session
+
+
+async def get_session_labels(db: AsyncSession, session_id: uuid.UUID) -> list[str]:
+    """Return label names for a session."""
     result = await db.execute(
+        select(Label.name)
+        .join(SessionLabel, Label.label_id == SessionLabel.label_id)
+        .where(SessionLabel.session_id == session_id)
+        .order_by(Label.name)
+    )
+    return [row[0] for row in result.all()]
+
+
+async def set_session_labels(
+    db: AsyncSession, session_id: uuid.UUID, user_id: str, label_names: list[str]
+) -> list[str]:
+    """Replace all labels on a session. Creates new Label rows as needed."""
+    # Remove existing associations
+    await db.execute(
+        delete(SessionLabel).where(SessionLabel.session_id == session_id)
+    )
+
+    if not label_names:
+        await db.commit()
+        return []
+
+    # Get-or-create labels
+    final_labels: list[Label] = []
+    for name in label_names:
+        name = name.strip()
+        if not name:
+            continue
+        result = await db.execute(
+            select(Label).where(Label.user_id == user_id, Label.name == name)
+        )
+        label = result.scalar_one_or_none()
+        if not label:
+            label = Label(user_id=user_id, name=name)
+            db.add(label)
+            await db.flush()
+        final_labels.append(label)
+
+    # Create associations
+    for label in final_labels:
+        db.add(SessionLabel(session_id=session_id, label_id=label.label_id))
+
+    await db.commit()
+    return sorted(l.name for l in final_labels)
+
+
+async def list_user_labels(db: AsyncSession, user_id: str = "default") -> list[dict]:
+    """Return all labels for a user (for autocomplete)."""
+    result = await db.execute(
+        select(Label)
+        .where(Label.user_id == user_id)
+        .order_by(Label.name)
+    )
+    return [
+        {"label_id": str(l.label_id), "name": l.name}
+        for l in result.scalars().all()
+    ]
+
+
+async def has_user_messages(db: AsyncSession, session_id: uuid.UUID) -> bool:
+    """Check whether a session has any user-sent messages."""
+    result = await db.execute(
+        select(func.count()).select_from(Message).where(
+            Message.session_id == session_id, Message.role == "user"
+        )
+    )
+    return (result.scalar() or 0) > 0
+
+
+async def list_sessions(db: AsyncSession, user_id: str = "default", label_filter: str | None = None) -> list[dict]:
+    """Return sessions with agent names and labels for display."""
+    query = (
         select(Session, Agent.name)
         .join(Agent, Session.agent_id == Agent.agent_id)
         .where(Session.user_id == user_id)
-        .order_by(Session.last_active.desc())
-        .limit(20)
     )
-    return [
-        {
+
+    if label_filter:
+        query = (
+            query
+            .join(SessionLabel, Session.session_id == SessionLabel.session_id)
+            .join(Label, SessionLabel.label_id == Label.label_id)
+            .where(Label.name == label_filter)
+        )
+
+    query = query.order_by(Session.last_active.desc()).limit(20)
+    result = await db.execute(query)
+
+    sessions = []
+    for s, agent_name in result.all():
+        labels = await get_session_labels(db, s.session_id)
+        sessions.append({
             "session_id": str(s.session_id),
             "agent_id": str(s.agent_id),
             "agent_name": agent_name,
@@ -89,9 +186,9 @@ async def list_sessions(db: AsyncSession, user_id: str = "default") -> list[dict
             "last_active": s.last_active.isoformat(),
             "name": s.name,
             "summary": s.summary,
-        }
-        for s, agent_name in result.all()
-    ]
+            "labels": labels,
+        })
+    return sessions
 
 
 async def get_session_messages(
@@ -137,35 +234,52 @@ async def _persist_message(
 # ── Session lifecycle ───────────────────────────────────────────────────
 
 async def _create_agent_session(
-    db: AsyncSession, user_id: str, agent: Agent
+    db: AsyncSession, user_id: str, agent: Agent, labels: list[str] | None = None
 ) -> Session:
     """Always create a fresh session for this user+agent pair."""
     session = Session(user_id=user_id, agent_id=agent.agent_id)
     db.add(session)
     await db.commit()
     await db.refresh(session)
+
+    if labels:
+        await set_session_labels(db, session.session_id, user_id, labels)
+
     return session
 
 
-async def pause_session(db: AsyncSession, session_id: uuid.UUID) -> None:
-    """Pause a session and generate a summary."""
-    session = await get_session(db, session_id)
-    if session and session.status == "active":
-        try:
-            messages = await get_session_messages(db, session_id)
-            if messages:
-                agent = await agent_manager.get_agent_by_id(db, session.agent_id)
-                agent_name = agent.name if agent else "Agent"
-                op_model, op_base_url, op_api_key = await _operator_llm_config(db)
-                session.summary = await generate_session_summary(
-                    messages, agent_name,
-                    model=op_model, base_url=op_base_url, api_key=op_api_key,
-                )
-        except Exception as exc:
-            logger.warning("Failed to generate session summary: %s", exc)
+async def pause_session(db: AsyncSession, session_id: uuid.UUID) -> str:
+    """Pause a session and generate a summary.
 
-        session.status = "paused"
-        await db.commit()
+    Returns "deleted" if the session had no user messages and was removed,
+    "paused" if it was paused normally, or "not_found" if the session
+    didn't exist or wasn't active.
+    """
+    session = await get_session(db, session_id)
+    if not session or session.status != "active":
+        return "not_found"
+
+    # If the user never sent a message, delete the session entirely
+    if not await has_user_messages(db, session_id):
+        await delete_session(db, session_id)
+        return "deleted"
+
+    try:
+        messages = await get_session_messages(db, session_id)
+        if messages:
+            agent = await agent_manager.get_agent_by_id(db, session.agent_id)
+            agent_name = agent.name if agent else "Agent"
+            op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
+            session.summary = await generate_session_summary(
+                messages, agent_name,
+                provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
+            )
+    except Exception as exc:
+        logger.warning("Failed to generate session summary: %s", exc)
+
+    session.status = "paused"
+    await db.commit()
+    return "paused"
 
 
 # ── Lobby message handling (Operator) ───────────────────────────────────
@@ -194,12 +308,12 @@ async def handle_lobby_message(
         })
     sessions_ctx = await list_sessions(db, user_id)
 
-    op_model, op_base_url, op_api_key = await _operator_llm_config(db)
+    op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
 
     try:
         result = await call_operator(
             text, agents_ctx, sessions_ctx, lobby_history,
-            model=op_model, base_url=op_base_url, api_key=op_api_key,
+            provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
         )
     except Exception as exc:
         logger.exception("Operator LLM call failed, falling back to keyword matching: %s", exc)
@@ -242,10 +356,11 @@ async def _handle_llm_result(
 
     if result.tool_call == "connect_to_agent":
         agent_name = result.tool_args.get("agent_name")
+        labels = result.tool_args.get("labels")
         _append_tool_result(lobby_history, result, f"Connected to {agent_name}")
         if result.text:
             events.append(_text_event("operator", result.text))
-        events.extend(await _execute_handoff(db, user_id, agent_name))
+        events.extend(await _execute_handoff(db, user_id, agent_name, labels=labels))
         return events
 
     if result.tool_call == "resume_session":
@@ -306,7 +421,7 @@ async def _handle_lobby_keyword(
 
 
 async def _execute_handoff(
-    db: AsyncSession, user_id: str, agent_name: str | None
+    db: AsyncSession, user_id: str, agent_name: str | None, labels: list[str] | None = None
 ) -> list[dict]:
     if not agent_name:
         reply = "Which agent?"
@@ -325,11 +440,13 @@ async def _execute_handoff(
         return [_lobby_state_event(), _text_event("operator", reply)]
 
     health = agent_health.get_status(agent.agent_id)
-    session = await _create_agent_session(db, user_id, agent)
+    session = await _create_agent_session(db, user_id, agent, labels=labels)
 
     confirm = operator_connect_message(agent.name)
     greeting = f"Hi, I'm {agent.name}. How can I help you?"
     await _persist_message(db, session.session_id, "agent", greeting)
+
+    session_labels = await get_session_labels(db, session.session_id)
 
     events: list[dict] = [_text_event("operator", confirm)]
     if health.status == "error":
@@ -340,7 +457,7 @@ async def _execute_handoff(
         ))
     events.extend([
         _handoff_event("operator", agent.name),
-        _session_entered_event(session, agent.name),
+        _session_entered_event(session, agent.name, session_labels),
         _text_event(agent.name, greeting),
     ])
 
@@ -396,10 +513,10 @@ async def handle_session_message(
     # Auto-name the session after the first user exchange
     if session.name is None:
         try:
-            op_model, op_base_url, op_api_key = await _operator_llm_config(db)
+            op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
             name = await generate_session_name(
                 text, response_text, agent.name,
-                model=op_model, base_url=op_base_url, api_key=op_api_key,
+                provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
             )
             session.name = name
             await db.commit()
@@ -482,7 +599,7 @@ async def handle_session_message_stream(
     # Auto-name the session after the first user exchange
     if session.name is None:
         try:
-            op_model, op_base_url, op_api_key = await _operator_llm_config(db)
+            op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
             name = await generate_session_name(
                 text, full_response, agent.name,
                 model=op_model, base_url=op_base_url, api_key=op_api_key,
@@ -545,12 +662,13 @@ def _handoff_event(from_: str, to: str) -> dict:
     }
 
 
-def _session_entered_event(session: Session, agent_name: str) -> dict:
+def _session_entered_event(session: Session, agent_name: str, labels: list[str] | None = None) -> dict:
     return {
         "type": "session_entered",
         "payload": {
             "session_id": str(session.session_id),
             "agent_name": agent_name,
+            "labels": labels or [],
         },
     }
 

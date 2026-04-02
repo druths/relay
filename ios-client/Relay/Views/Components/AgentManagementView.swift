@@ -23,8 +23,13 @@ struct AgentManagementView: View {
         agents.sorted {
             if $0.isOperator { return true }
             if $1.isOperator { return false }
+            if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
             return $0.name < $1.name
         }
+    }
+
+    private var nonOperatorAgents: [Agent] {
+        sortedAgents.filter { !$0.isOperator }
     }
 
     var body: some View {
@@ -127,6 +132,41 @@ struct AgentManagementView: View {
                 Rectangle().fill(Color.relayElevated).frame(height: 1)
             }
 
+            // Reorder controls for selected non-operator agent
+            if let selectedId = vm.selectedAgentId,
+               !vm.isNewAgent,
+               let agent = agents.first(where: { $0.agentId == selectedId }),
+               !agent.isOperator {
+                let idx = nonOperatorAgents.firstIndex(where: { $0.agentId == selectedId })
+                HStack(spacing: 12) {
+                    Text("Order")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.relayTextQuaternary)
+                    Button {
+                        moveAgent(selectedId, direction: -1)
+                    } label: {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(idx == 0 ? Color.relayTextQuinary : Color.relayTextSecondary)
+                    }
+                    .disabled(idx == 0)
+
+                    Button {
+                        moveAgent(selectedId, direction: 1)
+                    } label: {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(idx == (nonOperatorAgents.count - 1) ? Color.relayTextQuinary : Color.relayTextSecondary)
+                    }
+                    .disabled(idx == (nonOperatorAgents.count - 1))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Color.relayElevated).frame(height: 1)
+                }
+            }
+
             // Agent form
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -134,6 +174,19 @@ struct AgentManagementView: View {
                 }
                 .padding(16)
             }
+        }
+    }
+
+    private func moveAgent(_ agentId: String, direction: Int) {
+        var reordered = nonOperatorAgents
+        guard let idx = reordered.firstIndex(where: { $0.agentId == agentId }) else { return }
+        let newIdx = idx + direction
+        guard newIdx >= 0 && newIdx < reordered.count else { return }
+        reordered.swapAt(idx, newIdx)
+        let ids = reordered.map(\.agentId)
+        Task {
+            await vm.reorderAgents(ids: ids)
+            onChanged()
         }
     }
 

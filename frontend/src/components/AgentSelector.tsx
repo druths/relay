@@ -8,7 +8,9 @@ interface AgentSelectorProps {
 }
 
 export function AgentSelector({ agents, activeSpeaker, onSelect, disabled }: AgentSelectorProps) {
-  const connectable = agents.filter((a) => a.name !== "Operator");
+  const connectable = agents
+    .filter((a) => a.name !== "Operator")
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 
   return (
     <div className="space-y-2">

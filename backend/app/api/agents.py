@@ -41,6 +41,7 @@ class AgentOut(BaseModel):
     is_operator: bool = False
     status: str = "unknown"
     status_message: str = ""
+    sort_order: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -87,6 +88,7 @@ def _agent_out(a) -> AgentOut:
         llm_api_key=mask_api_key(a.llm_api_key),
         tts_api_key=mask_api_key(a.tts_api_key),
         is_operator=(a.name == "Operator"),
+        sort_order=a.sort_order,
         status=health.status,
         status_message=health.message,
     )
@@ -155,6 +157,27 @@ async def delete_agent(
 
     await db.delete(agent)
     await db.commit()
+
+
+class AgentReorder(BaseModel):
+    agent_ids: list[str]
+
+
+@router.put("/reorder", response_model=list[AgentOut])
+async def reorder_agents(
+    body: AgentReorder,
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the sort order of agents. The list should contain agent IDs in the desired order.
+    Operator is always pinned to sort_order 0 and should not be included."""
+    for i, agent_id_str in enumerate(body.agent_ids):
+        agent_id = uuid.UUID(agent_id_str)
+        agent = await get_agent_by_id(db, agent_id)
+        if agent and agent.name != "Operator":
+            agent.sort_order = i + 1  # Operator stays at 0
+    await db.commit()
+    agents = await list_all_agents(db)
+    return [_agent_out(a) for a in agents]
 
 
 @router.get("/tts/voices/{provider}")

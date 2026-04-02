@@ -34,14 +34,14 @@ async def get_agent_by_id(db: AsyncSession, agent_id: uuid.UUID) -> Agent | None
 
 async def list_agents(db: AsyncSession) -> list[Agent]:
     result = await db.execute(
-        select(Agent).where(Agent.name != "Operator").order_by(Agent.name)
+        select(Agent).where(Agent.name != "Operator").order_by(Agent.sort_order, Agent.name)
     )
     return list(result.scalars().all())
 
 
 async def list_all_agents(db: AsyncSession) -> list[Agent]:
     """List all agents including the Operator."""
-    result = await db.execute(select(Agent).order_by(Agent.name))
+    result = await db.execute(select(Agent).order_by(Agent.sort_order, Agent.name))
     return list(result.scalars().all())
 
 

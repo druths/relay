@@ -207,6 +207,19 @@ final class AgentManagementViewModel {
         try await apiClient.delete(path: "/v1/agents/\(agentId)")
     }
 
+    // MARK: - Reorder Agents
+
+    func reorderAgents(ids: [String]) async {
+        struct ReorderBody: Encodable {
+            let agent_ids: [String]
+        }
+        do {
+            let _: [Agent] = try await apiClient.request("PUT", path: "/v1/agents/reorder", body: ReorderBody(agent_ids: ids))
+        } catch {
+            print("[AgentMgmt] Failed to reorder agents: \(error)")
+        }
+    }
+
     // MARK: - Save Platform Settings
 
     func savePlatformSettings() async throws {

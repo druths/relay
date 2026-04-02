@@ -113,6 +113,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE agents ADD COLUMN IF NOT EXISTS tts_api_key VARCHAR(500)"
         ))
+        await conn.execute(text(
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0"
+        ))
     # Seed data
     await _seed_agents()
     await _seed_platform_settings()
@@ -146,6 +149,7 @@ app.include_router(auth.router)
 app.include_router(agents.router)
 app.include_router(platform.router)
 app.include_router(sessions.router)
+app.include_router(sessions.labels_router)
 app.include_router(websocket.router)
 
 

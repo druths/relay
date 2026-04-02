@@ -7,6 +7,7 @@ export interface RelayState {
   connected: boolean;
   activeSessionId: string | null;
   activeAgentName: string | null;
+  activeSessionLabels: string[];
   activeSpeaker: string;
   status: string;
   lobbyMessages: Message[];
@@ -26,6 +27,7 @@ export function useRelay() {
     connected: false,
     activeSessionId: null,
     activeAgentName: null,
+    activeSessionLabels: [],
     activeSpeaker: "operator",
     status: "idle",
     lobbyMessages: [],
@@ -140,6 +142,7 @@ export function useRelay() {
             ...s,
             activeSessionId: event.payload.session_id,
             activeAgentName: event.payload.agent_name,
+            activeSessionLabels: event.payload.labels || [],
             sessionMessages: [],
           }));
           fetchSessions();
@@ -151,6 +154,7 @@ export function useRelay() {
             ...s,
             activeSessionId: null,
             activeAgentName: null,
+            activeSessionLabels: [],
             sessionMessages: [],
           }));
           fetchSessions();
@@ -224,6 +228,58 @@ export function useRelay() {
           }));
           break;
 
+        case "session_renamed":
+          setState((s) => ({
+            ...s,
+            sessions: s.sessions.map((sess) =>
+              sess.session_id === event.payload.session_id
+                ? { ...sess, name: event.payload.name }
+                : sess
+            ),
+          }));
+          break;
+
+        case "session_labels_updated":
+          setState((s) => ({
+            ...s,
+            sessions: s.sessions.map((sess) =>
+              sess.session_id === event.payload.session_id
+                ? { ...sess, labels: event.payload.labels }
+                : sess
+            ),
+            activeSessionLabels:
+              s.activeSessionId === event.payload.session_id
+                ? event.payload.labels
+                : s.activeSessionLabels,
+          }));
+          break;
+
+        case "session_deleted":
+          audioPlayerRef.current.stop();
+          setState((s) => ({
+            ...s,
+            sessions: s.sessions.filter(
+              (sess) => sess.session_id !== event.payload.session_id
+            ),
+            activeSessionId:
+              s.activeSessionId === event.payload.session_id
+                ? null
+                : s.activeSessionId,
+            activeAgentName:
+              s.activeSessionId === event.payload.session_id
+                ? null
+                : s.activeAgentName,
+            activeSessionLabels:
+              s.activeSessionId === event.payload.session_id
+                ? []
+                : s.activeSessionLabels,
+            sessionMessages:
+              s.activeSessionId === event.payload.session_id
+                ? []
+                : s.sessionMessages,
+          }));
+          break;
+
         case "audio_start":
           audioPlayerRef.current.start();
           break;
@@ -288,6 +344,7 @@ export function useRelay() {
       connected: false,
       activeSessionId: null,
       activeAgentName: null,
+      activeSessionLabels: [],
       lobbyMessages: [],
       sessionMessages: [],
       sessions: [],
@@ -352,6 +409,22 @@ export function useRelay() {
     }));
   }, []);
 
+  // Rename a session
+  const renameSession = useCallback((sessionId: string, name: string) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    ws.current.send(
+      JSON.stringify({ type: "rename_session", payload: { session_id: sessionId, name } })
+    );
+  }, []);
+
+  // Update session labels
+  const updateSessionLabels = useCallback((sessionId: string, labels: string[]) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    ws.current.send(
+      JSON.stringify({ type: "update_session_labels", payload: { session_id: sessionId, labels } })
+    );
+  }, []);
+
   // Update agent config
   const updateAgentConfig = useCallback(
     async (agentId: string, config: { voice_settings?: Record<string, number>; voice_id?: string; tts_provider?: string; persona_prompt?: string }) => {
@@ -385,6 +458,8 @@ export function useRelay() {
     leaveSession,
     resumeSession,
     deleteSession,
+    renameSession,
+    updateSessionLabels,
     updateAgentConfig,
     refreshAgents,
     fetchSessions,

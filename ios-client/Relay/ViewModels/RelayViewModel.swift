@@ -9,6 +9,7 @@ final class RelayViewModel {
     var connected = false
     var activeSessionId: String?
     var activeAgentName: String?
+    var activeSessionLabels: [String] = []
     var activeSpeaker = "operator"
     var status = "idle"
     var lobbyMessages: [Message] = []
@@ -131,6 +132,7 @@ final class RelayViewModel {
         connected = false
         activeSessionId = nil
         activeAgentName = nil
+        activeSessionLabels = []
         lobbyMessages = []
         sessionMessages = []
         sessions = []
@@ -219,6 +221,31 @@ final class RelayViewModel {
             try await webSocketService.send(.resumeSession(sessionId: sessionId))
         } catch {
             print("[Relay] Failed to resume session: \(error)")
+        }
+    }
+
+    func renameSession(_ sessionId: String, name: String) async {
+        do {
+            try await webSocketService.send(.renameSession(sessionId: sessionId, name: name))
+        } catch {
+            print("[Relay] Failed to rename session: \(error)")
+        }
+    }
+
+    func updateSessionLabels(_ sessionId: String, labels: [String]) async {
+        do {
+            try await webSocketService.send(.updateSessionLabels(sessionId: sessionId, labels: labels))
+        } catch {
+            print("[Relay] Failed to update session labels: \(error)")
+        }
+    }
+
+    func deleteSession(_ sessionId: String) async {
+        do {
+            try await apiClient.delete(path: "/v1/sessions/\(sessionId)")
+            sessions.removeAll { $0.sessionId == sessionId }
+        } catch {
+            print("[Relay] Failed to delete session: \(error)")
         }
     }
 
@@ -416,6 +443,7 @@ final class RelayViewModel {
                 // The UI swap (activeSessionId) waits for operator audio to finish.
                 pendingSessionId = payload.sessionId
                 pendingAgentName = payload.agentName
+                activeSessionLabels = payload.labels
                 sessionMessages = []
                 Task {
                     await audio.player.waitUntilFinished()
@@ -445,6 +473,7 @@ final class RelayViewModel {
             } else {
                 activeSessionId = payload.sessionId
                 activeAgentName = payload.agentName
+                activeSessionLabels = payload.labels
                 sessionMessages = []
                 audio.handleSessionChange(newSessionId: payload.sessionId)
                 Task { await fetchSessions() }
@@ -462,6 +491,7 @@ final class RelayViewModel {
             pendingAudioHasDone = false
             activeSessionId = nil
             activeAgentName = nil
+            activeSessionLabels = []
             sessionMessages = []
             audio.handleSessionChange(newSessionId: nil)
             if isLiveMode { updateLiveActivity() }
@@ -475,6 +505,32 @@ final class RelayViewModel {
         case .sessionNamed(let payload):
             if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
                 sessions[idx].name = payload.name
+            }
+
+        case .sessionRenamed(let payload):
+            if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
+                sessions[idx].name = payload.name
+            }
+
+        case .sessionLabelsUpdated(let payload):
+            if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
+                sessions[idx].labels = payload.labels
+            }
+            if activeSessionId == payload.sessionId {
+                activeSessionLabels = payload.labels
+            }
+
+        case .sessionDeleted(let payload):
+            audio.stopAudio()
+            audioGapTask?.cancel()
+            audioGapTask = nil
+            sessions.removeAll { $0.sessionId == payload.sessionId }
+            if activeSessionId == payload.sessionId {
+                activeSessionId = nil
+                activeAgentName = nil
+                activeSessionLabels = []
+                sessionMessages = []
+                audio.handleSessionChange(newSessionId: nil)
             }
 
         case .textStart(let payload):

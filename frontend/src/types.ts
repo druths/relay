@@ -11,6 +11,7 @@ export interface Agent {
   llm_api_key: string | null;
   tts_api_key: string | null;
   is_operator: boolean;
+  sort_order: number;
   status: "healthy" | "error" | "unknown";
   status_message: string;
 }
@@ -36,6 +37,7 @@ export interface Session {
   last_active: string;
   name: string | null;
   summary: string | null;
+  labels: string[];
 }
 
 export interface Message {
@@ -80,6 +82,7 @@ export interface WsSessionEntered {
   payload: {
     session_id: string;
     agent_name: string;
+    labels: string[];
   };
 }
 
@@ -159,6 +162,29 @@ export interface WsTranscription {
   };
 }
 
+export interface WsSessionRenamed {
+  type: "session_renamed";
+  payload: {
+    session_id: string;
+    name: string;
+  };
+}
+
+export interface WsSessionLabelsUpdated {
+  type: "session_labels_updated";
+  payload: {
+    session_id: string;
+    labels: string[];
+  };
+}
+
+export interface WsSessionDeleted {
+  type: "session_deleted";
+  payload: {
+    session_id: string;
+  };
+}
+
 export interface WsError {
   type: "error";
   payload: {
@@ -181,4 +207,7 @@ export type WsEvent =
   | WsAudioChunk
   | WsAudioDone
   | WsTranscription
+  | WsSessionRenamed
+  | WsSessionLabelsUpdated
+  | WsSessionDeleted
   | WsError;

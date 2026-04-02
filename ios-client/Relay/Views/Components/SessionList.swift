@@ -46,6 +46,25 @@ struct SessionList: View {
                         .foregroundStyle(Color.relayTextQuinary)
                 }
 
+                if !session.labels.isEmpty {
+                    HStack(spacing: 3) {
+                        ForEach(session.labels.prefix(2), id: \.self) { label in
+                            Text(label)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(Color.relayPrimary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.relayPrimary.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                        if session.labels.count > 2 {
+                            Text("+\(session.labels.count - 2)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.relayTextQuaternary)
+                        }
+                    }
+                }
+
                 if let summary = session.summary {
                     Text(summary)
                         .font(.system(size: 11))

@@ -30,8 +30,27 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
   const sorted = [...agents].sort((a, b) => {
     if (a.is_operator) return -1;
     if (b.is_operator) return 1;
-    return a.name.localeCompare(b.name);
+    return a.sort_order - b.sort_order || a.name.localeCompare(b.name);
   });
+
+  const nonOperator = sorted.filter((a) => !a.is_operator);
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  const handleDrop = async (targetId: string) => {
+    if (!dragId || dragId === targetId) return;
+    const fromIdx = nonOperator.findIndex((a) => a.agent_id === dragId);
+    const toIdx = nonOperator.findIndex((a) => a.agent_id === targetId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const reordered = [...nonOperator];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    setDragId(null);
+    await apiFetch("/v1/agents/reorder", {
+      method: "PUT",
+      body: JSON.stringify({ agent_ids: reordered.map((a) => a.agent_id) }),
+    });
+    onAgentsChanged();
+  };
 
   const [selectedId, setSelectedId] = useState<string | null>(
     sorted[0]?.agent_id ?? null
@@ -359,15 +378,25 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
             {/* Left panel — agent list */}
             <div className="w-56 border-r border-gray-800 flex flex-col p-3 gap-1 overflow-y-auto">
               {sorted.map((a) => (
-                <button
+                <div
                   key={a.agent_id}
-                  onClick={() => { setIsNew(false); setSelectedId(a.agent_id); }}
-                  className={`text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition-colors ${
+                  draggable={!a.is_operator}
+                  onDragStart={() => setDragId(a.agent_id)}
+                  onDragEnd={() => setDragId(null)}
+                  onDragOver={(e) => { if (!a.is_operator) e.preventDefault(); }}
+                  onDrop={() => { if (!a.is_operator) handleDrop(a.agent_id); }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
                     !isNew && selectedId === a.agent_id
                       ? "bg-gray-800 text-white"
                       : "text-gray-400 hover:bg-gray-800/50"
-                  }`}
+                  } ${dragId === a.agent_id ? "opacity-40" : ""}`}
+                  onClick={() => { setIsNew(false); setSelectedId(a.agent_id); }}
                 >
+                  {!a.is_operator && (
+                    <span className="text-gray-600 cursor-grab active:cursor-grabbing select-none" title="Drag to reorder">
+                      ⠿
+                    </span>
+                  )}
                   <span
                     className={`w-2 h-2 rounded-full flex-shrink-0 ${
                       a.status === "healthy"
@@ -381,7 +410,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                     {a.is_operator && <span className="mr-1 text-xs">&#128274;</span>}
                     {a.name}
                   </span>
-                </button>
+                </div>
               ))}
               <button
                 onClick={() => { setIsNew(true); setSelectedId(null); }}

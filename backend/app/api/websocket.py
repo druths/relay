@@ -13,10 +13,13 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from app.services.conversation_manager import (
     get_session,
+    get_session_labels,
     get_session_messages,
     handle_lobby_message,
     handle_session_message_stream,
     pause_session,
+    rename_session,
+    set_session_labels,
 )
 from app.services.operator import operator_greeting
 from app.services import agent_manager
@@ -191,12 +194,21 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                         await _cancel_active_task(active_task)
                         active_task = None
                         if active_session_id:
-                            await pause_session(db, active_session_id)
+                            result = await pause_session(db, active_session_id)
+                            left_session_id = active_session_id
                             active_session_id = None
-                            await websocket.send_json({
-                                "type": "session_left",
-                                "payload": {"session_id": None},
-                            })
+
+                            if result == "deleted":
+                                await websocket.send_json({
+                                    "type": "session_deleted",
+                                    "payload": {"session_id": str(left_session_id)},
+                                })
+                            else:
+                                await websocket.send_json({
+                                    "type": "session_left",
+                                    "payload": {"session_id": None},
+                                })
+
                             await websocket.send_json({
                                 "type": "state_update",
                                 "payload": {
@@ -218,6 +230,31 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                         active_session_id = await _do_resume(
                             websocket, db, user_id, target_sid, active_session_id
                         )
+
+                    elif msg_type == "rename_session":
+                        target_sid = uuid.UUID(data["payload"]["session_id"])
+                        new_name = data["payload"]["name"]
+                        session = await rename_session(db, target_sid, new_name)
+                        if session:
+                            await websocket.send_json({
+                                "type": "session_renamed",
+                                "payload": {
+                                    "session_id": str(target_sid),
+                                    "name": new_name,
+                                },
+                            })
+
+                    elif msg_type == "update_session_labels":
+                        target_sid = uuid.UUID(data["payload"]["session_id"])
+                        label_names = data["payload"]["labels"]
+                        labels = await set_session_labels(db, target_sid, user_id, label_names)
+                        await websocket.send_json({
+                            "type": "session_labels_updated",
+                            "payload": {
+                                "session_id": str(target_sid),
+                                "labels": labels,
+                            },
+                        })
 
             finally:
                 # Clean up on disconnect or error
@@ -545,11 +582,13 @@ async def _do_resume(
     await db.commit()
 
     agent = await agent_manager.get_agent_by_id(db, session.agent_id)
+    labels = await get_session_labels(db, session.session_id)
     await websocket.send_json({
         "type": "session_entered",
         "payload": {
             "session_id": str(session.session_id),
             "agent_name": agent.name if agent else "Unknown",
+            "labels": labels,
         },
     })
     messages = await get_session_messages(db, session.session_id)

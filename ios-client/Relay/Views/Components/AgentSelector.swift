@@ -5,9 +5,10 @@ struct AgentSelector: View {
     let activeAgentName: String?
     let onSelect: (Agent) -> Void
 
-    /// Agents to show — all except the Operator
+    /// Agents to show — all except the Operator, sorted by sort_order
     private var visibleAgents: [Agent] {
         agents.filter { !$0.isOperator }
+            .sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
     }
 
     var body: some View {
