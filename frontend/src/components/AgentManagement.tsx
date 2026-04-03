@@ -403,7 +403,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                         ? "bg-green-500"
                         : a.status === "error"
                         ? "bg-red-500"
-                        : "bg-gray-600"
+                        : "bg-blue-500"
                     }`}
                   />
                   <span className="truncate">
@@ -437,7 +437,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                 />
               </div>
 
-              {/* Health indicator */}
+              {/* Health check */}
               {selected && (
                 <div className="flex items-center gap-2 text-xs">
                   <span
@@ -446,7 +446,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                         ? "bg-green-500"
                         : selected.status === "error"
                         ? "bg-red-500"
-                        : "bg-gray-600"
+                        : "bg-blue-500"
                     }`}
                   />
                   <span className="text-gray-400">
@@ -454,8 +454,17 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                       ? "Healthy"
                       : selected.status === "error"
                       ? selected.status_message || "Error"
-                      : "Unknown"}
+                      : "Not checked"}
                   </span>
+                  <button
+                    onClick={async () => {
+                      const res = await apiFetch(`/v1/agents/${selected.agent_id}/health-check`, { method: "POST" });
+                      if (res.ok) onAgentsChanged();
+                    }}
+                    className="text-blue-400 hover:text-blue-300 ml-1"
+                  >
+                    Check now
+                  </button>
                 </div>
               )}
 

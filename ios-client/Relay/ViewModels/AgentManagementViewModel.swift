@@ -207,6 +207,18 @@ final class AgentManagementViewModel {
         try await apiClient.delete(path: "/v1/agents/\(agentId)")
     }
 
+    // MARK: - Health Check
+
+    func checkAgentHealth(_ agentId: String) async -> Agent? {
+        do {
+            let updated: Agent = try await apiClient.request("POST", path: "/v1/agents/\(agentId)/health-check")
+            return updated
+        } catch {
+            print("[AgentMgmt] Health check failed: \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Reorder Agents
 
     func reorderAgents(ids: [String]) async {

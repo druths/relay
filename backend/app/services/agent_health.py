@@ -33,6 +33,20 @@ def get_all_statuses() -> dict[uuid.UUID, AgentHealth]:
     return dict(_health)
 
 
+def set_healthy(agent_id: uuid.UUID) -> None:
+    """Mark an agent as healthy (e.g., after a successful LLM call)."""
+    _health[agent_id] = AgentHealth(
+        status="healthy", message="", checked_at=datetime.now(timezone.utc)
+    )
+
+
+def set_error(agent_id: uuid.UUID, message: str) -> None:
+    """Mark an agent as errored (e.g., after a failed LLM call)."""
+    _health[agent_id] = AgentHealth(
+        status="error", message=message, checked_at=datetime.now(timezone.utc)
+    )
+
+
 async def check_agent(agent: Agent) -> AgentHealth:
     """Test an agent's LLM provider with a minimal call."""
     provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)

@@ -202,6 +202,21 @@ async def get_tts_voices(
     return await fetch_voices_async(provider, effective_key or "", model_id=model_id)
 
 
+@router.post("/{agent_id}/health-check", response_model=AgentOut)
+async def check_agent_health(
+    agent_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger a health check for a specific agent."""
+    agent = await get_agent_by_id(db, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    from app.services.agent_health import check_agent
+    await check_agent(agent)
+    return _agent_out(agent)
+
+
 @router.get("/stt/status")
 async def get_stt_status(db: AsyncSession = Depends(get_db)):
     from app.services.stt import get_stt_provider_from_db

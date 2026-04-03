@@ -122,22 +122,18 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           connected={relay.connected}
         />
 
-        {relay.connected && (
-          <div className="flex flex-col gap-2">
-            {inSession && (
-              <button
-                onClick={() => relay.leaveSession()}
-                className="bg-amber-700 hover:bg-amber-600 rounded-lg px-4 py-2 text-sm
-                           font-medium transition-colors"
-              >
-                Back to Lobby
-              </button>
-            )}
-          </div>
+        {relay.connected && inSession && (
+          <button
+            onClick={() => relay.leaveSession()}
+            className="bg-amber-700 hover:bg-amber-600 rounded-lg px-4 py-2 text-sm
+                       font-medium transition-colors"
+          >
+            Back to Lobby
+          </button>
         )}
 
-        {/* Agent selector — only show in lobby */}
-        {relay.connected && !inSession && (
+        {/* Agent selector */}
+        {relay.connected && (
           <AgentSelector
             agents={relay.agents}
             activeSpeaker={relay.activeSpeaker}
@@ -146,8 +142,8 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           />
         )}
 
-        {/* Label filter bar — show in lobby when labels exist */}
-        {relay.connected && !inSession && allLabels.length > 0 && (
+        {/* Label filter bar */}
+        {relay.connected && allLabels.length > 0 && (
           <div className="space-y-1">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">
               Labels
@@ -170,8 +166,8 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        {/* Session list — show in lobby when sessions exist */}
-        {relay.connected && !inSession && filteredSessions.length > 0 && (
+        {/* Session list */}
+        {relay.connected && filteredSessions.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">
               {labelFilter ? `Sessions: ${labelFilter}` : "Sessions"}
@@ -198,8 +194,11 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                   ) : (
                     <button
                       onClick={() => { setMenuOpenId(null); relay.resumeSession(s.session_id); }}
-                      className="w-full text-left px-3 py-2 pr-8 rounded-lg text-sm
-                                 hover:bg-gray-800 text-gray-300 transition-colors"
+                      className={`w-full text-left px-3 py-2 pr-8 rounded-lg text-sm transition-colors ${
+                        relay.activeSessionId === s.session_id
+                          ? "bg-emerald-900/40 text-emerald-300 ring-1 ring-emerald-800"
+                          : "hover:bg-gray-800 text-gray-300"
+                      }`}
                     >
                       <div className="font-medium">{s.name || s.agent_name}</div>
                       <div className="text-xs text-gray-500">

@@ -241,9 +241,24 @@ struct AgentManagementView: View {
                 Circle()
                     .fill(statusColor(selected.status))
                     .frame(width: 8, height: 8)
-                Text(selected.status == .healthy ? "Healthy" : selected.status == .error ? (selected.statusMessage.isEmpty ? "Error" : selected.statusMessage) : "Unknown")
+                Text(selected.status == .healthy ? "Healthy" : selected.status == .error ? (selected.statusMessage.isEmpty ? "Error" : selected.statusMessage) : "Not checked")
                     .font(.system(size: 12))
                     .foregroundStyle(Color.relayTextTertiary)
+
+                Spacer()
+
+                Button {
+                    Task {
+                        if let updated = await vm.checkAgentHealth(selected.agentId) {
+                            // Refresh the agent list to reflect new status
+                            onChanged()
+                        }
+                    }
+                } label: {
+                    Text("Check now")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.relayPrimary)
+                }
             }
             .padding(.bottom, 12)
         }
@@ -778,7 +793,7 @@ struct AgentManagementView: View {
         switch status {
         case .healthy: Color.relaySuccess
         case .error: Color.relayError
-        case .unknown: Color.relayTextQuaternary
+        case .unknown: Color.relayPrimary
         }
     }
 }

@@ -5,6 +5,7 @@ struct RelayView: View {
     let authService: AuthService
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var relay: RelayViewModel
     @State private var showSettings = false
     @State private var showMenu = false
@@ -14,6 +15,7 @@ struct RelayView: View {
     @State private var showLabelEditor = false
     @State private var labelInputText = ""
     @State private var menuLabelFilter: String?
+    @State private var sidebarLabelFilter: String?
 
     init(authService: AuthService) {
         self.authService = authService
@@ -24,55 +26,17 @@ struct RelayView: View {
         relay.activeSessionId != nil ? relay.sessionMessages : relay.lobbyMessages
     }
 
+    private var isRegular: Bool {
+        horizontalSizeClass == .regular
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            header
-
-            // Agent cards — only when in lobby
-            if relay.connected && relay.activeSessionId == nil {
-                AgentSelector(
-                    agents: relay.agents,
-                    activeAgentName: relay.activeAgentName,
-                    onSelect: { agent in
-                        Task { await relay.sendMessage("connect me to \(agent.name)") }
-                    }
-                )
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(Color.relayBorder).frame(height: 1)
-                }
+        Group {
+            if isRegular {
+                iPadLayout
+            } else {
+                iPhoneLayout
             }
-
-            // Session labels bar — when in session with labels
-            if relay.activeSessionId != nil && !relay.activeSessionLabels.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(relay.activeSessionLabels, id: \.self) { label in
-                            Text(label)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.relayPrimary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.relayPrimary.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                }
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(Color.relayBorder).frame(height: 1)
-                }
-            }
-
-            ConversationLog(
-                messages: currentMessages,
-                activeSessionId: relay.activeSessionId,
-                activeAgentName: relay.activeAgentName,
-                connected: relay.connected
-            )
-            .frame(maxHeight: .infinity)
-
-            InputBar(relay: relay)
         }
         .background(Color.relaySurface)
         .fullScreenCover(isPresented: $showSettings) {
@@ -130,9 +94,41 @@ struct RelayView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - iPhone Layout (unchanged)
 
-    private var header: some View {
+    private var iPhoneLayout: some View {
+        VStack(spacing: 0) {
+            iPhoneHeader
+
+            // Agent cards — only when in lobby
+            if relay.connected && relay.activeSessionId == nil {
+                AgentSelector(
+                    agents: relay.agents,
+                    activeAgentName: relay.activeAgentName,
+                    onSelect: { agent in
+                        Task { await relay.sendMessage("connect me to \(agent.name)") }
+                    }
+                )
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Color.relayBorder).frame(height: 1)
+                }
+            }
+
+            sessionLabelsBar
+
+            ConversationLog(
+                messages: currentMessages,
+                activeSessionId: relay.activeSessionId,
+                activeAgentName: relay.activeAgentName,
+                connected: relay.connected
+            )
+            .frame(maxHeight: .infinity)
+
+            InputBar(relay: relay)
+        }
+    }
+
+    private var iPhoneHeader: some View {
         HStack(spacing: 12) {
             Button(action: { showMenu = true }) {
                 Image(systemName: "line.3.horizontal")
@@ -154,28 +150,7 @@ struct RelayView: View {
             Spacer()
 
             if relay.activeSessionId != nil {
-                // Session kebab menu
-                Menu {
-                    Button {
-                        renameSessionId = relay.activeSessionId
-                        renameText = relay.sessions.first(where: { $0.sessionId == relay.activeSessionId })?.name ?? ""
-                        showRenameAlert = true
-                    } label: {
-                        Label("Rename Session", systemImage: "pencil")
-                    }
-
-                    Button {
-                        showLabelEditor = true
-                    } label: {
-                        Label("Manage Labels", systemImage: "tag")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Color.relayTextTertiary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 8)
-                }
+                sessionKebabMenu
 
                 Button(action: { Task { await relay.leaveSession() } }) {
                     HStack(spacing: 4) {
@@ -200,7 +175,352 @@ struct RelayView: View {
         }
     }
 
-    // MARK: - Menu Sheet
+    // MARK: - iPad Layout
+
+    private var iPadLayout: some View {
+        HStack(spacing: 0) {
+            iPadSidebar
+                .frame(width: 280)
+
+            Rectangle().fill(Color.relayBorder).frame(width: 1)
+
+            iPadMainContent
+        }
+    }
+
+    private var iPadSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Sidebar header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Relay")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(Color.relayTextPrimary)
+                    Text(relay.activeAgentName.map { "Session with \($0)" } ?? "Lobby")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.relayTextQuaternary)
+                }
+
+                Spacer()
+
+                StatusOrb(
+                    activeSpeaker: relay.activeSpeaker,
+                    status: relay.status,
+                    connected: relay.connected,
+                    compact: true
+                )
+
+                Button(action: { showSettings = true }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.relayTextTertiary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Color.relayBorder).frame(height: 1)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Agents section
+                    if relay.connected {
+                        sidebarAgentsSection
+                    }
+
+                    // Label filter
+                    let allLabels = Array(Set(relay.sessions.flatMap(\.labels))).sorted()
+                    if !allLabels.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("LABELS")
+                                .font(.system(size: 10, weight: .semibold))
+                                .tracking(1.5)
+                                .foregroundStyle(Color.relayTextQuaternary)
+                                .padding(.horizontal, 16)
+
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(allLabels, id: \.self) { label in
+                                        Button {
+                                            sidebarLabelFilter = sidebarLabelFilter == label ? nil : label
+                                        } label: {
+                                            Text(label)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(sidebarLabelFilter == label ? .white : Color.relayPrimary)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(sidebarLabelFilter == label ? Color.relayPrimary : Color.relayPrimary.opacity(0.15))
+                                                .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                        }
+                    }
+
+                    // Sessions section
+                    if !relay.sessions.isEmpty {
+                        sidebarSessionsSection
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+
+            // Logout
+            Button(action: { authService.logout() }) {
+                Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.relayTextQuaternary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.relayBorder).frame(height: 1)
+            }
+        }
+        .background(Color.relaySurface.opacity(0.5))
+    }
+
+    private var sidebarAgentsSection: some View {
+        let visibleAgents = relay.agents
+            .filter { !$0.isOperator }
+            .sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("AGENTS")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.5)
+                .foregroundStyle(Color.relayTextQuaternary)
+                .padding(.horizontal, 16)
+
+            VStack(spacing: 2) {
+                ForEach(visibleAgents) { agent in
+                    let isActive = agent.name.lowercased() == (relay.activeAgentName ?? "").lowercased()
+                    Button {
+                        Task { await relay.sendMessage("connect me to \(agent.name)") }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(agent.status == .healthy ? Color.relaySuccess
+                                      : agent.status == .error ? Color.relayError
+                                      : Color.relayPrimary)
+                                .frame(width: 8, height: 8)
+
+                            Text(agent.name)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(isActive ? Color.relaySuccessLight : Color.relayTextSecondary)
+
+                            Spacer()
+
+                            Text(agent.llmProvider)
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.relayTextQuaternary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(isActive ? Color.relayAgentActive : Color.clear)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var sidebarSessionsSection: some View {
+        let filtered = sidebarLabelFilter.map { filter in
+            relay.sessions.filter { $0.labels.contains(filter) }
+        } ?? relay.sessions
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(sidebarLabelFilter.map { "SESSIONS: \($0.uppercased())" } ?? "SESSIONS")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.5)
+                .foregroundStyle(Color.relayTextQuaternary)
+                .padding(.horizontal, 16)
+
+            VStack(spacing: 2) {
+                ForEach(filtered.prefix(15)) { session in
+                    let isActive = relay.activeSessionId == session.sessionId
+                    Button {
+                        Task { await relay.resumeSession(session.sessionId) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(session.name ?? session.agentName)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(isActive ? Color.relaySuccessLight : Color.relayTextSecondary)
+                                .lineLimit(1)
+
+                            HStack(spacing: 4) {
+                                Text(session.agentName)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Color.relayTextQuaternary)
+                                Text("·")
+                                    .foregroundStyle(Color.relayTextQuaternary)
+                                Text(session.status)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Color.relayTextQuaternary)
+                            }
+
+                            if !session.labels.isEmpty {
+                                HStack(spacing: 3) {
+                                    ForEach(session.labels.prefix(3), id: \.self) { label in
+                                        Text(label)
+                                            .font(.system(size: 9, weight: .medium))
+                                            .foregroundStyle(Color.relayPrimary)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1)
+                                            .background(Color.relayPrimary.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+
+                            if let summary = session.summary {
+                                Text(summary)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color.relayTextTertiary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(isActive ? Color.relayAgentActive : Color.clear)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            renameSessionId = session.sessionId
+                            renameText = session.name ?? ""
+                            showRenameAlert = true
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive) {
+                            Task { await relay.deleteSession(session.sessionId) }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var iPadMainContent: some View {
+        VStack(spacing: 0) {
+            iPadHeader
+
+            sessionLabelsBar
+
+            ConversationLog(
+                messages: currentMessages,
+                activeSessionId: relay.activeSessionId,
+                activeAgentName: relay.activeAgentName,
+                connected: relay.connected
+            )
+            .frame(maxHeight: .infinity)
+
+            InputBar(relay: relay)
+        }
+    }
+
+    private var iPadHeader: some View {
+        HStack(spacing: 12) {
+            StatusOrb(
+                activeSpeaker: relay.activeSpeaker,
+                status: relay.status,
+                connected: relay.connected,
+                compact: true
+            )
+
+            Text(relay.activeAgentName ?? "Operator")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Color.relayTextPrimary)
+
+            Spacer()
+
+            if relay.activeSessionId != nil {
+                sessionKebabMenu
+
+                Button(action: { Task { await relay.leaveSession() } }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Lobby")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(Color.relayWarning)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.relayWarning.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.relaySurface.ignoresSafeArea(edges: .top))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.relayBorder).frame(height: 1)
+        }
+    }
+
+    // MARK: - Shared Components
+
+    private var sessionKebabMenu: some View {
+        Menu {
+            Button {
+                renameSessionId = relay.activeSessionId
+                renameText = relay.sessions.first(where: { $0.sessionId == relay.activeSessionId })?.name ?? ""
+                showRenameAlert = true
+            } label: {
+                Label("Rename Session", systemImage: "pencil")
+            }
+
+            Button {
+                showLabelEditor = true
+            } label: {
+                Label("Manage Labels", systemImage: "tag")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 16))
+                .foregroundStyle(Color.relayTextTertiary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 8)
+        }
+    }
+
+    @ViewBuilder
+    private var sessionLabelsBar: some View {
+        if relay.activeSessionId != nil && !relay.activeSessionLabels.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(relay.activeSessionLabels, id: \.self) { label in
+                        Text(label)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.relayPrimary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.relayPrimary.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            }
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Color.relayBorder).frame(height: 1)
+            }
+        }
+    }
+
+    // MARK: - Menu Sheet (iPhone only)
 
     private var menuSheet: some View {
         NavigationStack {

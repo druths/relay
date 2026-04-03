@@ -77,12 +77,9 @@ def _append_voice_note(messages: list[dict], voice_instructions: str) -> list[di
 
 async def generate_response(agent: Agent, text: str, context: list[dict], voice_instructions: str | None = None) -> str:
     """Generate a text response from an agent using its configured LLM provider."""
-    health = agent_health.get_status(agent.agent_id)
-    if health.status == "error":
-        return f"[{agent.name}] Agent is currently unavailable: {health.message}"
-
     provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
     if provider is None:
+        agent_health.set_error(agent.agent_id, f"{agent.llm_provider} API key not configured")
         return (
             f"[{agent.name}] LLM provider '{agent.llm_provider}' is not configured. "
             f"Please check the API key for this provider."
@@ -103,9 +100,12 @@ async def generate_response(agent: Agent, text: str, context: list[dict], voice_
         system_prompt = _build_system_prompt(agent, voice_instructions)
 
     try:
-        return await provider.generate(system_prompt, messages, agent.llm_model)
+        result = await provider.generate(system_prompt, messages, agent.llm_model)
+        agent_health.set_healthy(agent.agent_id)
+        return result
     except Exception as exc:
         logger.exception("LLM call failed for agent %s: %s", agent.name, exc)
+        agent_health.set_error(agent.agent_id, str(exc)[:120])
         return f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
 
 
@@ -114,13 +114,9 @@ async def generate_response_stream(
     voice_instructions: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream a text response from an agent using its configured LLM provider."""
-    health = agent_health.get_status(agent.agent_id)
-    if health.status == "error":
-        yield f"[{agent.name}] Agent is currently unavailable: {health.message}"
-        return
-
     provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
     if provider is None:
+        agent_health.set_error(agent.agent_id, f"{agent.llm_provider} API key not configured")
         yield (
             f"[{agent.name}] LLM provider '{agent.llm_provider}' is not configured. "
             f"Please check the API key for this provider."
@@ -143,6 +139,8 @@ async def generate_response_stream(
     try:
         async for chunk in provider.generate_stream(system_prompt, messages, agent.llm_model):
             yield chunk
+        agent_health.set_healthy(agent.agent_id)
     except Exception as exc:
         logger.exception("LLM stream failed for agent %s: %s", agent.name, exc)
+        agent_health.set_error(agent.agent_id, str(exc)[:120])
         yield f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."

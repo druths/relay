@@ -63,7 +63,7 @@ struct AgentSelector: View {
         switch status {
         case .healthy: Color.relaySuccess
         case .error: Color.relayError
-        case .unknown: Color.relayTextQuaternary
+        case .unknown: Color.relayPrimary
         }
     }
 }

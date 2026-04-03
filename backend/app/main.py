@@ -85,23 +85,6 @@ async def _seed_platform_settings() -> None:
 
 # ── App lifecycle ───────────────────────────────────────────────────────
 
-async def _periodic_health_check() -> None:
-    """Re-check agent health every 30s when any agent is unhealthy, 60s when all are healthy."""
-    while True:
-        statuses = agent_health.get_all_statuses()
-        all_healthy = all(h.status == "healthy" for h in statuses.values()) if statuses else True
-        await asyncio.sleep(60 if all_healthy else 30)
-        try:
-            async with async_session() as db:
-                result = await db.execute(select(Agent))
-                all_agents = list(result.scalars().all())
-            await agent_health.check_all(all_agents)
-        except asyncio.CancelledError:
-            return
-        except Exception as exc:
-            logging.getLogger(__name__).warning("Periodic health check failed: %s", exc)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create tables (new tables auto-created; new columns need ALTER)
@@ -119,17 +102,9 @@ async def lifespan(app: FastAPI):
     # Seed data
     await _seed_agents()
     await _seed_platform_settings()
-    # Initial health check
-    async with async_session() as db:
-        result = await db.execute(select(Agent))
-        all_agents = list(result.scalars().all())
-    await agent_health.check_all(all_agents)
-    # Start periodic health check
-    health_task = asyncio.create_task(_periodic_health_check())
     # Expose session factory on app state for the WebSocket handler
     app.state.db_session = async_session
     yield
-    health_task.cancel()
     await engine.dispose()
 
 

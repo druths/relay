@@ -42,7 +42,7 @@ export function AgentSelector({ agents, activeSpeaker, onSelect, disabled }: Age
                       ? "bg-emerald-400"
                       : agent.status === "error"
                       ? "bg-red-400"
-                      : "bg-gray-500"
+                      : "bg-blue-400"
                   }`}
                   title={
                     agent.status === "healthy"
