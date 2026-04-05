@@ -156,7 +156,7 @@ final class RelayViewModel {
     // MARK: - Actions
 
     func sendMessage(_ text: String) async {
-        ChimeGenerator.play()
+        if isLiveMode { ChimeGenerator.play() }
 
         let message = Message(role: .user, textContent: text)
         if activeSessionId != nil {
@@ -193,9 +193,11 @@ final class RelayViewModel {
                 print("[STT][local] transcribed: \"\(text)\"")
                 try? FileManager.default.removeItem(at: fileURL)
 
-                await MainActor.run {
-                    ChimeGenerator.play()
-                    HapticService.impact(.light)
+                if await self.isLiveMode {
+                    await MainActor.run {
+                        ChimeGenerator.play()
+                        HapticService.impact(.light)
+                    }
                 }
                 await sendMessage(text)
             } catch {
@@ -433,7 +435,7 @@ final class RelayViewModel {
             }
 
         case .handoff(let payload):
-            if payload.playEarcon {
+            if payload.playEarcon && isLiveMode {
                 HapticService.notification(.success)
             }
 
@@ -606,8 +608,10 @@ final class RelayViewModel {
 
         case .transcription(let payload):
             print("[STT] transcription received: \"\(payload.text)\"")
-            ChimeGenerator.play()
-            HapticService.impact(.light)
+            if isLiveMode {
+                ChimeGenerator.play()
+                HapticService.impact(.light)
+            }
             let msg = Message(role: .user, textContent: payload.text)
             if isInSession {
                 sessionMessages.append(msg)
