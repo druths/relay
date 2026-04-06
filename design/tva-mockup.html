@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relay — TVA Theme Mockup</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  :root {
+    /* TVA palette */
+    --tva-bg: #1a1410;
+    --tva-surface: #231e17;
+    --tva-elevated: #2e2820;
+    --tva-border: #4a3f30;
+    --tva-border-light: #5c4f3d;
+
+    --tva-text-primary: #f0e6d2;
+    --tva-text-secondary: #c9b896;
+    --tva-text-tertiary: #9a8a6e;
+    --tva-text-quaternary: #6b5d48;
+
+    --tva-amber: #d4920a;
+    --tva-amber-light: #e8a820;
+    --tva-amber-dim: rgba(212, 146, 10, 0.15);
+    --tva-green: #5a9a4a;
+    --tva-green-light: #7ab86a;
+    --tva-green-dim: rgba(90, 154, 74, 0.25);
+    --tva-red: #c45a3a;
+    --tva-red-dim: rgba(196, 90, 58, 0.15);
+    --tva-orange: #c47a2a;
+    --tva-orange-dim: rgba(196, 122, 42, 0.2);
+
+    /* CRT / retro accents */
+    --tva-scanline: rgba(0,0,0,0.03);
+    --tva-glow: rgba(212, 146, 10, 0.06);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    background: var(--tva-bg);
+    color: var(--tva-text-primary);
+    height: 100vh;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Subtle scanline overlay on the whole page */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      var(--tva-scanline) 0px,
+      var(--tva-scanline) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    z-index: 9999;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 260px;
+    border-right: 1px solid var(--tva-border);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 16px;
+    background: var(--tva-surface);
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .sidebar-header h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--tva-amber);
+  }
+
+  .sidebar-header .subtitle {
+    font-size: 10px;
+    color: var(--tva-text-quaternary);
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .gear-btn {
+    background: none;
+    border: 1px solid var(--tva-border);
+    color: var(--tva-text-tertiary);
+    width: 30px;
+    height: 30px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Status orb */
+  .status-orb {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--tva-elevated);
+    border: 1px solid var(--tva-border);
+    border-radius: 6px;
+  }
+
+  .orb {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--tva-amber);
+    box-shadow: 0 0 8px var(--tva-amber), 0 0 16px rgba(212,146,10,0.3);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  .status-text {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--tva-text-tertiary);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* Section headers */
+  .section-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--tva-text-quaternary);
+    padding: 0 4px;
+  }
+
+  /* Agent list */
+  .agent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .agent-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+    font-size: 13px;
+    color: var(--tva-text-secondary);
+  }
+
+  .agent-item:hover {
+    background: var(--tva-elevated);
+    border-color: var(--tva-border);
+  }
+
+  .agent-item.active {
+    background: var(--tva-green-dim);
+    border-color: var(--tva-green);
+    color: var(--tva-green-light);
+  }
+
+  .agent-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--tva-amber);
+    flex-shrink: 0;
+  }
+
+  .agent-dot.active { background: var(--tva-green); }
+
+  .agent-provider {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--tva-text-quaternary);
+    margin-left: auto;
+  }
+
+  /* Label chips */
+  .label-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 0 4px;
+  }
+
+  .label-chip {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: var(--tva-orange-dim);
+    color: var(--tva-orange);
+    border: 1px solid rgba(196, 122, 42, 0.3);
+    cursor: pointer;
+    letter-spacing: 0.5px;
+  }
+
+  .label-chip.active {
+    background: var(--tva-orange);
+    color: var(--tva-bg);
+  }
+
+  /* Session list */
+  .session-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .session-item {
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+
+  .session-item:hover {
+    background: var(--tva-elevated);
+    border-color: var(--tva-border);
+  }
+
+  .session-item.active {
+    background: var(--tva-green-dim);
+    border-color: var(--tva-green);
+  }
+
+  .session-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--tva-text-secondary);
+    margin-bottom: 2px;
+  }
+
+  .session-item.active .session-name {
+    color: var(--tva-green-light);
+  }
+
+  .session-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--tva-text-quaternary);
+    letter-spacing: 0.3px;
+  }
+
+  .session-labels {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .session-label-chip {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 2px;
+    background: var(--tva-orange-dim);
+    color: var(--tva-text-quaternary);
+  }
+
+  .session-summary {
+    font-size: 11px;
+    color: var(--tva-text-quaternary);
+    margin-top: 3px;
+    line-height: 1.3;
+  }
+
+  .logout-btn {
+    margin-top: auto;
+    font-size: 11px;
+    color: var(--tva-text-quaternary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    padding: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Main area ── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* Header bar */
+  .main-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--tva-border);
+    background: var(--tva-surface);
+  }
+
+  .main-header .agent-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--tva-text-primary);
+  }
+
+  .main-header .session-name-display {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--tva-text-tertiary);
+    padding: 3px 8px;
+    background: var(--tva-elevated);
+    border: 1px solid var(--tva-border);
+    border-radius: 3px;
+  }
+
+  .spacer { flex: 1; }
+
+  .lobby-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--tva-amber);
+    background: var(--tva-amber-dim);
+    border: 1px solid rgba(212,146,10,0.3);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+
+  .kebab-btn {
+    background: none;
+    border: none;
+    color: var(--tva-text-tertiary);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px 6px;
+    letter-spacing: 2px;
+  }
+
+  /* Labels bar */
+  .labels-bar {
+    display: flex;
+    gap: 6px;
+    padding: 6px 20px;
+    border-bottom: 1px solid var(--tva-border);
+  }
+
+  .labels-bar .label-chip {
+    font-size: 10px;
+  }
+
+  /* Conversation area */
+  .conversation {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background:
+      linear-gradient(180deg, var(--tva-glow) 0%, transparent 30%),
+      var(--tva-bg);
+  }
+
+  .message {
+    max-width: 75%;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 14px;
+    line-height: 1.5;
+    border: 1px solid;
+  }
+
+  .message.operator {
+    align-self: flex-start;
+    background: rgba(45, 55, 100, 0.25);
+    border-color: rgba(60, 70, 120, 0.4);
+    color: var(--tva-text-secondary);
+  }
+
+  .message.agent {
+    align-self: flex-start;
+    background: rgba(50, 80, 45, 0.25);
+    border-color: rgba(60, 100, 50, 0.4);
+    color: var(--tva-text-secondary);
+  }
+
+  .message.user {
+    align-self: flex-end;
+    background: var(--tva-elevated);
+    border-color: var(--tva-border);
+    color: var(--tva-text-primary);
+  }
+
+  .message .speaker {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .message.operator .speaker { color: rgba(120, 140, 220, 0.8); }
+  .message.agent .speaker { color: var(--tva-green); }
+  .message.user .speaker { color: var(--tva-amber); }
+
+  /* Input area */
+  .input-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--tva-border);
+    background: var(--tva-surface);
+  }
+
+  .input-bar input {
+    flex: 1;
+    background: var(--tva-elevated);
+    border: 1px solid var(--tva-border);
+    border-radius: 4px;
+    padding: 10px 14px;
+    color: var(--tva-text-primary);
+    font-size: 14px;
+    font-family: 'IBM Plex Sans', sans-serif;
+    outline: none;
+  }
+
+  .input-bar input::placeholder {
+    color: var(--tva-text-quaternary);
+  }
+
+  .input-bar input:focus {
+    border-color: var(--tva-amber);
+    box-shadow: 0 0 0 1px var(--tva-amber-dim);
+  }
+
+  .send-btn {
+    background: var(--tva-amber);
+    color: var(--tva-bg);
+    border: none;
+    border-radius: 4px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .live-btn {
+    background: none;
+    border: 1px solid var(--tva-border);
+    color: var(--tva-text-tertiary);
+    border-radius: 4px;
+    padding: 10px;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── Comparison layout ── */
+  .comparison {
+    display: flex;
+    width: 100%;
+    height: 100vh;
+  }
+
+  .comparison .panel {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .comparison .panel-label {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 3px;
+    z-index: 100;
+    pointer-events: none;
+  }
+
+  .comparison .panel:first-child .panel-label {
+    background: rgba(37, 99, 235, 0.3);
+    color: #93c5fd;
+  }
+
+  .comparison .panel:last-child .panel-label {
+    background: var(--tva-amber-dim);
+    color: var(--tva-amber);
+    border: 1px solid rgba(212,146,10,0.3);
+  }
+
+  .comparison .divider {
+    width: 2px;
+    background: #333;
+    flex-shrink: 0;
+  }
+
+  /* Current theme overrides for left panel */
+  .current-theme {
+    --bg: #030712;
+    --surface: #111827;
+    --elevated: #1f2937;
+    --border: #374151;
+    --text-primary: #f9fafb;
+    --text-secondary: #e5e7eb;
+    --text-tertiary: #9ca3af;
+    --text-quaternary: #6b7280;
+    --blue: #2563eb;
+    --green: #34d399;
+    --green-dim: rgba(6, 78, 59, 0.4);
+  }
+
+  .current-theme .sidebar {
+    background: var(--surface);
+    border-color: var(--border);
+  }
+
+  .current-theme .sidebar-header h1 {
+    color: var(--text-primary);
+    font-family: 'IBM Plex Sans', sans-serif;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 18px;
+  }
+
+  .current-theme .sidebar-header .subtitle {
+    color: var(--text-quaternary);
+    font-family: 'IBM Plex Sans', sans-serif;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .current-theme .gear-btn { border-color: transparent; }
+
+  .current-theme .status-orb {
+    background: var(--elevated);
+    border-color: var(--border);
+  }
+
+  .current-theme .orb {
+    background: var(--blue);
+    box-shadow: 0 0 8px var(--blue);
+  }
+
+  .current-theme .status-text {
+    color: var(--text-tertiary);
+    font-family: 'IBM Plex Sans', sans-serif;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .current-theme .section-label {
+    color: var(--text-quaternary);
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+
+  .current-theme .agent-item {
+    color: var(--text-secondary);
+  }
+
+  .current-theme .agent-item:hover {
+    background: var(--elevated);
+    border-color: transparent;
+  }
+
+  .current-theme .agent-item.active {
+    background: var(--green-dim);
+    border-color: transparent;
+    color: var(--green);
+  }
+
+  .current-theme .agent-dot { background: var(--blue); }
+  .current-theme .agent-dot.active { background: var(--green); }
+
+  .current-theme .agent-provider {
+    color: var(--text-quaternary);
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+
+  .current-theme .label-chip {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: rgba(37, 99, 235, 0.15);
+    color: #3b82f6;
+    border-color: transparent;
+    border-radius: 10px;
+  }
+
+  .current-theme .session-item:hover {
+    background: var(--elevated);
+    border-color: transparent;
+  }
+
+  .current-theme .session-item.active {
+    background: var(--green-dim);
+    border-color: transparent;
+  }
+
+  .current-theme .session-name { color: var(--text-secondary); }
+  .current-theme .session-item.active .session-name { color: var(--green); }
+  .current-theme .session-meta { color: var(--text-quaternary); font-family: 'IBM Plex Sans', sans-serif; }
+  .current-theme .session-label-chip {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: var(--elevated);
+    border-radius: 10px;
+  }
+  .current-theme .session-summary { color: var(--text-quaternary); }
+  .current-theme .logout-btn { color: var(--text-quaternary); font-family: 'IBM Plex Sans', sans-serif; }
+
+  .current-theme .main-header { background: var(--surface); border-color: var(--border); }
+  .current-theme .main-header .agent-name { color: var(--text-primary); }
+  .current-theme .main-header .session-name-display {
+    background: var(--elevated); border-color: var(--border);
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+  .current-theme .lobby-btn {
+    color: #ca8a04;
+    background: rgba(202,138,4,0.15);
+    border-color: rgba(202,138,4,0.3);
+  }
+  .current-theme .labels-bar { border-color: var(--border); }
+  .current-theme .conversation { background: var(--bg); }
+  .current-theme .message { border-radius: 12px; }
+  .current-theme .message.operator { background: rgba(30,58,138,0.4); border-color: rgba(30,58,138,0.5); }
+  .current-theme .message.agent { background: rgba(6,78,59,0.4); border-color: rgba(6,78,59,0.5); }
+  .current-theme .message.user { background: var(--elevated); border-color: var(--border); }
+  .current-theme .message .speaker { font-family: 'IBM Plex Sans', sans-serif; }
+  .current-theme .message.operator .speaker { color: #93c5fd; }
+  .current-theme .message.agent .speaker { color: var(--green); }
+  .current-theme .message.user .speaker { color: var(--text-tertiary); }
+  .current-theme .input-bar { background: var(--surface); border-color: var(--border); }
+  .current-theme .input-bar input { background: var(--elevated); border-color: var(--border); color: var(--text-primary); }
+  .current-theme .input-bar input:focus { border-color: var(--blue); }
+  .current-theme .send-btn { background: var(--blue); border-radius: 8px; font-family: 'IBM Plex Sans', sans-serif; letter-spacing: 0; text-transform: none; }
+  .current-theme .live-btn { border-color: var(--border); color: var(--text-tertiary); border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<div class="comparison">
+  <!-- LEFT: Current theme -->
+  <div class="panel current-theme">
+    <div class="panel-label">Current</div>
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div>
+          <h1>Relay</h1>
+          <div class="subtitle">Session with Trinity</div>
+        </div>
+        <button class="gear-btn">&#9881;</button>
+      </div>
+
+      <div class="status-orb">
+        <div class="orb"></div>
+        <span class="status-text">Connected &middot; Ready</span>
+      </div>
+
+      <button class="lobby-btn">&larr; Back to Lobby</button>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="section-label">Agents</div>
+        <div class="agent-list">
+          <div class="agent-item active">
+            <div class="agent-dot active"></div>
+            Trinity
+            <span class="agent-provider">openclaw</span>
+          </div>
+          <div class="agent-item">
+            <div class="agent-dot"></div>
+            Claude
+            <span class="agent-provider">anthropic</span>
+          </div>
+          <div class="agent-item">
+            <div class="agent-dot"></div>
+            Gemini
+            <span class="agent-provider">gemini</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="section-label">Labels</div>
+        <div class="label-row">
+          <span class="label-chip">builds</span>
+          <span class="label-chip">frontend</span>
+          <span class="label-chip">research</span>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="section-label">Sessions</div>
+        <div class="session-list">
+          <div class="session-item active">
+            <div class="session-name">API Rate Limiting</div>
+            <div class="session-meta">Trinity &middot; active</div>
+            <div class="session-labels">
+              <span class="session-label-chip">builds</span>
+            </div>
+          </div>
+          <div class="session-item">
+            <div class="session-name">Logo Redesign Ideas</div>
+            <div class="session-meta">Claude &middot; paused</div>
+            <div class="session-summary">Discussed 3 concepts, settled on the geometric approach...</div>
+          </div>
+          <div class="session-item">
+            <div class="session-name">Deployment Pipeline</div>
+            <div class="session-meta">Trinity &middot; paused</div>
+            <div class="session-labels">
+              <span class="session-label-chip">builds</span>
+              <span class="session-label-chip">frontend</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="logout-btn">Logout</button>
+    </div>
+
+    <div class="main">
+      <div class="main-header">
+        <div class="orb" style="width:8px;height:8px"></div>
+        <span class="agent-name">Trinity</span>
+        <span class="session-name-display">API Rate Limiting</span>
+        <span class="spacer"></span>
+        <button class="kebab-btn">&vellip;</button>
+        <button class="lobby-btn">&larr; Lobby</button>
+      </div>
+      <div class="labels-bar">
+        <span class="label-chip">builds</span>
+      </div>
+      <div class="conversation">
+        <div class="message agent">
+          <div class="speaker">Trinity</div>
+          Hi, I'm Trinity. How can I help you?
+        </div>
+        <div class="message user">
+          <div class="speaker">You</div>
+          I need to implement rate limiting on our API endpoints. What approach do you recommend?
+        </div>
+        <div class="message agent">
+          <div class="speaker">Trinity</div>
+          For your FastAPI backend, I'd recommend a token bucket algorithm using Redis. You can use the <code>slowapi</code> library which wraps <code>limits</code> and integrates directly with FastAPI middleware. This gives you per-user and per-endpoint rate limiting with minimal code changes.
+        </div>
+        <div class="message user">
+          <div class="speaker">You</div>
+          We already have Redis running. How would the middleware look?
+        </div>
+      </div>
+      <div class="input-bar">
+        <button class="live-btn">&#127908;</button>
+        <input type="text" placeholder="Message Trinity..." />
+        <button class="send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- RIGHT: TVA theme -->
+  <div class="panel">
+    <div class="panel-label">TVA Theme</div>
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div>
+          <h1>Relay</h1>
+          <div class="subtitle">Session with Trinity</div>
+        </div>
+        <button class="gear-btn">&#9881;</button>
+      </div>
+
+      <div class="status-orb">
+        <div class="orb"></div>
+        <span class="status-text">Connected &middot; Ready</span>
+      </div>
+
+      <button class="lobby-btn">&larr; Back to Lobby</button>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="section-label">Agents</div>
+        <div class="agent-list">
+          <div class="agent-item active">
+            <div class="agent-dot active"></div>
+            Trinity
+            <span class="agent-provider">openclaw</span>
+          </div>
+          <div class="agent-item">
+            <div class="agent-dot"></div>
+            Claude
+            <span class="agent-provider">anthropic</span>
+          </div>
+          <div class="agent-item">
+            <div class="agent-dot"></div>
+            Gemini
+            <span class="agent-provider">gemini</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="section-label">Labels</div>
+        <div class="label-row">
+          <span class="label-chip">builds</span>
+          <span class="label-chip">frontend</span>
+          <span class="label-chip">research</span>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="section-label">Sessions</div>
+        <div class="session-list">
+          <div class="session-item active">
+            <div class="session-name">API Rate Limiting</div>
+            <div class="session-meta">Trinity &middot; active</div>
+            <div class="session-labels">
+              <span class="session-label-chip">builds</span>
+            </div>
+          </div>
+          <div class="session-item">
+            <div class="session-name">Logo Redesign Ideas</div>
+            <div class="session-meta">Claude &middot; paused</div>
+            <div class="session-summary">Discussed 3 concepts, settled on the geometric approach...</div>
+          </div>
+          <div class="session-item">
+            <div class="session-name">Deployment Pipeline</div>
+            <div class="session-meta">Trinity &middot; paused</div>
+            <div class="session-labels">
+              <span class="session-label-chip">builds</span>
+              <span class="session-label-chip">frontend</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="logout-btn">&#9654; Logout</button>
+    </div>
+
+    <div class="main">
+      <div class="main-header">
+        <div class="orb" style="width:8px;height:8px"></div>
+        <span class="agent-name">Trinity</span>
+        <span class="session-name-display">API Rate Limiting</span>
+        <span class="spacer"></span>
+        <button class="kebab-btn">&vellip;</button>
+        <button class="lobby-btn">&larr; Lobby</button>
+      </div>
+      <div class="labels-bar">
+        <span class="label-chip">builds</span>
+      </div>
+      <div class="conversation">
+        <div class="message agent">
+          <div class="speaker">Trinity</div>
+          Hi, I'm Trinity. How can I help you?
+        </div>
+        <div class="message user">
+          <div class="speaker">You</div>
+          I need to implement rate limiting on our API endpoints. What approach do you recommend?
+        </div>
+        <div class="message agent">
+          <div class="speaker">Trinity</div>
+          For your FastAPI backend, I'd recommend a token bucket algorithm using Redis. You can use the <code>slowapi</code> library which wraps <code>limits</code> and integrates directly with FastAPI middleware. This gives you per-user and per-endpoint rate limiting with minimal code changes.
+        </div>
+        <div class="message user">
+          <div class="speaker">You</div>
+          We already have Redis running. How would the middleware look?
+        </div>
+      </div>
+      <div class="input-bar">
+        <button class="live-btn">&#127908;</button>
+        <input type="text" placeholder="Message Trinity..." />
+        <button class="send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

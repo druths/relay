@@ -8,6 +8,7 @@ import {
   STT_PROVIDER_OPTIONS,
 } from "../providerSchemas";
 import { apiFetch } from "../api";
+import { type ThemeName, getStoredTheme, applyTheme } from "../theme";
 
 interface Voice {
   id: string;
@@ -21,10 +22,11 @@ interface Props {
   onAgentsChanged: () => void;
 }
 
-type Tab = "agents" | "tts" | "stt";
+type Tab = "agents" | "tts" | "stt" | "appearance";
 
 export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
   const [tab, setTab] = useState<Tab>("agents");
+  const [currentTheme, setCurrentTheme] = useState<ThemeName>(getStoredTheme());
 
   // ── Agent state ──
   const sorted = [...agents].sort((a, b) => {
@@ -328,8 +330,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
   const ttsSchema = TTS_PROVIDERS[form.tts_provider ?? "none"];
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-950/90 flex items-center justify-center">
-      <div className="bg-gray-900 rounded-xl border border-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 bg-gray-950/90 flex items-start justify-center pt-12">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col modal-panel">
         {/* Header with tabs */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
           <div className="flex items-center gap-6">
@@ -365,6 +367,16 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
               >
                 Speech to Text
               </button>
+              <button
+                onClick={() => setTab("appearance")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  tab === "appearance"
+                    ? "bg-gray-800 text-white"
+                    : "text-gray-400 hover:text-gray-300"
+                }`}
+              >
+                Appearance
+              </button>
             </div>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xl">
@@ -398,7 +410,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                     </span>
                   )}
                   <span
-                    className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    className={`w-2 h-2 rounded-full flex-shrink-0 status-dot ${
                       a.status === "healthy"
                         ? "bg-green-500"
                         : a.status === "error"
@@ -441,7 +453,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
               {selected && (
                 <div className="flex items-center gap-2 text-xs">
                   <span
-                    className={`w-2 h-2 rounded-full ${
+                    className={`w-2 h-2 rounded-full status-dot ${
                       selected.status === "healthy"
                         ? "bg-green-500"
                         : selected.status === "error"
@@ -658,6 +670,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                   disabled={saving}
                   className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg px-4 py-2
                              text-sm font-medium transition-colors"
+                  style={currentTheme !== "default" ? { backgroundColor: "var(--primary)", color: "var(--bg)" } : undefined}
                 >
                   {saving ? "Saving…" : isNew ? "Create Agent" : "Save Changes"}
                 </button>
@@ -764,6 +777,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
               disabled={savingPlatform}
               className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg px-4 py-2
                          text-sm font-medium transition-colors"
+              style={currentTheme !== "default" ? { backgroundColor: "var(--primary)", color: "var(--bg)" } : undefined}
             >
               {savingPlatform ? "Saving…" : "Save Settings"}
             </button>
@@ -772,7 +786,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
 
         {/* ════════ Speech to Text Tab ════════ */}
         {tab === "stt" && (
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-2xl">
+          <div className="flex-1 flex flex-col min-h-0 max-w-2xl">
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
             {/* STT Provider */}
             <fieldset className="space-y-3">
               <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -906,15 +921,51 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
               </div>
               )}
             </fieldset>
-
+          </div>
+          <div className="p-6 pt-2 border-t border-gray-800">
             <button
               onClick={handleSavePlatform}
               disabled={savingPlatform}
               className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg px-4 py-2
                          text-sm font-medium transition-colors"
+              style={currentTheme !== "default" ? { backgroundColor: "var(--primary)", color: "var(--bg)" } : undefined}
             >
               {savingPlatform ? "Saving…" : "Save Settings"}
             </button>
+          </div>
+          </div>
+        )}
+        {/* ════════ Appearance Tab ════════ */}
+        {tab === "appearance" && (
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Theme</h3>
+              <div className="flex gap-3">
+                {(["default", "tva", "tva_mono"] as ThemeName[]).map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => {
+                      applyTheme(name);
+                      setCurrentTheme(name);
+                    }}
+                    className={`px-6 py-3 rounded-lg text-sm font-medium transition-colors border ${
+                      currentTheme === name
+                        ? "bg-gray-700 text-white border-gray-500"
+                        : "bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800"
+                    }`}
+                  >
+                    {{ default: "Default", tva: "TVA", tva_mono: "TVA Mono" }[name]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-600 mt-3">
+                {currentTheme === "tva_mono"
+                  ? "FOR ALL TIME. ALWAYS."
+                  : currentTheme === "tva"
+                  ? "FOR ALL TIME. ALWAYS."
+                  : "The standard Relay experience."}
+              </p>
+            </div>
           </div>
         )}
       </div>

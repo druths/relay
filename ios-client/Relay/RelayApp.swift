@@ -3,14 +3,19 @@ import AVFoundation
 
 @main
 struct RelayApp: App {
+    @State private var themeManager = ThemeManager()
+
     init() {
         configureAudioSession()
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(themeManager: themeManager)
+                .environment(\.relayTheme, themeManager.current)
+                .environment(\.relayChatFontSize, themeManager.chatFontSize)
                 .preferredColorScheme(.dark)
+                .overlay { CRTOverlay() }
                 .onOpenURL { url in
                     switch url.host() {
                     case "toggle-mute":

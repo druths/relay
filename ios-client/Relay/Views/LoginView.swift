@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct LoginView: View {
+    @Environment(\.relayTheme) private var theme
     @State private var vm: LoginViewModel
 
     init(authService: AuthService) {
@@ -9,14 +10,14 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.relayBackground.ignoresSafeArea()
+            theme.background.ignoresSafeArea()
 
             VStack(spacing: 24) {
                 Spacer()
 
                 Text("Relay")
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(Color.relayTextPrimary)
+                    .font(theme.headingFont(size: 32, weight: .bold))
+                    .foregroundStyle(theme.textPrimary)
 
                 VStack(spacing: 12) {
                     TextField("Server URL", text: $vm.serverURL)
@@ -38,8 +39,8 @@ struct LoginView: View {
 
                     if let error = vm.error {
                         Text(error)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.relayError)
+                            .font(theme.bodyFont(size: 13))
+                            .foregroundStyle(theme.error)
                     }
 
                     Button(action: { Task { await vm.login() } }) {
@@ -55,7 +56,7 @@ struct LoginView: View {
                         .frame(height: 44)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.relayPrimary)
+                    .tint(theme.primary)
                     .disabled(vm.isLoading)
                 }
                 .padding(.horizontal, 32)
@@ -73,8 +74,8 @@ struct LoginView: View {
     private var savedAccountsList: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Saved accounts")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.relayTextTertiary)
+                .font(theme.bodyFont(size: 11, weight: .medium))
+                .foregroundStyle(theme.textTertiary)
                 .padding(.horizontal, 32)
 
             ForEach(vm.accounts) { account in
@@ -83,16 +84,16 @@ struct LoginView: View {
                         HStack(spacing: 8) {
                             if vm.selectedAccountId == account.id {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(Color.relayPrimary)
+                                    .font(theme.bodyFont(size: 14))
+                                    .foregroundStyle(theme.primary)
                             } else {
                                 Image(systemName: "person.circle")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(Color.relayTextTertiary)
+                                    .font(theme.bodyFont(size: 14))
+                                    .foregroundStyle(theme.textTertiary)
                             }
                             Text(account.displayLabel)
-                                .font(.system(size: 13))
-                                .foregroundStyle(Color.relayTextSecondary)
+                                .font(theme.bodyFont(size: 13))
+                                .foregroundStyle(theme.textSecondary)
                                 .lineLimit(1)
                             Spacer()
                         }
@@ -101,8 +102,8 @@ struct LoginView: View {
 
                     Button(action: { vm.deleteAccount(account) }) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(Color.relayTextTertiary)
+                            .font(theme.bodyFont(size: 16))
+                            .foregroundStyle(theme.textTertiary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -110,10 +111,10 @@ struct LoginView: View {
                 .padding(.vertical, 6)
                 .background(
                     vm.selectedAccountId == account.id
-                        ? Color.relayElevated.opacity(0.6)
+                        ? theme.elevated.opacity(0.6)
                         : Color.clear
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                 .padding(.horizontal, 28)
             }
         }
@@ -121,13 +122,14 @@ struct LoginView: View {
 }
 
 struct RelayTextFieldStyle: TextFieldStyle {
+    @Environment(\.relayTheme) private var theme
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.relayElevated)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .foregroundStyle(Color.relayTextSecondary)
-            .font(.system(size: 14))
+            .background(theme.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+            .foregroundStyle(theme.textSecondary)
+            .font(theme.bodyFont(size: 14))
     }
 }

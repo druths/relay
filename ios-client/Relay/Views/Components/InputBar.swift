@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InputBar: View {
     @Bindable var relay: RelayViewModel
+    @Environment(\.relayTheme) private var theme
     @State private var text = ""
     @State private var showInputPicker = false
     @State private var showOutputPicker = false
@@ -25,12 +26,12 @@ struct InputBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
-            Color.relaySurface
+            theme.surface
                 .ignoresSafeArea(edges: .bottom)
                 .overlay(alignment: .top) {
                     Rectangle()
-                        .fill(Color.relayBorder)
-                        .frame(height: 1)
+                        .fill(theme.border)
+                        .frame(height: theme.borderWidth)
                 }
         )
         .animation(.easeInOut(duration: 0.25), value: relay.isLiveMode)
@@ -58,18 +59,18 @@ struct InputBar: View {
     private var chatContent: some View {
         goLiveButton
 
-        TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(Color.relayTextQuaternary))
+        TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(theme.textQuaternary))
             .textFieldStyle(RelayInputFieldStyle(isDisabled: disabled))
             .disabled(disabled)
             .onSubmit { handleSend() }
 
         Button(action: handleSend) {
-            Image(systemName: "paperplane.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(sendButtonEnabled ? Color.relayPrimary : Color.relayBorder)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+            ThemedIcon(systemName: "paperplane.fill")
+                .font(theme.bodyFont(size: 18, weight: .semibold))
+                .foregroundStyle(theme.sendButtonInverted ? theme.background : .white)
+                .frame(width: 44, height: 44)
+                .background(sendButtonEnabled ? theme.primary : theme.border)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
         .disabled(!sendButtonEnabled)
     }
@@ -84,12 +85,12 @@ struct InputBar: View {
         muteButton
 
         Button(action: { relay.exitLiveMode() }) {
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.relayError)
-                .frame(width: 36, height: 36)
-                .background(Color.relayError.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+            ThemedIcon(systemName: "xmark.circle.fill")
+                .font(theme.bodyFont(size: 18, weight: .semibold))
+                .foregroundStyle(theme.error)
+                .frame(width: 44, height: 44)
+                .background(theme.error.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
     }
 
@@ -97,12 +98,18 @@ struct InputBar: View {
 
     private var goLiveButton: some View {
         Button(action: handleGoLive) {
-            Image(systemName: "waveform")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.relaySuccess)
-                .frame(width: 36, height: 36)
-                .background(Color.relaySuccess.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+            ThemedIcon(systemName: "waveform")
+                .font(theme.bodyFont(size: 18, weight: .bold))
+                .foregroundStyle(theme.liveButtonInverted ? theme.primary : theme.success)
+                .frame(width: 44, height: 44)
+                .background(theme.liveButtonInverted ? theme.background : theme.success.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                .overlay(
+                    theme.liveButtonInverted
+                        ? RoundedRectangle(cornerRadius: theme.cornerRadius)
+                            .stroke(theme.primary.opacity(0.5), lineWidth: theme.borderWidth)
+                        : nil
+                )
         }
         .disabled(disabled)
         .simultaneousGesture(
@@ -116,12 +123,12 @@ struct InputBar: View {
 
     private var muteButton: some View {
         Button(action: { relay.toggleMute() }) {
-            Image(systemName: relay.audio.isMuted ? "mic.slash.fill" : "mic.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(relay.audio.isMuted ? Color.relayError : Color.relayTextTertiary)
-                .frame(width: 36, height: 36)
-                .background(relay.audio.isMuted ? Color.relayMutedButton : Color.relayElevated)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+            ThemedIcon(systemName: relay.audio.isMuted ? "mic.slash.fill" : "mic.fill")
+                .font(theme.bodyFont(size: 18, weight: .semibold))
+                .foregroundStyle(relay.audio.isMuted ? theme.error : theme.textSecondary)
+                .frame(width: 44, height: 44)
+                .background(relay.audio.isMuted ? theme.mutedButton : theme.elevated)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.4)
@@ -160,16 +167,18 @@ struct InputBar: View {
 // MARK: - Input text field style
 
 struct RelayInputFieldStyle: TextFieldStyle {
+    @Environment(\.relayTheme) private var theme
+    @Environment(\.relayChatFontSize) private var chatFontSize
     let isDisabled: Bool
 
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.relayElevated)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .foregroundStyle(Color.relayTextSecondary)
-            .font(.system(size: 14))
+            .background(theme.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+            .foregroundStyle(theme.textSecondary)
+            .font(theme.bodyFont(size: chatFontSize))
             .opacity(isDisabled ? 0.5 : 1)
     }
 }
@@ -181,6 +190,7 @@ struct OutputPickerSheet: View {
     let onSelect: (RelayViewModel.OutputMode) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.relayTheme) private var theme
 
     var body: some View {
         NavigationStack {
@@ -191,7 +201,7 @@ struct OutputPickerSheet: View {
                         Spacer()
                         if currentMode == .speaker {
                             Image(systemName: "checkmark")
-                                .foregroundStyle(Color.relaySuccess)
+                                .foregroundStyle(theme.success)
                         }
                     }
                 }
@@ -202,7 +212,7 @@ struct OutputPickerSheet: View {
                         Spacer()
                         if currentMode == .earpiece {
                             Image(systemName: "checkmark")
-                                .foregroundStyle(Color.relaySuccess)
+                                .foregroundStyle(theme.success)
                         }
                     }
                 }

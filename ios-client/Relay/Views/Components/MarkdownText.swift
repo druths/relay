@@ -8,6 +8,13 @@ import UIKit
 struct MarkdownText: View {
     let text: String
 
+    @Environment(\.relayTheme) private var theme
+    @Environment(\.relayChatFontSize) private var chatFontSize
+
+    private var styling: MarkdownStyling {
+        MarkdownStyling(theme: theme, chatFontSize: chatFontSize)
+    }
+
     var body: some View {
         let blocks = MarkdownParser.parseBlocks(text)
         VStack(alignment: .leading, spacing: 4) {
@@ -21,17 +28,71 @@ struct MarkdownText: View {
     private func blockView(for block: MarkdownParser.Block) -> some View {
         switch block {
         case .paragraph(let t):
-            SelectableText(source: t, style: .paragraph)
+            SelectableText(source: t, style: .paragraph, styling: styling)
         case .header(let level, let t):
-            SelectableText(source: t, style: .header(level))
+            SelectableText(source: t, style: .header(level), styling: styling)
         case .codeBlock(let code):
-            SelectableText(source: code, style: .code)
+            SelectableText(source: code, style: .code, styling: styling)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(uiColor: MarkdownParser.codeBg))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .background(Color(uiColor: styling.codeBg))
+                .clipShape(RoundedRectangle(cornerRadius: max(theme.cornerRadius * 0.6, 4)))
         }
+    }
+}
+
+// MARK: - Theme-derived styling for UIKit rendering
+
+struct MarkdownStyling: Equatable {
+    let textSecondary: UIColor
+    let textPrimary: UIColor
+    let codeBg: UIColor
+    let inlineCodeBg: UIColor
+
+    let bodyFont: UIFont
+    let boldFont: UIFont
+    let italicFont: UIFont
+    let inlineCodeFont: UIFont
+    let codeBlockFont: UIFont
+
+    let headingFontName: String?
+
+    init(theme: RelayTheme, chatFontSize: CGFloat = 16) {
+        self.textSecondary = UIColor(theme.textSecondary)
+        self.textPrimary = UIColor(theme.textPrimary)
+        self.codeBg = UIColor(theme.surface)
+        self.inlineCodeBg = UIColor(theme.elevated)
+
+        let size = chatFontSize
+
+        if let fontName = theme.bodyFontName {
+            let body = UIFont(name: fontName, size: size) ?? UIFont.systemFont(ofSize: size)
+            self.bodyFont = body
+            self.boldFont = body  // Custom pixel fonts don't have bold variants
+            self.italicFont = body
+            let mono = UIFont(name: theme.monoFontName ?? fontName, size: size - 1) ?? UIFont.monospacedSystemFont(ofSize: size - 1, weight: .regular)
+            self.inlineCodeFont = mono
+            self.codeBlockFont = UIFont(name: theme.monoFontName ?? fontName, size: size - 2) ?? UIFont.monospacedSystemFont(ofSize: size - 2, weight: .regular)
+        } else {
+            self.bodyFont = UIFont.systemFont(ofSize: size)
+            self.boldFont = UIFont.boldSystemFont(ofSize: size)
+            self.italicFont = UIFont.italicSystemFont(ofSize: size)
+            self.inlineCodeFont = UIFont.monospacedSystemFont(ofSize: size - 1, weight: .regular)
+            self.codeBlockFont = UIFont.monospacedSystemFont(ofSize: size - 2, weight: .regular)
+        }
+
+        self.headingFontName = theme.headingFontName
+    }
+
+    func headerFont(_ level: Int) -> UIFont {
+        let size: CGFloat = level == 1 ? 20 : level == 2 ? 17 : 15
+        if let name = headingFontName {
+            // Pixel heading font — use smaller size to fit
+            let pixelSize: CGFloat = level == 1 ? 12 : level == 2 ? 10 : 9
+            return UIFont(name: name, size: pixelSize) ?? UIFont.systemFont(ofSize: size, weight: .semibold)
+        }
+        return UIFont.systemFont(ofSize: size, weight: .semibold)
     }
 }
 
@@ -48,6 +109,7 @@ private enum BlockStyle: Equatable {
 private struct SelectableText: UIViewRepresentable {
     let source: String
     let style: BlockStyle
+    let styling: MarkdownStyling
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -65,11 +127,12 @@ private struct SelectableText: UIViewRepresentable {
 
     func updateUIView(_ view: UITextView, context: Context) {
         let coord = context.coordinator
-        guard source != coord.lastSource || style != coord.lastStyle else { return }
+        guard source != coord.lastSource || style != coord.lastStyle || styling != coord.lastStyling else { return }
         coord.lastSource = source
         coord.lastStyle = style
+        coord.lastStyling = styling
         coord.cachedSize = nil
-        view.attributedText = MarkdownParser.renderBlock(source, style: style)
+        view.attributedText = MarkdownParser.renderBlock(source, style: style, styling: styling)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
@@ -87,6 +150,7 @@ private struct SelectableText: UIViewRepresentable {
     final class Coordinator {
         var lastSource: String?
         var lastStyle: BlockStyle?
+        var lastStyling: MarkdownStyling?
         var cachedSize: CGSize?
         var cachedWidth: CGFloat?
     }
@@ -95,23 +159,6 @@ private struct SelectableText: UIViewRepresentable {
 // MARK: - Markdown parser
 
 private enum MarkdownParser {
-    // Colors matching RelayColors.swift
-    static let textSecondary = UIColor(red: 0xe5/255, green: 0xe7/255, blue: 0xeb/255, alpha: 1)
-    static let textPrimary = UIColor(red: 0xf9/255, green: 0xfa/255, blue: 0xfb/255, alpha: 1)
-    static let codeBg = UIColor(red: 0x11/255, green: 0x18/255, blue: 0x27/255, alpha: 1)
-    static let inlineCodeBg = UIColor(red: 0x1f/255, green: 0x29/255, blue: 0x37/255, alpha: 1)
-
-    static let bodyFont = UIFont.systemFont(ofSize: 14)
-    static let boldFont = UIFont.boldSystemFont(ofSize: 14)
-    static let italicFont = UIFont.italicSystemFont(ofSize: 14)
-    static let inlineCodeFont = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-    static let codeBlockFont = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-
-    static func headerFont(_ level: Int) -> UIFont {
-        let size: CGFloat = level == 1 ? 20 : level == 2 ? 17 : 15
-        return UIFont.systemFont(ofSize: size, weight: .semibold)
-    }
-
     // MARK: Block types
 
     enum Block {
@@ -122,16 +169,16 @@ private enum MarkdownParser {
 
     // MARK: Render a single block
 
-    static func renderBlock(_ text: String, style: BlockStyle) -> NSAttributedString {
+    static func renderBlock(_ text: String, style: BlockStyle, styling: MarkdownStyling) -> NSAttributedString {
         switch style {
         case .paragraph:
-            return renderInlineMarkdown(text, font: bodyFont, color: textSecondary)
+            return renderInlineMarkdown(text, font: styling.bodyFont, color: styling.textSecondary, styling: styling)
         case .header(let level):
-            return renderInlineMarkdown(text, font: headerFont(level), color: textPrimary)
+            return renderInlineMarkdown(text, font: styling.headerFont(level), color: styling.textPrimary, styling: styling)
         case .code:
             return NSAttributedString(string: text, attributes: [
-                .font: codeBlockFont,
-                .foregroundColor: textSecondary,
+                .font: styling.codeBlockFont,
+                .foregroundColor: styling.textSecondary,
             ])
         }
     }
@@ -218,7 +265,7 @@ private enum MarkdownParser {
     // MARK: Inline markdown
 
     /// Parses **bold**, *italic*, and `code` within a line of text.
-    static func renderInlineMarkdown(_ text: String, font: UIFont, color: UIColor) -> NSAttributedString {
+    static func renderInlineMarkdown(_ text: String, font: UIFont, color: UIColor, styling: MarkdownStyling) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let baseAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
 
@@ -252,12 +299,12 @@ private enum MarkdownParser {
                 var attrs = baseAttrs
                 switch match.type {
                 case .bold:
-                    attrs[.font] = font.bold
+                    attrs[.font] = styling.boldFont
                 case .italic:
-                    attrs[.font] = font.italic
+                    attrs[.font] = styling.italicFont
                 case .code:
-                    attrs[.font] = inlineCodeFont
-                    attrs[.backgroundColor] = inlineCodeBg
+                    attrs[.font] = styling.inlineCodeFont
+                    attrs[.backgroundColor] = styling.inlineCodeBg
                 }
                 result.append(NSAttributedString(string: inner, attributes: attrs))
                 remaining = remaining[closeRange.upperBound...]

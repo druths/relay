@@ -14,7 +14,7 @@ export function AgentSelector({ agents, activeSpeaker, onSelect, disabled }: Age
 
   return (
     <div className="space-y-2">
-      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1 section-label">
         Agents
       </h3>
       <div className="space-y-1">
@@ -37,7 +37,7 @@ export function AgentSelector({ agents, activeSpeaker, onSelect, disabled }: Age
             >
               <div className="font-medium flex items-center gap-2">
                 <span
-                  className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
+                  className={`inline-block w-2 h-2 rounded-full flex-shrink-0 status-dot ${
                     agent.status === "healthy"
                       ? "bg-emerald-400"
                       : agent.status === "error"

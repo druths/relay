@@ -107,17 +107,19 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           </div>
           <button
             onClick={() => setShowSettings(true)}
-            className="text-gray-500 hover:text-gray-300 transition-colors p-1"
+            className="text-gray-500 hover:text-gray-300 transition-colors p-1 settings-icon"
             title="Agent Management"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 gear-icon" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
             </svg>
+            <span className="pixel-gear">*</span>
           </button>
         </div>
 
         <StatusOrb
           activeSpeaker={relay.activeSpeaker}
+          displayName={relay.activeAgentName ?? undefined}
           status={relay.status}
           connected={relay.connected}
         />
@@ -145,7 +147,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         {/* Label filter bar */}
         {relay.connected && allLabels.length > 0 && (
           <div className="space-y-1">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1 section-label">
               Labels
             </h3>
             <div className="flex flex-wrap gap-1 px-1">
@@ -169,7 +171,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         {/* Session list */}
         {relay.connected && filteredSessions.length > 0 && (
           <div className="space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1 section-label">
               {labelFilter ? `Sessions: ${labelFilter}` : "Sessions"}
             </h3>
             <div className="space-y-1" ref={menuRef}>
@@ -196,7 +198,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                       onClick={() => { setMenuOpenId(null); relay.resumeSession(s.session_id); }}
                       className={`w-full text-left px-3 py-2 pr-8 rounded-lg text-sm transition-colors ${
                         relay.activeSessionId === s.session_id
-                          ? "bg-emerald-900/40 text-emerald-300 ring-1 ring-emerald-800"
+                          ? "bg-emerald-900/40 text-emerald-300 ring-1 ring-emerald-800 session-active"
                           : "hover:bg-gray-800 text-gray-300"
                       }`}
                     >
@@ -246,7 +248,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
                       {menuOpenId === s.session_id && (
                         <div className="absolute right-0 top-6 z-50 bg-gray-800 border border-gray-700
-                                        rounded-lg shadow-lg py-1 w-32">
+                                        rounded-lg shadow-lg py-1 w-32 dropdown-menu">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -352,7 +354,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
               {showSessionMenu && (
                 <div className="absolute right-0 top-8 z-50 bg-gray-800 border border-gray-700
-                                rounded-lg shadow-lg py-1 w-44">
+                                rounded-lg shadow-lg py-1 w-44 dropdown-menu">
                   <button
                     onClick={() => {
                       setRenamingSession(true);
@@ -475,12 +477,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         />
         <TextInput
           onSend={relay.sendMessage}
-          onSendAudio={relay.sendAudio}
-          onStopAudio={relay.stopAudio}
           disabled={!relay.connected}
-          muted={relay.muted}
-          onToggleMute={relay.toggleMute}
-          sttAvailable={relay.sttAvailable}
         />
       </main>
 

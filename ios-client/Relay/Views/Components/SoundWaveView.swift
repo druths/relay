@@ -4,6 +4,7 @@ struct SoundWaveView: View {
     var meteringLevel: Float
     var barCount: Int = 5
 
+    @Environment(\.relayTheme) private var theme
     @State private var offsets: [Double] = []
 
     private var normalizedLevel: Double {
@@ -18,7 +19,7 @@ struct SoundWaveView: View {
                 let offset = index < offsets.count ? offsets[index] : 0
                 let barLevel = max(0.08, min(1.0, normalizedLevel + offset * normalizedLevel))
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.relayPrimary)
+                    .fill(theme.primary)
                     .frame(width: 4, height: 4 + barLevel * 28)
                     .animation(.easeInOut(duration: 0.12), value: barLevel)
             }

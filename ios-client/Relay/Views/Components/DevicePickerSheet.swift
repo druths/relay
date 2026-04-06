@@ -6,6 +6,7 @@ struct DevicePickerSheet: View {
     let onSelect: (AVAudioSessionPortDescription) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.relayTheme) private var theme
     @State private var inputs: [AVAudioSessionPortDescription] = []
     @State private var currentUid: String?
     @State private var isLoading = true
@@ -18,7 +19,7 @@ struct DevicePickerSheet: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if inputs.isEmpty {
                     Text("No devices available")
-                        .foregroundStyle(Color.relayTextQuaternary)
+                        .foregroundStyle(theme.textQuaternary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(inputs, id: \.uid) { input in
@@ -28,11 +29,11 @@ struct DevicePickerSheet: View {
                         }) {
                             HStack {
                                 Text(input.portName)
-                                    .foregroundStyle(Color.relayTextSecondary)
+                                    .foregroundStyle(theme.textSecondary)
                                 Spacer()
                                 if input.uid == currentUid {
                                     Image(systemName: "checkmark")
-                                        .foregroundStyle(Color.relaySuccess)
+                                        .foregroundStyle(theme.success)
                                 }
                             }
                         }

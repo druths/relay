@@ -3,6 +3,7 @@ import SwiftUI
 struct MessageBubble: View {
     let message: Message
 
+    @Environment(\.relayTheme) private var theme
     @State private var animating = false
 
     private var isUser: Bool { message.role == .user }
@@ -17,9 +18,9 @@ struct MessageBubble: View {
 
     private var bubbleColor: Color {
         switch message.role {
-        case .user: Color.relayElevated
-        case .operator: Color.relayOperatorBubble
-        case .agent: Color.relayAgentBubble
+        case .user: theme.elevated
+        case .operator: theme.operatorBubble
+        case .agent: theme.agentBubble
         }
     }
 
@@ -34,9 +35,7 @@ struct MessageBubble: View {
                     if message.isStreaming {
                         HStack(spacing: 3) {
                             ForEach(0..<3, id: \.self) { i in
-                                Circle()
-                                    .fill(Color.relayTextTertiary)
-                                    .frame(width: 5, height: 5)
+                                StatusIndicator(color: theme.textTertiary, size: 5)
                                     .scaleEffect(animating ? 1.0 : 0.5)
                                     .opacity(animating ? 1.0 : 0.3)
                                     .animation(
@@ -51,14 +50,21 @@ struct MessageBubble: View {
                     } else if message.isInterrupted {
                         Image(systemName: "waveform.badge.xmark")
                             .font(.caption)
-                            .foregroundStyle(Color.relayTextQuaternary)
+                            .foregroundStyle(theme.textQuaternary)
                             .padding(.bottom, 2)
                     }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(bubbleColor)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: theme.cornerRadius)
+                        .stroke(
+                            theme.bubbleBorderColor ?? theme.border.opacity(theme.borderWidth > 1 ? 0.6 : 0),
+                            lineWidth: theme.bubbleBorderColor != nil ? theme.borderWidth : (theme.borderWidth > 1 ? theme.borderWidth : 0)
+                        )
+                )
             }
 
             if !isUser { Spacer(minLength: 48) }

@@ -6,6 +6,8 @@ struct ConversationLog: View {
     let activeAgentName: String?
     let connected: Bool
 
+    @Environment(\.relayTheme) private var theme
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -13,10 +15,6 @@ struct ConversationLog: View {
                     if messages.isEmpty {
                         emptyState
                     } else {
-                        if activeSessionId != nil {
-                            sessionHeader
-                        }
-
                         ForEach(messages) { message in
                             MessageBubble(message: message)
                                 .id(message.id)
@@ -42,12 +40,12 @@ struct ConversationLog: View {
             Spacer(minLength: 12)
             if !connected {
                 Text("Connect to start...")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.bodyFont(size: 14))
+                    .foregroundStyle(theme.textQuaternary)
             } else if activeSessionId != nil {
                 Text("In session with \(activeAgentName ?? "agent"). Loading...")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.bodyFont(size: 14))
+                    .foregroundStyle(theme.textQuaternary)
             }
         }
         .frame(maxWidth: .infinity)
@@ -57,14 +55,14 @@ struct ConversationLog: View {
     private var sessionHeader: some View {
         HStack {
             Rectangle()
-                .fill(Color.relayBorder)
-                .frame(height: 1)
+                .fill(theme.border)
+                .frame(height: theme.borderWidth)
             Text(activeAgentName ?? "Session")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.relayTextTertiary)
+                .font(theme.bodyFont(size: 12, weight: .medium))
+                .foregroundStyle(theme.textTertiary)
             Rectangle()
-                .fill(Color.relayBorder)
-                .frame(height: 1)
+                .fill(theme.border)
+                .frame(height: theme.borderWidth)
         }
         .padding(.vertical, 4)
     }

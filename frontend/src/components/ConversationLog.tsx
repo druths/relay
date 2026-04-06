@@ -9,9 +9,9 @@ interface ConversationLogProps {
 }
 
 const ROLE_STYLES: Record<string, string> = {
-  user: "bg-gray-800 ml-12 text-right",
-  operator: "bg-blue-900/40 mr-12",
-  agent: "bg-emerald-900/40 mr-12",
+  user: "bg-gray-800 ml-12 text-right msg-user",
+  operator: "bg-blue-900/40 mr-12 msg-operator",
+  agent: "bg-emerald-900/40 mr-12 msg-agent",
 };
 
 
@@ -40,11 +40,6 @@ export function ConversationLog({
 
   return (
     <div className="flex-1 overflow-y-auto space-y-3 p-4">
-      {activeSessionId && (
-        <div className="text-center text-xs text-gray-600 py-2 border-b border-gray-800 mb-2">
-          Session with {activeAgentName}
-        </div>
-      )}
       {messages.map((msg, i) => (
         <div
           key={i}

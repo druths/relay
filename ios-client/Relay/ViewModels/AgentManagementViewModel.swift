@@ -11,9 +11,10 @@ struct Voice: Codable, Identifiable {
 final class AgentManagementViewModel {
     enum Tab: String, CaseIterable {
         case agents = "Agents"
-        case tts = "Text to Speech"
-        case stt = "Speech to Text"
-        case account = "Account"
+        case tts = "TTS"
+        case stt = "STT"
+        case appearance = "Style"
+        case account = "User"
     }
 
     var selectedTab: Tab = .agents

@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relay — TVA Retro Mockup v2</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #0a0806;
+    --surface: #141008;
+    --elevated: #1e1810;
+    --border: #3a2e1e;
+    --border-light: #4d3e2a;
+
+    --text-primary: #e8d4a0;
+    --text-secondary: #c4a870;
+    --text-tertiary: #8a7450;
+    --text-quaternary: #5a4a30;
+
+    --amber: #d49000;
+    --amber-bright: #ffc040;
+    --amber-dim: rgba(212, 144, 0, 0.12);
+    --amber-glow: rgba(212, 144, 0, 0.25);
+    --green: #40a030;
+    --green-bright: #60d040;
+    --green-dim: rgba(64, 160, 48, 0.15);
+    --red: #c04020;
+    --orange: #c07020;
+    --orange-dim: rgba(192, 112, 32, 0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'VT323', monospace;
+    background: var(--bg);
+    color: var(--text-primary);
+    height: 100vh;
+    display: flex;
+    overflow: hidden;
+    font-size: 18px;
+    letter-spacing: 0.5px;
+  }
+
+  /* CRT scanlines — thicker, more visible */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0,0,0,0.12) 0px,
+      rgba(0,0,0,0.12) 2px,
+      transparent 2px,
+      transparent 4px
+    );
+    z-index: 9999;
+  }
+
+  /* CRT vignette */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      ellipse at center,
+      transparent 50%,
+      rgba(0,0,0,0.5) 100%
+    );
+    z-index: 9998;
+  }
+
+  /* Pixel-style heading font */
+  .pixel-title {
+    font-family: 'Press Start 2P', monospace;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 280px;
+    border-right: 2px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 12px;
+    background: var(--surface);
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 4px;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 12px;
+  }
+
+  .sidebar-header h1 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 14px;
+    color: var(--amber-bright);
+    text-shadow: 0 0 10px var(--amber), 0 0 20px rgba(212,144,0,0.3);
+    letter-spacing: 4px;
+  }
+
+  .sidebar-header .subtitle {
+    font-size: 14px;
+    color: var(--text-quaternary);
+    margin-top: 6px;
+    letter-spacing: 1px;
+  }
+
+  .gear-btn {
+    background: var(--elevated);
+    border: 2px solid var(--border);
+    color: var(--text-tertiary);
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Status orb */
+  .status-orb {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--elevated);
+    border: 2px solid var(--border);
+  }
+
+  .orb {
+    width: 10px;
+    height: 10px;
+    background: var(--amber-bright);
+    box-shadow: 0 0 6px var(--amber), 0 0 12px var(--amber-glow);
+    animation: blink 1.5s steps(2) infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .status-text {
+    font-size: 16px;
+    color: var(--text-tertiary);
+    letter-spacing: 1px;
+  }
+
+  /* Section headers */
+  .section-label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    letter-spacing: 2px;
+    color: var(--text-quaternary);
+    padding: 0 4px;
+    text-shadow: 0 0 4px var(--text-quaternary);
+  }
+
+  /* Lobby button */
+  .lobby-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'VT323', monospace;
+    font-size: 16px;
+    color: var(--amber);
+    background: var(--amber-dim);
+    border: 2px solid var(--border-light);
+    padding: 6px 12px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-shadow: 0 0 6px var(--amber-glow);
+  }
+
+  /* Agent list */
+  .agent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .agent-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.1s;
+    font-size: 18px;
+    color: var(--text-secondary);
+  }
+
+  .agent-item:hover {
+    background: var(--elevated);
+    border-color: var(--border);
+  }
+
+  .agent-item.active {
+    background: var(--green-dim);
+    border-color: var(--green);
+    color: var(--green-bright);
+    text-shadow: 0 0 8px rgba(64,160,48,0.4);
+  }
+
+  .agent-item::before {
+    content: '>';
+    color: transparent;
+    font-weight: bold;
+    width: 10px;
+  }
+
+  .agent-item.active::before {
+    color: var(--green-bright);
+    text-shadow: 0 0 4px var(--green);
+  }
+
+  .agent-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--amber);
+    flex-shrink: 0;
+  }
+
+  .agent-dot.active {
+    background: var(--green);
+    box-shadow: 0 0 4px var(--green);
+  }
+
+  .agent-provider {
+    font-size: 14px;
+    color: var(--text-quaternary);
+    margin-left: auto;
+  }
+
+  /* Label chips */
+  .label-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 0 4px;
+  }
+
+  .label-chip {
+    font-size: 14px;
+    padding: 2px 8px;
+    background: var(--orange-dim);
+    color: var(--orange);
+    border: 1px solid rgba(192, 112, 32, 0.3);
+    cursor: pointer;
+    letter-spacing: 0.5px;
+  }
+
+  .label-chip.active {
+    background: var(--orange);
+    color: var(--bg);
+    border-color: var(--orange);
+  }
+
+  /* Session list */
+  .session-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .session-item {
+    padding: 6px 10px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.1s;
+  }
+
+  .session-item:hover {
+    background: var(--elevated);
+    border-color: var(--border);
+  }
+
+  .session-item.active {
+    background: var(--green-dim);
+    border-color: var(--green);
+  }
+
+  .session-name {
+    font-size: 18px;
+    color: var(--text-secondary);
+    margin-bottom: 2px;
+  }
+
+  .session-item.active .session-name {
+    color: var(--green-bright);
+    text-shadow: 0 0 6px rgba(64,160,48,0.3);
+  }
+
+  .session-meta {
+    font-size: 14px;
+    color: var(--text-quaternary);
+  }
+
+  .session-labels {
+    display: flex;
+    gap: 4px;
+    margin-top: 3px;
+  }
+
+  .session-label-chip {
+    font-size: 12px;
+    padding: 0 6px;
+    background: var(--orange-dim);
+    color: var(--text-quaternary);
+    border: 1px solid rgba(192,112,32,0.2);
+  }
+
+  .session-summary {
+    font-size: 15px;
+    color: var(--text-quaternary);
+    margin-top: 2px;
+    line-height: 1.2;
+  }
+
+  .logout-btn {
+    margin-top: auto;
+    font-family: 'VT323', monospace;
+    font-size: 16px;
+    color: var(--text-quaternary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    padding: 8px 4px;
+    border-top: 2px solid var(--border);
+    letter-spacing: 1px;
+  }
+
+  /* ── Main area ── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .main-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 2px solid var(--border);
+    background: var(--surface);
+  }
+
+  .main-header .agent-name {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    color: var(--text-primary);
+    text-shadow: 0 0 6px var(--amber-glow);
+    letter-spacing: 2px;
+  }
+
+  .main-header .session-tag {
+    font-size: 14px;
+    color: var(--text-tertiary);
+    padding: 2px 8px;
+    background: var(--elevated);
+    border: 1px solid var(--border);
+  }
+
+  .spacer { flex: 1; }
+
+  .kebab-btn {
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 6px;
+    font-family: 'VT323', monospace;
+  }
+
+  .labels-bar {
+    display: flex;
+    gap: 6px;
+    padding: 6px 16px;
+    border-bottom: 2px solid var(--border);
+    background: var(--surface);
+  }
+
+  /* Conversation area */
+  .conversation {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(212,144,0,0.03) 0%, transparent 60%),
+      var(--bg);
+  }
+
+  .message {
+    max-width: 75%;
+    padding: 8px 12px;
+    font-size: 18px;
+    line-height: 1.4;
+    border: 2px solid;
+  }
+
+  .message.operator {
+    align-self: flex-start;
+    background: rgba(40, 50, 90, 0.2);
+    border-color: rgba(60, 70, 110, 0.4);
+    color: var(--text-secondary);
+  }
+
+  .message.agent {
+    align-self: flex-start;
+    background: rgba(30, 60, 25, 0.25);
+    border-color: rgba(50, 90, 40, 0.4);
+    color: var(--text-secondary);
+  }
+
+  .message.user {
+    align-self: flex-end;
+    background: var(--elevated);
+    border-color: var(--border-light);
+    color: var(--text-primary);
+  }
+
+  .message .speaker {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+
+  .message.operator .speaker { color: rgba(130, 150, 220, 0.8); }
+  .message.agent .speaker { color: var(--green); text-shadow: 0 0 4px rgba(64,160,48,0.3); }
+  .message.user .speaker { color: var(--amber); text-shadow: 0 0 4px var(--amber-glow); }
+
+  .message code {
+    background: rgba(255,255,255,0.05);
+    padding: 1px 4px;
+    border: 1px solid var(--border);
+    color: var(--amber);
+    font-family: 'VT323', monospace;
+    font-size: 18px;
+  }
+
+  /* Cursor blink for the "typing" message */
+  .typing-cursor {
+    display: inline-block;
+    width: 8px;
+    height: 16px;
+    background: var(--green-bright);
+    animation: cursor-blink 0.8s steps(2) infinite;
+    vertical-align: middle;
+    margin-left: 2px;
+    box-shadow: 0 0 4px var(--green);
+  }
+
+  @keyframes cursor-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  /* Input area */
+  .input-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 2px solid var(--border);
+    background: var(--surface);
+  }
+
+  .input-bar input {
+    flex: 1;
+    background: var(--bg);
+    border: 2px solid var(--border);
+    padding: 8px 12px;
+    color: var(--text-primary);
+    font-size: 18px;
+    font-family: 'VT323', monospace;
+    outline: none;
+    letter-spacing: 0.5px;
+    caret-color: var(--amber-bright);
+  }
+
+  .input-bar input::placeholder {
+    color: var(--text-quaternary);
+  }
+
+  .input-bar input:focus {
+    border-color: var(--amber);
+    box-shadow: 0 0 8px var(--amber-dim), inset 0 0 20px rgba(212,144,0,0.03);
+  }
+
+  .send-btn {
+    background: var(--amber);
+    color: var(--bg);
+    border: 2px solid var(--amber);
+    padding: 8px 16px;
+    font-size: 18px;
+    font-family: 'VT323', monospace;
+    cursor: pointer;
+    letter-spacing: 2px;
+    text-shadow: none;
+  }
+
+  .send-btn:hover {
+    background: var(--amber-bright);
+    box-shadow: 0 0 10px var(--amber-glow);
+  }
+
+  .live-btn {
+    background: var(--elevated);
+    border: 2px solid var(--border);
+    color: var(--text-tertiary);
+    padding: 8px 10px;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* File stamp watermark */
+  .watermark {
+    position: fixed;
+    bottom: 12px;
+    right: 16px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 6px;
+    color: var(--text-quaternary);
+    opacity: 0.4;
+    letter-spacing: 2px;
+    z-index: 10000;
+    text-shadow: 0 0 4px var(--amber-dim);
+  }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <div>
+      <h1 class="pixel-title">RELAY</h1>
+      <div class="subtitle">// session: Trinity</div>
+    </div>
+    <button class="gear-btn">&#9881;</button>
+  </div>
+
+  <div class="status-orb">
+    <div class="orb"></div>
+    <span class="status-text">ONLINE // READY</span>
+  </div>
+
+  <button class="lobby-btn">[&lt;] RETURN TO LOBBY</button>
+
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="section-label">AGENTS</div>
+    <div class="agent-list">
+      <div class="agent-item active">
+        <div class="agent-dot active"></div>
+        Trinity
+        <span class="agent-provider">openclaw</span>
+      </div>
+      <div class="agent-item">
+        <div class="agent-dot"></div>
+        Claude
+        <span class="agent-provider">anthropic</span>
+      </div>
+      <div class="agent-item">
+        <div class="agent-dot"></div>
+        Gemini
+        <span class="agent-provider">gemini</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="section-label">LABELS</div>
+    <div class="label-row">
+      <span class="label-chip">builds</span>
+      <span class="label-chip active">frontend</span>
+      <span class="label-chip">research</span>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="section-label">SESSIONS</div>
+    <div class="session-list">
+      <div class="session-item active">
+        <div class="session-name">&gt; API Rate Limiting</div>
+        <div class="session-meta">Trinity // active</div>
+        <div class="session-labels">
+          <span class="session-label-chip">builds</span>
+        </div>
+      </div>
+      <div class="session-item">
+        <div class="session-name">&nbsp; Logo Redesign Ideas</div>
+        <div class="session-meta">Claude // paused</div>
+        <div class="session-summary">Discussed 3 concepts, settled on geometric...</div>
+      </div>
+      <div class="session-item">
+        <div class="session-name">&nbsp; Deployment Pipeline</div>
+        <div class="session-meta">Trinity // paused</div>
+        <div class="session-labels">
+          <span class="session-label-chip">builds</span>
+          <span class="session-label-chip">frontend</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button class="logout-btn">[X] DISCONNECT</button>
+</div>
+
+<div class="main">
+  <div class="main-header">
+    <div class="orb" style="width:8px;height:8px"></div>
+    <span class="agent-name">TRINITY</span>
+    <span class="session-tag">API Rate Limiting</span>
+    <span class="spacer"></span>
+    <button class="kebab-btn">...</button>
+    <button class="lobby-btn">[&lt;] LOBBY</button>
+  </div>
+  <div class="labels-bar">
+    <span class="label-chip">builds</span>
+  </div>
+  <div class="conversation">
+    <div class="message agent">
+      <div class="speaker">TRINITY</div>
+      Hi, I'm Trinity. How can I help you?
+    </div>
+    <div class="message user">
+      <div class="speaker">YOU</div>
+      I need to implement rate limiting on our API endpoints. What approach do you recommend?
+    </div>
+    <div class="message agent">
+      <div class="speaker">TRINITY</div>
+      For your FastAPI backend, I'd recommend a token bucket algorithm using Redis. You can use the <code>slowapi</code> library which wraps <code>limits</code> and integrates directly with FastAPI middleware. This gives you per-user and per-endpoint rate limiting with minimal code changes.
+    </div>
+    <div class="message user">
+      <div class="speaker">YOU</div>
+      We already have Redis running. How would the middleware look?
+    </div>
+    <div class="message agent">
+      <div class="speaker">TRINITY</div>
+      Here's the basic setup you'd add to your <code>main.py</code> — the limiter wraps your existing FastAPI app and you annotate routes with rate strings like <code>"10/minute"</code>. Since you already have Redis, point the storage at your existing instance and you're done.<span class="typing-cursor"></span>
+    </div>
+  </div>
+  <div class="input-bar">
+    <button class="live-btn">&#9611;&#9611;</button>
+    <input type="text" placeholder="> Message Trinity..." />
+    <button class="send-btn">SEND</button>
+  </div>
+</div>
+
+<div class="watermark">TVA // TEMPORAL RELAY AUTHORITY // FOR ALL TIME. ALWAYS.</div>
+
+</body>
+</html>

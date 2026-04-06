@@ -3,18 +3,21 @@ import SwiftUI
 struct AgentManagementView: View {
     let agents: [Agent]
     let authService: AuthService
+    let themeManager: ThemeManager?
     let onChanged: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.relayTheme) private var theme
     @State private var vm: AgentManagementViewModel
     @State private var showDeleteConfirm = false
     @State private var errorMessage: String?
     @State private var showUnsavedAlert = false
     @State private var pendingAction: (() -> Void)?
 
-    init(agents: [Agent], authService: AuthService, onChanged: @escaping () -> Void) {
+    init(agents: [Agent], authService: AuthService, themeManager: ThemeManager? = nil, onChanged: @escaping () -> Void) {
         self.agents = agents
         self.authService = authService
+        self.themeManager = themeManager
         self.onChanged = onChanged
         _vm = State(initialValue: AgentManagementViewModel(apiClient: APIClient(authService: authService)))
     }
@@ -38,7 +41,7 @@ struct AgentManagementView: View {
                 tabBar
                 tabContent
             }
-            .background(Color.relaySurface)
+            .background(theme.surface)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -74,26 +77,29 @@ struct AgentManagementView: View {
     // MARK: - Tab Bar
 
     private var tabBar: some View {
-        HStack(spacing: 4) {
-            ForEach(AgentManagementViewModel.Tab.allCases, id: \.self) { tab in
-                Button(action: {
-                    guard vm.selectedTab != tab else { return }
-                    attemptAction { vm.selectedTab = tab }
-                }) {
-                    Text(tab.rawValue)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(vm.selectedTab == tab ? Color.relayTextPrimary : Color.relayTextQuaternary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(vm.selectedTab == tab ? Color.relayBorder : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(AgentManagementViewModel.Tab.allCases, id: \.self) { tab in
+                    Button(action: {
+                        guard vm.selectedTab != tab else { return }
+                        attemptAction { vm.selectedTab = tab }
+                    }) {
+                        Text(tab.rawValue)
+                            .font(theme.bodyFont(size: 20, weight: .medium))
+                            .foregroundStyle(vm.selectedTab == tab ? theme.textPrimary : theme.textQuaternary)
+                            .fixedSize()
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(vm.selectedTab == tab ? theme.border : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                    }
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.relayElevated).frame(height: 1)
+            Rectangle().fill(theme.elevated).frame(height: theme.borderWidth)
         }
     }
 
@@ -108,6 +114,8 @@ struct AgentManagementView: View {
             ttsTab
         case .stt:
             sttTab
+        case .appearance:
+            appearanceTab
         case .account:
             accountTab
         }
@@ -129,7 +137,7 @@ struct AgentManagementView: View {
                 .padding(.vertical, 10)
             }
             .overlay(alignment: .bottom) {
-                Rectangle().fill(Color.relayElevated).frame(height: 1)
+                Rectangle().fill(theme.elevated).frame(height: theme.borderWidth)
             }
 
             // Reorder controls for selected non-operator agent
@@ -140,14 +148,14 @@ struct AgentManagementView: View {
                 let idx = nonOperatorAgents.firstIndex(where: { $0.agentId == selectedId })
                 HStack(spacing: 12) {
                     Text("Order")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.relayTextQuaternary)
+                        .font(theme.bodyFont(size: 18))
+                        .foregroundStyle(theme.textQuaternary)
                     Button {
                         moveAgent(selectedId, direction: -1)
                     } label: {
                         Image(systemName: "arrow.left")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(idx == 0 ? Color.relayTextQuinary : Color.relayTextSecondary)
+                            .font(theme.bodyFont(size: 18, weight: .medium))
+                            .foregroundStyle(idx == 0 ? theme.textQuinary : theme.textSecondary)
                     }
                     .disabled(idx == 0)
 
@@ -155,15 +163,15 @@ struct AgentManagementView: View {
                         moveAgent(selectedId, direction: 1)
                     } label: {
                         Image(systemName: "arrow.right")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(idx == (nonOperatorAgents.count - 1) ? Color.relayTextQuinary : Color.relayTextSecondary)
+                            .font(theme.bodyFont(size: 18, weight: .medium))
+                            .foregroundStyle(idx == (nonOperatorAgents.count - 1) ? theme.textQuinary : theme.textSecondary)
                     }
                     .disabled(idx == (nonOperatorAgents.count - 1))
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
                 .overlay(alignment: .bottom) {
-                    Rectangle().fill(Color.relayElevated).frame(height: 1)
+                    Rectangle().fill(theme.elevated).frame(height: theme.borderWidth)
                 }
             }
 
@@ -194,21 +202,19 @@ struct AgentManagementView: View {
         let isActive = !vm.isNewAgent && vm.selectedAgentId == agent.agentId
         return Button(action: { vm.selectAgent(agent); Task { await vm.fetchVoices() } }) {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(statusColor(agent.status))
-                    .frame(width: 8, height: 8)
+                StatusIndicator(color: statusColor(agent.status))
                 if agent.isOperator {
                     Image(systemName: "lock.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(Color.relayTextQuaternary)
+                        .font(theme.bodyFont(size: 18))
+                        .foregroundStyle(theme.textQuaternary)
                 }
                 Text(agent.name)
-                    .font(.system(size: 13))
-                    .foregroundStyle(isActive ? Color.relayTextPrimary : Color.relayTextTertiary)
+                    .font(theme.bodyFont(size: 20))
+                    .foregroundStyle(isActive ? theme.textPrimary : theme.textTertiary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(isActive ? Color.relayBorder : Color.relayElevated)
+            .background(isActive ? theme.border : theme.elevated)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -218,14 +224,14 @@ struct AgentManagementView: View {
         Button(action: { vm.startNewAgent() }) {
             HStack(spacing: 4) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12))
+                    .font(theme.bodyFont(size: 18))
                 Text("New")
-                    .font(.system(size: 13))
+                    .font(theme.bodyFont(size: 20))
             }
-            .foregroundStyle(vm.isNewAgent ? Color.relayPrimaryLighter : Color.relayPrimaryLight)
+            .foregroundStyle(vm.isNewAgent ? theme.primaryLighter : theme.primaryLight)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(vm.isNewAgent ? Color.relayNewAgentPill : Color.relayElevated)
+            .background(vm.isNewAgent ? theme.newAgentPill : theme.elevated)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -238,12 +244,10 @@ struct AgentManagementView: View {
         // Health status
         if let selected {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(statusColor(selected.status))
-                    .frame(width: 8, height: 8)
+                StatusIndicator(color: statusColor(selected.status))
                 Text(selected.status == .healthy ? "Healthy" : selected.status == .error ? (selected.statusMessage.isEmpty ? "Error" : selected.statusMessage) : "Not checked")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextTertiary)
+                    .font(theme.monoFont(size: 18))
+                    .foregroundStyle(theme.textTertiary)
 
                 Spacer()
 
@@ -256,8 +260,8 @@ struct AgentManagementView: View {
                     }
                 } label: {
                     Text("Check now")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.relayPrimary)
+                        .font(theme.bodyFont(size: 18))
+                        .foregroundStyle(theme.primary)
                 }
             }
             .padding(.bottom, 12)
@@ -306,18 +310,18 @@ struct AgentManagementView: View {
             } label: {
                 HStack {
                     Text(vm.voices.first { $0.id == vm.form["voice_id"] }?.name ?? (vm.voices.isEmpty ? "No voices available" : "Select voice..."))
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color.relayTextSecondary)
+                        .font(theme.bodyFont(size: 21))
+                        .foregroundStyle(theme.textSecondary)
                         .lineLimit(1)
                     Spacer()
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.relayTextQuaternary)
+                        .font(theme.bodyFont(size: 18))
+                        .foregroundStyle(theme.textQuaternary)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)
-                .background(Color.relayElevated)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .background(theme.elevated)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
             }
             .disabled(vm.voices.isEmpty)
             .opacity(vm.voices.isEmpty ? 0.5 : 1)
@@ -350,13 +354,13 @@ struct AgentManagementView: View {
             get: { vm.form["persona_prompt"] ?? "" },
             set: { vm.form["persona_prompt"] = $0 }
         ))
-        .font(.system(size: 14))
-        .foregroundStyle(Color.relayTextSecondary)
+        .font(theme.bodyFont(size: 21))
+        .foregroundStyle(theme.textSecondary)
         .scrollContentBackground(.hidden)
         .frame(minHeight: 80)
         .padding(8)
-        .background(Color.relayElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(theme.elevated)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
 
         // Actions
         HStack(spacing: 12) {
@@ -371,12 +375,12 @@ struct AgentManagementView: View {
                 }
             }) {
                 Text(vm.isSaving ? "Saving..." : (vm.isNewAgent ? "Create Agent" : "Save Changes"))
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(theme.bodyFont(size: 21, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .background(Color.relayPrimary)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .background(theme.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
             }
             .disabled(vm.isSaving)
             .opacity(vm.isSaving ? 0.5 : 1)
@@ -384,12 +388,12 @@ struct AgentManagementView: View {
             if let selected, !selected.isOperator {
                 Button(action: { showDeleteConfirm = true }) {
                     Text("Delete")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.relayError)
+                        .font(theme.bodyFont(size: 21, weight: .semibold))
+                        .foregroundStyle(theme.error)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 12)
-                        .background(Color.relayBorder)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(theme.border)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                 }
                 .confirmationDialog("Delete \"\(selected.name)\"?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                     Button("Delete", role: .destructive) {
@@ -437,13 +441,13 @@ struct AgentManagementView: View {
                 sectionLabel("Voice Instructions")
                 hintText("Injected into the agent system prompt when live mode is active. Use this to encourage concise, conversational responses without markdown.")
                 TextEditor(text: platformBinding("voice_mode_instructions"))
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.relayTextSecondary)
+                    .font(theme.bodyFont(size: 21))
+                    .foregroundStyle(theme.textSecondary)
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 120)
                     .padding(8)
-                    .background(Color.relayElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .background(theme.elevated)
+                    .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
 
                 savePlatformButton
                     .padding(.top, 20)
@@ -508,33 +512,33 @@ struct AgentManagementView: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(theme.labelFont(size: 17))
             .tracking(1)
-            .foregroundStyle(Color.relayTextQuaternary)
+            .foregroundStyle(theme.textQuaternary)
             .padding(.top, 20)
             .padding(.bottom, 8)
     }
 
     private func sectionLabel(_ label: String) -> some View {
         Text(label)
-            .font(.system(size: 12))
-            .foregroundStyle(Color.relayTextQuaternary)
+            .font(theme.bodyFont(size: 18))
+            .foregroundStyle(theme.textQuaternary)
             .padding(.top, 8)
             .padding(.bottom, 4)
     }
 
     private func hintText(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(Color.relayTextQuinary)
+            .font(theme.monoFont(size: 17))
+            .foregroundStyle(theme.textQuinary)
             .padding(.top, 2)
             .padding(.bottom, 8)
     }
 
     private var separator: some View {
         Rectangle()
-            .fill(Color.relayElevated)
-            .frame(height: 1)
+            .fill(theme.elevated)
+            .frame(height: theme.borderWidth)
             .padding(.top, 24)
             .padding(.bottom, 8)
     }
@@ -547,12 +551,12 @@ struct AgentManagementView: View {
                 TextField(placeholder, text: formBinding(key))
             }
         }
-        .font(.system(size: 14))
-        .foregroundStyle(Color.relayTextSecondary)
+        .font(theme.bodyFont(size: 21))
+        .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.relayElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(theme.elevated)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1)
         .textInputAutocapitalization(.never)
@@ -567,12 +571,12 @@ struct AgentManagementView: View {
                 TextField(placeholder, text: platformBinding(key))
             }
         }
-        .font(.system(size: 14))
-        .foregroundStyle(Color.relayTextSecondary)
+        .font(theme.bodyFont(size: 21))
+        .foregroundStyle(theme.textSecondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.relayElevated)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(theme.elevated)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
     }
@@ -585,17 +589,17 @@ struct AgentManagementView: View {
         } label: {
             HStack {
                 Text(options.first { $0.0 == vm.form[key] }?.1 ?? vm.form[key] ?? "")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.relayTextSecondary)
+                    .font(theme.bodyFont(size: 21))
+                    .foregroundStyle(theme.textSecondary)
                 Spacer()
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.bodyFont(size: 18))
+                    .foregroundStyle(theme.textQuaternary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
-            .background(Color.relayElevated)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .background(theme.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
     }
 
@@ -610,17 +614,17 @@ struct AgentManagementView: View {
         } label: {
             HStack {
                 Text(options.first { $0.0 == vm.form[key] }?.1 ?? vm.form[key] ?? "")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.relayTextSecondary)
+                    .font(theme.bodyFont(size: 21))
+                    .foregroundStyle(theme.textSecondary)
                 Spacer()
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.bodyFont(size: 18))
+                    .foregroundStyle(theme.textQuaternary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
-            .background(Color.relayElevated)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .background(theme.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
     }
 
@@ -632,17 +636,17 @@ struct AgentManagementView: View {
         } label: {
             HStack {
                 Text(options.first { $0.0 == vm.platformForm[key] }?.1 ?? vm.platformForm[key] ?? "")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.relayTextSecondary)
+                    .font(theme.bodyFont(size: 21))
+                    .foregroundStyle(theme.textSecondary)
                 Spacer()
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.bodyFont(size: 18))
+                    .foregroundStyle(theme.textQuaternary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 12)
-            .background(Color.relayElevated)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .background(theme.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
     }
 
@@ -650,12 +654,12 @@ struct AgentManagementView: View {
         VStack(spacing: 4) {
             HStack {
                 Text(label)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.bodyFont(size: 18))
+                    .foregroundStyle(theme.textQuaternary)
                 Spacer()
                 Text(String(format: format, Double(vm.form[key] ?? "0") ?? 0))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.monoFont(size: 18))
+                    .foregroundStyle(theme.textQuaternary)
             }
             .padding(.top, 8)
 
@@ -663,7 +667,7 @@ struct AgentManagementView: View {
                 get: { Double(vm.form[key] ?? "0") ?? range.lowerBound },
                 set: { vm.form[key] = String($0) }
             ), in: range, step: step)
-            .tint(Color.relayPrimary)
+            .tint(theme.primary)
         }
     }
 
@@ -671,12 +675,12 @@ struct AgentManagementView: View {
         VStack(spacing: 4) {
             HStack {
                 Text(label)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.bodyFont(size: 18))
+                    .foregroundStyle(theme.textQuaternary)
                 Spacer()
                 Text("\(String(format: format, Double(vm.platformForm[key] ?? "0") ?? 0))\(unit)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                    .font(theme.monoFont(size: 18))
+                    .foregroundStyle(theme.textQuaternary)
             }
             .padding(.top, 8)
 
@@ -684,7 +688,7 @@ struct AgentManagementView: View {
                 get: { Double(vm.platformForm[key] ?? "0") ?? range.lowerBound },
                 set: { vm.platformForm[key] = String($0) }
             ), in: range, step: step)
-            .tint(Color.relayPrimary)
+            .tint(theme.primary)
         }
     }
 
@@ -699,15 +703,81 @@ struct AgentManagementView: View {
             }
         }) {
             Text(vm.isSavingPlatform ? "Saving..." : "Save Settings")
-                .font(.system(size: 14, weight: .semibold))
+                .font(theme.bodyFont(size: 21, weight: .semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
-                .background(Color.relayPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .background(theme.primary)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
         .disabled(vm.isSavingPlatform)
         .opacity(vm.isSavingPlatform ? 0.5 : 1)
+    }
+
+    // MARK: - Account Tab
+
+    // MARK: - Appearance Tab
+
+    private var appearanceTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let themeManager {
+                    sectionTitle("SKIN")
+                    HStack {
+                        ForEach(ThemeName.allCases, id: \.rawValue) { name in
+                            Button {
+                                themeManager.currentName = name
+                            } label: {
+                                Text(name.displayName)
+                                    .font(theme.bodyFont(size: 21, weight: themeManager.currentName == name ? .semibold : .regular))
+                                    .foregroundStyle(themeManager.currentName == name ? theme.textPrimary : theme.textTertiary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .frame(maxWidth: .infinity)
+                                    .background(themeManager.currentName == name ? theme.border : theme.elevated)
+                                    .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    sectionTitle("CHAT TEXT SIZE")
+                    HStack(spacing: 12) {
+                        Text("A")
+                            .font(theme.bodyFont(size: 18))
+                            .foregroundStyle(theme.textQuaternary)
+                        Slider(
+                            value: Binding(
+                                get: { themeManager.chatFontSize },
+                                set: { themeManager.chatFontSize = $0 }
+                            ),
+                            in: 12...24,
+                            step: 1
+                        )
+                        .tint(theme.primary)
+                        Text("A")
+                            .font(theme.bodyFont(size: 36))
+                            .foregroundStyle(theme.textQuaternary)
+                    }
+
+                    // Preview
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Preview")
+                            .font(theme.monoFont(size: 17))
+                            .foregroundStyle(theme.textQuaternary)
+                        Text("The quick brown fox jumps over the lazy dog.")
+                            .font(theme.bodyFont(size: themeManager.chatFontSize))
+                            .foregroundStyle(theme.textSecondary)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(theme.elevated)
+                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                    }
+                    .padding(.top, 8)
+                }
+            }
+            .padding(16)
+        }
     }
 
     // MARK: - Account Tab
@@ -719,23 +789,23 @@ struct AgentManagementView: View {
 
                 sectionTitle("SERVER")
                 Text(account?.serverURL ?? AppConfig.serverBase)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.relayTextSecondary)
+                    .font(theme.bodyFont(size: 21))
+                    .foregroundStyle(theme.textSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.relayElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .background(theme.elevated)
+                    .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
 
                 sectionTitle("USERNAME")
                 Text(account?.username ?? "—")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.relayTextSecondary)
+                    .font(theme.bodyFont(size: 21))
+                    .foregroundStyle(theme.textSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.relayElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .background(theme.elevated)
+                    .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
 
                 Button(action: {
                     AccountStore.shared.clearCurrentAccount()
@@ -743,12 +813,12 @@ struct AgentManagementView: View {
                     dismiss()
                 }) {
                     Text("Sign Out")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.relayError)
+                        .font(theme.bodyFont(size: 21, weight: .semibold))
+                        .foregroundStyle(theme.error)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 12)
-                        .background(Color.relayBorder)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(theme.border)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                 }
                 .padding(.top, 24)
             }
@@ -762,7 +832,7 @@ struct AgentManagementView: View {
         switch vm.selectedTab {
         case .agents: return vm.isAgentFormDirty
         case .tts, .stt: return vm.isPlatformFormDirty
-        case .account: return false
+        case .appearance, .account: return false
         }
     }
 
@@ -791,9 +861,9 @@ struct AgentManagementView: View {
 
     private func statusColor(_ status: Agent.AgentStatus) -> Color {
         switch status {
-        case .healthy: Color.relaySuccess
-        case .error: Color.relayError
-        case .unknown: Color.relayPrimary
+        case .healthy: theme.success
+        case .error: theme.error
+        case .unknown: theme.primary
         }
     }
 }

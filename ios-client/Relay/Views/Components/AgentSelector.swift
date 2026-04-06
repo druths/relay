@@ -5,6 +5,8 @@ struct AgentSelector: View {
     let activeAgentName: String?
     let onSelect: (Agent) -> Void
 
+    @Environment(\.relayTheme) private var theme
+
     /// Agents to show — all except the Operator, sorted by sort_order
     private var visibleAgents: [Agent] {
         agents.filter { !$0.isOperator }
@@ -15,9 +17,9 @@ struct AgentSelector: View {
         VStack(alignment: .leading, spacing: 8) {
             Spacer().frame(height: 4)
             Text("AGENTS")
-                .font(.system(size: 10, weight: .semibold))
+                .font(theme.labelFont(size: 12))
                 .tracking(1.5)
-                .foregroundStyle(Color.relayTextQuaternary)
+                .foregroundStyle(theme.textQuaternary)
                 .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -37,33 +39,25 @@ struct AgentSelector: View {
 
         return Button(action: { onSelect(agent) }) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(statusColor(agent.status))
-                    .frame(width: 8, height: 8)
+                StatusIndicator(color: statusColor(agent.status))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(agent.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(isActive ? Color.relaySuccessLight : Color.relayTextSecondary)
-
-                    Text(agent.llmProvider)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.relayTextQuaternary)
-                }
+                Text(agent.name)
+                    .font(theme.bodyFont(size: 16, weight: .medium))
+                    .foregroundStyle(isActive ? theme.successLight : theme.textSecondary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isActive ? Color.relayAgentActive : Color.relayElevated)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .background(isActive ? theme.agentActive : theme.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
         .buttonStyle(.plain)
     }
 
     private func statusColor(_ status: Agent.AgentStatus) -> Color {
         switch status {
-        case .healthy: Color.relaySuccess
-        case .error: Color.relayError
-        case .unknown: Color.relayPrimary
+        case .healthy: theme.success
+        case .error: theme.error
+        case .unknown: theme.primary
         }
     }
 }

@@ -3,9 +3,11 @@ import SwiftUI
 
 struct RelayView: View {
     let authService: AuthService
+    let themeManager: ThemeManager
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.relayTheme) private var theme
     @State private var relay: RelayViewModel
     @State private var showSettings = false
     @State private var showMenu = false
@@ -17,8 +19,9 @@ struct RelayView: View {
     @State private var menuLabelFilter: String?
     @State private var sidebarLabelFilter: String?
 
-    init(authService: AuthService) {
+    init(authService: AuthService, themeManager: ThemeManager) {
         self.authService = authService
+        self.themeManager = themeManager
         _relay = State(initialValue: RelayViewModel(authService: authService))
     }
 
@@ -38,13 +41,16 @@ struct RelayView: View {
                 iPhoneLayout
             }
         }
-        .background(Color.relaySurface)
+        .background(theme.surface)
         .fullScreenCover(isPresented: $showSettings) {
             AgentManagementView(
                 agents: relay.agents,
                 authService: authService,
+                themeManager: themeManager,
                 onChanged: { Task { await relay.refreshAgents() } }
             )
+            .environment(\.relayTheme, themeManager.current)
+            .environment(\.relayChatFontSize, themeManager.chatFontSize)
         }
         .onChange(of: showSettings) { _, isShowing in
             if !isShowing { Task { await relay.fetchPlatformSettings() } }
@@ -110,7 +116,7 @@ struct RelayView: View {
                     }
                 )
                 .overlay(alignment: .bottom) {
-                    Rectangle().fill(Color.relayBorder).frame(height: 1)
+                    Rectangle().fill(theme.border).frame(height: theme.borderWidth)
                 }
             }
 
@@ -131,9 +137,11 @@ struct RelayView: View {
     private var iPhoneHeader: some View {
         HStack(spacing: 12) {
             Button(action: { showMenu = true }) {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color.relayTextTertiary)
+                ThemedIcon(systemName: "line.3.horizontal")
+                    .font(theme.bodyFont(size: 22))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
 
             StatusOrb(
@@ -144,8 +152,10 @@ struct RelayView: View {
             )
 
             Text(relay.activeAgentName ?? "Operator")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(Color.relayTextPrimary)
+                .font(theme.headingFont(size: 20))
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
 
             Spacer()
 
@@ -153,25 +163,20 @@ struct RelayView: View {
                 sessionKebabMenu
 
                 Button(action: { Task { await relay.leaveSession() } }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Lobby")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(Color.relayWarning)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.relayWarning.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    ThemedIcon(systemName: "xmark.circle.fill")
+                        .font(theme.bodyFont(size: 18, weight: .semibold))
+                        .foregroundStyle(theme.warning)
+                        .frame(width: 44, height: 44)
+                        .background(theme.warning.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                 }
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color.relaySurface.ignoresSafeArea(edges: .top))
+        .background(theme.surface.ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.relayBorder).frame(height: 1)
+            Rectangle().fill(theme.border).frame(height: theme.borderWidth)
         }
     }
 
@@ -182,7 +187,7 @@ struct RelayView: View {
             iPadSidebar
                 .frame(width: 280)
 
-            Rectangle().fill(Color.relayBorder).frame(width: 1)
+            Rectangle().fill(theme.border).frame(width: theme.borderWidth)
 
             iPadMainContent
         }
@@ -194,11 +199,11 @@ struct RelayView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Relay")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(Color.relayTextPrimary)
+                        .font(theme.headingFont(size: 20))
+                        .foregroundStyle(theme.textPrimary)
                     Text(relay.activeAgentName.map { "Session with \($0)" } ?? "Lobby")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.relayTextQuaternary)
+                        .font(theme.monoFont(size: 20))
+                        .foregroundStyle(theme.textQuaternary)
                 }
 
                 Spacer()
@@ -211,15 +216,15 @@ struct RelayView: View {
                 )
 
                 Button(action: { showSettings = true }) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Color.relayTextTertiary)
+                    ThemedIcon(systemName: "gearshape")
+                        .font(theme.bodyFont(size: 16))
+                        .foregroundStyle(theme.textTertiary)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .overlay(alignment: .bottom) {
-                Rectangle().fill(Color.relayBorder).frame(height: 1)
+                Rectangle().fill(theme.border).frame(height: theme.borderWidth)
             }
 
             ScrollView {
@@ -234,9 +239,9 @@ struct RelayView: View {
                     if !allLabels.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("LABELS")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(theme.labelFont(size: 12))
                                 .tracking(1.5)
-                                .foregroundStyle(Color.relayTextQuaternary)
+                                .foregroundStyle(theme.textQuaternary)
                                 .padding(.horizontal, 16)
 
                             ScrollView(.horizontal, showsIndicators: false) {
@@ -246,11 +251,11 @@ struct RelayView: View {
                                             sidebarLabelFilter = sidebarLabelFilter == label ? nil : label
                                         } label: {
                                             Text(label)
-                                                .font(.system(size: 11, weight: .medium))
-                                                .foregroundStyle(sidebarLabelFilter == label ? .white : Color.relayPrimary)
+                                                .font(theme.bodyFont(size: 20, weight: .medium))
+                                                .foregroundStyle(sidebarLabelFilter == label ? .white : theme.primary)
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
-                                                .background(sidebarLabelFilter == label ? Color.relayPrimary : Color.relayPrimary.opacity(0.15))
+                                                .background(sidebarLabelFilter == label ? theme.primary : theme.primary.opacity(0.15))
                                                 .clipShape(Capsule())
                                         }
                                         .buttonStyle(.plain)
@@ -271,17 +276,17 @@ struct RelayView: View {
 
             // Logout
             Button(action: { authService.logout() }) {
-                Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.relayTextQuaternary)
+                ThemedLabel(title: "Logout", systemImage: "rectangle.portrait.and.arrow.right")
+                    .font(theme.bodyFont(size: 13))
+                    .foregroundStyle(theme.textQuaternary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .overlay(alignment: .top) {
-                Rectangle().fill(Color.relayBorder).frame(height: 1)
+                Rectangle().fill(theme.border).frame(height: theme.borderWidth)
             }
         }
-        .background(Color.relaySurface.opacity(0.5))
+        .background(theme.surface.opacity(0.5))
     }
 
     private var sidebarAgentsSection: some View {
@@ -291,9 +296,9 @@ struct RelayView: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             Text("AGENTS")
-                .font(.system(size: 10, weight: .semibold))
+                .font(theme.labelFont(size: 12))
                 .tracking(1.5)
-                .foregroundStyle(Color.relayTextQuaternary)
+                .foregroundStyle(theme.textQuaternary)
                 .padding(.horizontal, 16)
 
             VStack(spacing: 2) {
@@ -303,25 +308,25 @@ struct RelayView: View {
                         Task { await relay.sendMessage("connect me to \(agent.name)") }
                     } label: {
                         HStack(spacing: 8) {
-                            Circle()
-                                .fill(agent.status == .healthy ? Color.relaySuccess
-                                      : agent.status == .error ? Color.relayError
-                                      : Color.relayPrimary)
-                                .frame(width: 8, height: 8)
+                            StatusIndicator(
+                                color: agent.status == .healthy ? theme.success
+                                      : agent.status == .error ? theme.error
+                                      : theme.primary
+                            )
 
                             Text(agent.name)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(isActive ? Color.relaySuccessLight : Color.relayTextSecondary)
+                                .font(theme.bodyFont(size: 13, weight: .medium))
+                                .foregroundStyle(isActive ? theme.successLight : theme.textSecondary)
 
                             Spacer()
 
                             Text(agent.llmProvider)
-                                .font(.system(size: 10))
-                                .foregroundStyle(Color.relayTextQuaternary)
+                                .font(theme.monoFont(size: 18))
+                                .foregroundStyle(theme.textQuaternary)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(isActive ? Color.relayAgentActive : Color.clear)
+                        .background(isActive ? theme.agentActive : Color.clear)
                     }
                     .buttonStyle(.plain)
                 }
@@ -336,9 +341,9 @@ struct RelayView: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             Text(sidebarLabelFilter.map { "SESSIONS: \($0.uppercased())" } ?? "SESSIONS")
-                .font(.system(size: 10, weight: .semibold))
+                .font(theme.labelFont(size: 12))
                 .tracking(1.5)
-                .foregroundStyle(Color.relayTextQuaternary)
+                .foregroundStyle(theme.textQuaternary)
                 .padding(.horizontal, 16)
 
             VStack(spacing: 2) {
@@ -349,30 +354,30 @@ struct RelayView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(session.name ?? session.agentName)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(isActive ? Color.relaySuccessLight : Color.relayTextSecondary)
+                                .font(theme.bodyFont(size: 13, weight: .medium))
+                                .foregroundStyle(isActive ? theme.successLight : theme.textSecondary)
                                 .lineLimit(1)
 
                             HStack(spacing: 4) {
                                 Text(session.agentName)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(Color.relayTextQuaternary)
+                                    .font(theme.monoFont(size: 18))
+                                    .foregroundStyle(theme.textQuaternary)
                                 Text("·")
-                                    .foregroundStyle(Color.relayTextQuaternary)
+                                    .foregroundStyle(theme.textQuaternary)
                                 Text(session.status)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(Color.relayTextQuaternary)
+                                    .font(theme.monoFont(size: 18))
+                                    .foregroundStyle(theme.textQuaternary)
                             }
 
                             if !session.labels.isEmpty {
                                 HStack(spacing: 3) {
                                     ForEach(session.labels.prefix(3), id: \.self) { label in
                                         Text(label)
-                                            .font(.system(size: 9, weight: .medium))
-                                            .foregroundStyle(Color.relayPrimary)
+                                            .font(theme.monoFont(size: 18, weight: .medium))
+                                            .foregroundStyle(theme.primary)
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 1)
-                                            .background(Color.relayPrimary.opacity(0.15))
+                                            .background(theme.primary.opacity(0.15))
                                             .clipShape(Capsule())
                                     }
                                 }
@@ -380,15 +385,15 @@ struct RelayView: View {
 
                             if let summary = session.summary {
                                 Text(summary)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Color.relayTextTertiary)
+                                    .font(theme.bodyFont(size: 20))
+                                    .foregroundStyle(theme.textTertiary)
                                     .lineLimit(2)
                             }
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(isActive ? Color.relayAgentActive : Color.clear)
+                        .background(isActive ? theme.agentActive : Color.clear)
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -439,8 +444,10 @@ struct RelayView: View {
             )
 
             Text(relay.activeAgentName ?? "Operator")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(Color.relayTextPrimary)
+                .font(theme.headingFont(size: 20))
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
 
             Spacer()
 
@@ -448,25 +455,20 @@ struct RelayView: View {
                 sessionKebabMenu
 
                 Button(action: { Task { await relay.leaveSession() } }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Lobby")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(Color.relayWarning)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.relayWarning.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    ThemedIcon(systemName: "xmark.circle.fill")
+                        .font(theme.bodyFont(size: 18, weight: .semibold))
+                        .foregroundStyle(theme.warning)
+                        .frame(width: 44, height: 44)
+                        .background(theme.warning.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                 }
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color.relaySurface.ignoresSafeArea(edges: .top))
+        .background(theme.surface.ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.relayBorder).frame(height: 1)
+            Rectangle().fill(theme.border).frame(height: theme.borderWidth)
         }
     }
 
@@ -488,34 +490,47 @@ struct RelayView: View {
                 Label("Manage Labels", systemImage: "tag")
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 16))
-                .foregroundStyle(Color.relayTextTertiary)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 8)
+            ThemedIcon(systemName: "ellipsis")
+                .font(theme.bodyFont(size: 24, weight: .bold))
+                .foregroundStyle(theme.textPrimary)
+                .frame(width: 48, height: 48)
+                .background(theme.elevated)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
     }
 
     @ViewBuilder
     private var sessionLabelsBar: some View {
-        if relay.activeSessionId != nil && !relay.activeSessionLabels.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(relay.activeSessionLabels, id: \.self) { label in
-                        Text(label)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.relayPrimary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.relayPrimary.opacity(0.15))
-                            .clipShape(Capsule())
+        if relay.activeSessionId != nil {
+            let sessionName = relay.sessions.first(where: { $0.sessionId == relay.activeSessionId })?.name
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(sessionName ?? "<New session>")
+                    .font(theme.monoFont(size: 18))
+                    .foregroundStyle(theme.textTertiary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 16)
+
+                if !relay.activeSessionLabels.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(relay.activeSessionLabels, id: \.self) { label in
+                                Text(label)
+                                    .font(theme.bodyFont(size: 20, weight: .medium))
+                                    .foregroundStyle(theme.primary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(theme.primary.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .padding(.horizontal, 16)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
             }
+            .padding(.vertical, 6)
             .overlay(alignment: .bottom) {
-                Rectangle().fill(Color.relayBorder).frame(height: 1)
+                Rectangle().fill(theme.border).frame(height: theme.borderWidth)
             }
         }
     }
@@ -532,14 +547,16 @@ struct RelayView: View {
                             showSettings = true
                         }
                     }) {
-                        Label("Settings", systemImage: "gearshape")
+                        ThemedLabel(title: "Settings", systemImage: "gearshape")
+                            .foregroundStyle(theme.textPrimary)
                     }
 
                     Button(role: .destructive, action: {
                         showMenu = false
                         authService.logout()
                     }) {
-                        Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
+                        ThemedLabel(title: "Logout", systemImage: "rectangle.portrait.and.arrow.right")
+                            .foregroundStyle(theme.error)
                     }
                 }
 
@@ -547,7 +564,7 @@ struct RelayView: View {
                     // Label filter chips
                     let allLabels = Array(Set(relay.sessions.flatMap(\.labels))).sorted()
                     if !allLabels.isEmpty {
-                        Section("Labels") {
+                        Section(header: Text("Labels").font(theme.labelFont(size: 12)).tracking(1).foregroundStyle(theme.primary)) {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 6) {
                                     ForEach(allLabels, id: \.self) { label in
@@ -555,11 +572,11 @@ struct RelayView: View {
                                             menuLabelFilter = menuLabelFilter == label ? nil : label
                                         } label: {
                                             Text(label)
-                                                .font(.system(size: 12, weight: .medium))
-                                                .foregroundStyle(menuLabelFilter == label ? .white : Color.relayPrimary)
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 5)
-                                                .background(menuLabelFilter == label ? Color.relayPrimary : Color.relayPrimary.opacity(0.15))
+                                                .font(theme.bodyFont(size: 18, weight: .medium))
+                                                .foregroundStyle(menuLabelFilter == label ? .white : theme.primary)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 6)
+                                                .background(menuLabelFilter == label ? theme.primary : theme.primary.opacity(0.15))
                                                 .clipShape(Capsule())
                                         }
                                         .buttonStyle(.plain)
@@ -575,40 +592,40 @@ struct RelayView: View {
                         relay.sessions.filter { $0.labels.contains(filter) }
                     } ?? Array(relay.sessions.prefix(10))
 
-                    Section(menuLabelFilter.map { "Sessions: \($0)" } ?? "Recent Sessions") {
+                    Section(header: Text(menuLabelFilter.map { "Sessions: \($0)" } ?? "Recent Sessions").font(theme.labelFont(size: 12)).tracking(1).foregroundStyle(theme.primary)) {
                         ForEach(filteredSessions.prefix(10)) { session in
                             Button(action: {
                                 showMenu = false
                                 Task { await relay.resumeSession(session.sessionId) }
                             }) {
-                                VStack(alignment: .leading, spacing: 3) {
+                                VStack(alignment: .leading, spacing: 4) {
                                     Text(session.name ?? session.agentName)
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundStyle(Color.relayTextSecondary)
+                                        .font(theme.bodyFont(size: 16, weight: .medium))
+                                        .foregroundStyle(theme.textSecondary)
                                         .lineLimit(1)
 
                                     HStack(spacing: 4) {
                                         Text(session.agentName)
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(Color.relayTextQuaternary)
+                                            .font(theme.monoFont(size: 14))
+                                            .foregroundStyle(theme.textQuaternary)
 
                                         Text("·")
-                                            .foregroundStyle(Color.relayTextQuaternary)
+                                            .foregroundStyle(theme.textQuaternary)
 
                                         Text(session.status)
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(Color.relayTextQuaternary)
+                                            .font(theme.monoFont(size: 14))
+                                            .foregroundStyle(theme.textQuaternary)
                                     }
 
                                     if !session.labels.isEmpty {
                                         HStack(spacing: 4) {
                                             ForEach(session.labels, id: \.self) { label in
                                                 Text(label)
-                                                    .font(.system(size: 10, weight: .medium))
-                                                    .foregroundStyle(Color.relayPrimary)
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 1)
-                                                    .background(Color.relayPrimary.opacity(0.15))
+                                                    .font(theme.monoFont(size: 18, weight: .medium))
+                                                    .foregroundStyle(theme.primary)
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 3)
+                                                    .background(theme.primary.opacity(0.15))
                                                     .clipShape(Capsule())
                                             }
                                         }
@@ -616,8 +633,8 @@ struct RelayView: View {
 
                                     if let summary = session.summary {
                                         Text(summary)
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(Color.relayTextTertiary)
+                                            .font(theme.bodyFont(size: 14))
+                                            .foregroundStyle(theme.textTertiary)
                                             .lineLimit(2)
                                     }
                                 }
@@ -647,15 +664,23 @@ struct RelayView: View {
                     }
                 }
             }
-            .navigationTitle("Menu")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Menu")
+                        .font(theme.headingFont(size: 18))
+                        .foregroundStyle(theme.textPrimary)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { showMenu = false }
+                    Button { showMenu = false } label: {
+                        Text("Done")
+                            .font(theme.bodyFont(size: 16, weight: .medium))
+                            .foregroundStyle(theme.primary)
+                    }
                 }
             }
         }
-        .background(Color.relaySurface)
+        .background(theme.surface)
     }
 
     // MARK: - Label Editor Sheet
@@ -665,8 +690,8 @@ struct RelayView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if relay.activeSessionLabels.isEmpty {
                     Text("No labels yet")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color.relayTextTertiary)
+                        .font(theme.bodyFont(size: 14))
+                        .foregroundStyle(theme.textTertiary)
                         .padding(.horizontal, 16)
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -674,8 +699,8 @@ struct RelayView: View {
                             ForEach(relay.activeSessionLabels, id: \.self) { label in
                                 HStack(spacing: 4) {
                                     Text(label)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(Color.relayPrimary)
+                                        .font(theme.bodyFont(size: 20, weight: .medium))
+                                        .foregroundStyle(theme.primary)
 
                                     Button {
                                         guard let sessionId = relay.activeSessionId else { return }
@@ -683,13 +708,13 @@ struct RelayView: View {
                                         Task { await relay.updateSessionLabels(sessionId, labels: newLabels) }
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(Color.relayPrimary.opacity(0.6))
+                                            .font(theme.bodyFont(size: 18))
+                                            .foregroundStyle(theme.primary.opacity(0.6))
                                     }
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.relayPrimary.opacity(0.15))
+                                .background(theme.primary.opacity(0.15))
                                 .clipShape(Capsule())
                             }
                         }
@@ -718,8 +743,8 @@ struct RelayView: View {
                 if !existingLabels.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Existing Labels")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.relayTextQuaternary)
+                            .font(theme.labelFont(size: 14))
+                            .foregroundStyle(theme.textQuaternary)
                             .padding(.horizontal, 16)
 
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -730,16 +755,16 @@ struct RelayView: View {
                                         let newLabels = relay.activeSessionLabels + [label]
                                         Task { await relay.updateSessionLabels(sessionId, labels: newLabels) }
                                     } label: {
-                                        HStack(spacing: 3) {
+                                        HStack(spacing: 4) {
                                             Image(systemName: "plus.circle.fill")
-                                                .font(.system(size: 12))
+                                                .font(theme.bodyFont(size: 18))
                                             Text(label)
-                                                .font(.system(size: 13, weight: .medium))
+                                                .font(theme.bodyFont(size: 20, weight: .medium))
                                         }
-                                        .foregroundStyle(Color.relayTextTertiary)
+                                        .foregroundStyle(theme.textTertiary)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 6)
-                                        .background(Color.relayElevated)
+                                        .background(theme.elevated)
                                         .clipShape(Capsule())
                                     }
                                     .buttonStyle(.plain)

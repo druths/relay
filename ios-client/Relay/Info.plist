@@ -40,6 +40,11 @@
 	<string>Relay uses speech recognition to transcribe your voice input.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>VT323-Regular.ttf</string>
+		<string>PressStart2P-Regular.ttf</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
