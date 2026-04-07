@@ -208,13 +208,6 @@ struct RelayView: View {
 
                 Spacer()
 
-                StatusOrb(
-                    activeSpeaker: relay.activeSpeaker,
-                    status: relay.status,
-                    connected: relay.connected,
-                    compact: true
-                )
-
                 Button(action: { showSettings = true }) {
                     ThemedIcon(systemName: "gearshape")
                         .font(theme.bodyFont(size: 16))
