@@ -39,39 +39,45 @@ async def _simple_llm_call(
         client = _get_openai_client(base_url, api_key)
         if client is None:
             return None
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
+        # Newer OpenAI models require max_completion_tokens instead of max_tokens
+        kwargs: dict = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            max_tokens=max_tokens,
-            temperature=0.3,
-        )
+            "temperature": 0.3,
+        }
+        try:
+            response = await client.chat.completions.create(max_tokens=max_tokens, **kwargs)
+        except Exception as e:
+            if "max_tokens" in str(e) and "max_completion_tokens" in str(e):
+                response = await client.chat.completions.create(max_completion_tokens=max_tokens, **kwargs)
+            else:
+                raise
         return (response.choices[0].message.content or "").strip() or None
 
 
 async def generate_session_name(
-    first_user_message: str,
-    first_agent_response: str,
-    agent_name: str,
+    transcript: str,
+    _unused: str = "",
+    agent_name: str = "Agent",
     *,
     provider: str = "openai",
     model: str = "gpt-4o-mini",
     base_url: str | None = None,
     api_key: str | None = None,
 ) -> str:
-    """Generate a short 3-5 word title for a session from the first exchange."""
+    """Generate a short 3-5 word title for a session from the conversation so far."""
     try:
         result = await _simple_llm_call(
             provider, model, base_url, api_key,
             system_prompt=(
-                "Generate a short title (3-5 words) that captures the topic of this conversation. "
+                "Generate a short title (3-5 words) that captures the main topic of this conversation. "
                 "Return ONLY the title, no quotes, no punctuation at the end."
             ),
             user_content=(
-                f"User said to {agent_name}: \"{first_user_message}\"\n"
-                f"{agent_name} replied: \"{first_agent_response[:200]}\""
+                f"Conversation with {agent_name}:\n{transcript[:600]}"
             ),
             max_tokens=20,
         )
@@ -79,13 +85,21 @@ async def generate_session_name(
             logger.info("Session name generated: %s", result)
             return result[:200]
     except Exception as exc:
-        logger.warning("Session naming LLM failed, using fallback: %s", exc)
+        logger.warning("Session naming LLM failed, using fallback: %s", exc, exc_info=True)
 
-    return _fallback_name(first_user_message)
+    return _fallback_name(transcript)
 
 
-def _fallback_name(first_user_message: str) -> str:
-    truncated = first_user_message[:40].strip()
+def _fallback_name(transcript: str) -> str:
+    # Extract first user line from transcript
+    for line in transcript.split("\n"):
+        if line.startswith("user:"):
+            text = line[5:].strip()
+            truncated = text[:40].strip()
+            if len(text) > 40:
+                truncated += "..."
+            return truncated
+    truncated = transcript[:40].strip()
     if len(first_user_message) > 40:
         truncated += "..."
     return truncated

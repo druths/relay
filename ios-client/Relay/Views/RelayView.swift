@@ -353,10 +353,17 @@ struct RelayView: View {
                         Task { await relay.resumeSession(session.sessionId) }
                     } label: {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(session.name ?? session.agentName)
-                                .font(theme.bodyFont(size: 13, weight: .medium))
-                                .foregroundStyle(isActive ? theme.successLight : theme.textSecondary)
-                                .lineLimit(1)
+                            HStack(spacing: 6) {
+                                if session.status == "processing" {
+                                    BlinkingIndicator(color: theme.primary, size: 6)
+                                } else if session.hasUnread {
+                                    StatusIndicator(color: theme.primary, size: 6)
+                                }
+                                Text(session.name ?? session.agentName)
+                                    .font(theme.bodyFont(size: 13, weight: .medium))
+                                    .foregroundStyle(isActive ? theme.successLight : theme.textSecondary)
+                                    .lineLimit(1)
+                            }
 
                             HStack(spacing: 4) {
                                 Text(session.agentName)
@@ -599,10 +606,17 @@ struct RelayView: View {
                                 Task { await relay.resumeSession(session.sessionId) }
                             }) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(session.name ?? session.agentName)
-                                        .font(theme.bodyFont(size: 16, weight: .medium))
-                                        .foregroundStyle(theme.textSecondary)
-                                        .lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        if session.status == "processing" {
+                                            BlinkingIndicator(color: theme.primary, size: 6)
+                                        } else if session.hasUnread {
+                                            StatusIndicator(color: theme.primary, size: 6)
+                                        }
+                                        Text(session.name ?? session.agentName)
+                                            .font(theme.bodyFont(size: 16, weight: .medium))
+                                            .foregroundStyle(theme.textSecondary)
+                                            .lineLimit(1)
+                                    }
 
                                     HStack(spacing: 4) {
                                         Text(session.agentName)

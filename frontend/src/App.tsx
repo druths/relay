@@ -202,7 +202,14 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                           : "hover:bg-gray-800 text-gray-300"
                       }`}
                     >
-                      <div className="font-medium">{s.name || s.agent_name}</div>
+                      <div className="font-medium flex items-center gap-2">
+                        {s.status === "processing" ? (
+                          <span className="w-2 h-2 rounded-full flex-shrink-0 status-dot session-processing-dot bg-amber-500" />
+                        ) : s.has_unread ? (
+                          <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 status-dot" />
+                        ) : null}
+                        {s.name || s.agent_name}
+                      </div>
                       <div className="text-xs text-gray-500">
                         {s.agent_name} &middot; {s.status}
                       </div>

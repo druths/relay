@@ -10,6 +10,7 @@ struct Session: Codable, Identifiable, Equatable {
     var name: String?
     var summary: String?
     var labels: [String]
+    var hasUnread: Bool
 
     var id: String { sessionId }
 
@@ -23,6 +24,7 @@ struct Session: Codable, Identifiable, Equatable {
         case name
         case summary
         case labels
+        case hasUnread = "has_unread"
     }
 
     init(from decoder: Decoder) throws {
@@ -36,5 +38,6 @@ struct Session: Codable, Identifiable, Equatable {
         name = try container.decodeIfPresent(String.self, forKey: .name)
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
+        hasUnread = try container.decodeIfPresent(Bool.self, forKey: .hasUnread) ?? false
     }
 }

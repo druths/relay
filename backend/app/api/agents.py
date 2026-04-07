@@ -142,20 +142,21 @@ async def delete_agent(
     if agent.name == "Operator":
         raise HTTPException(status_code=400, detail="Cannot delete the Operator agent")
 
-    # Check for active sessions
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    # Soft-delete all sessions for this agent
     result = await db.execute(
         select(Session).where(
             Session.agent_id == agent_id,
-            Session.status == "active",
-        ).limit(1)
-    )
-    if result.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete an agent with active sessions",
+            Session.deleted_at.is_(None),
         )
+    )
+    for session in result.scalars().all():
+        session.deleted_at = now
 
-    await db.delete(agent)
+    # Soft-delete the agent
+    agent.deleted_at = now
     await db.commit()
 
 

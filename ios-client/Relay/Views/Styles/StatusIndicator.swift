@@ -20,6 +20,37 @@ struct StatusIndicator: View {
     }
 }
 
+/// A blinking status indicator for processing/active sessions.
+struct BlinkingIndicator: View {
+    let color: Color
+    var size: CGFloat = 8
+
+    @Environment(\.relayTheme) private var theme
+    @State private var on = true
+
+    var body: some View {
+        Group {
+            if theme.pixelIndicators {
+                Rectangle()
+                    .fill(color)
+                    .frame(width: size, height: size)
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: size, height: size)
+            }
+        }
+        .opacity(on ? 1 : 0.15)
+        .animation(
+            theme.pixelIndicators
+                ? .easeInOut(duration: 0.4).repeatForever(autoreverses: true)
+                : .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+            value: on
+        )
+        .onAppear { on = false }
+    }
+}
+
 /// An icon that uses SF Symbols in default theme and pixel art / text glyphs in pixel themes.
 struct ThemedIcon: View {
     let systemName: String

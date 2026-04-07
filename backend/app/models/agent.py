@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,3 +25,4 @@ class Agent(Base):
     llm_api_key: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     tts_api_key: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)

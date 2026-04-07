@@ -38,6 +38,7 @@ export interface Session {
   name: string | null;
   summary: string | null;
   labels: string[];
+  has_unread: boolean;
 }
 
 export interface Message {
@@ -185,6 +186,22 @@ export interface WsSessionDeleted {
   };
 }
 
+export interface WsSessionStatus {
+  type: "session_status";
+  payload: {
+    session_id: string;
+    status: string;
+  };
+}
+
+export interface WsSessionUnread {
+  type: "session_unread";
+  payload: {
+    session_id: string;
+    has_unread: boolean;
+  };
+}
+
 export interface WsError {
   type: "error";
   payload: {
@@ -210,4 +227,6 @@ export type WsEvent =
   | WsSessionRenamed
   | WsSessionLabelsUpdated
   | WsSessionDeleted
+  | WsSessionStatus
+  | WsSessionUnread
   | WsError;

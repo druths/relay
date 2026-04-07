@@ -45,6 +45,7 @@ class SessionOut(BaseModel):
     name: str | None = None
     summary: str | None = None
     labels: list[str] = []
+    has_unread: bool = False
 
 
 class MessageOut(BaseModel):

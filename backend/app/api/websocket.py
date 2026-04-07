@@ -17,6 +17,8 @@ from app.services.conversation_manager import (
     get_session_messages,
     handle_lobby_message,
     handle_session_message_stream,
+    mark_session_read,
+    mark_session_unread,
     pause_session,
     rename_session,
     set_session_labels,
@@ -50,6 +52,30 @@ _TTS_EMOJI_RE = re.compile(
 _TTS_TRAILING_PUNCT_RE = re.compile(r'[.,;:]+$')
 
 
+# ── Connection registry for multi-client broadcast ─────────────────────
+_user_connections: dict[str, set[WebSocket]] = {}
+
+
+def _register_connection(user_id: str, ws: WebSocket) -> None:
+    _user_connections.setdefault(user_id, set()).add(ws)
+
+
+def _unregister_connection(user_id: str, ws: WebSocket) -> None:
+    if user_id in _user_connections:
+        _user_connections[user_id].discard(ws)
+        if not _user_connections[user_id]:
+            del _user_connections[user_id]
+
+
+async def _broadcast_to_user(user_id: str, event: dict) -> None:
+    """Send an event to all connected WebSocket clients for a user."""
+    for ws in list(_user_connections.get(user_id, [])):
+        try:
+            await ws.send_json(event)
+        except Exception:
+            pass
+
+
 @router.websocket("/v1/lobby")
 async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
     # Verify JWT before accepting the connection
@@ -62,9 +88,12 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
     await websocket.accept()
 
     user_id = "default"
+    _register_connection(user_id, websocket)
     active_session_id: uuid.UUID | None = None
     lobby_history: list[dict] = []  # In-memory conversation history for the LLM Operator
     is_live_mode = False
+    # Signal to detach in-flight task (let it finish in background)
+    detach_event = asyncio.Event()
     voice_mode_instructions: str | None = None
 
     try:
@@ -145,9 +174,11 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                     elif msg_type == "text_input":
                         await _cancel_active_task(active_task)
                         text = data["payload"]["text"]
+                        detach_event = asyncio.Event()  # Fresh event for each task
                         active_task = asyncio.create_task(
                             _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
-                                         voice_mode_instructions if is_live_mode else None)
+                                         voice_mode_instructions if is_live_mode else None,
+                                         detach_event=detach_event)
                         )
 
                     elif msg_type == "audio_input":
@@ -185,25 +216,43 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                         })
 
                         await _cancel_active_task(active_task)
+                        detach_event = asyncio.Event()
                         active_task = asyncio.create_task(
                             _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
-                                         voice_mode_instructions if is_live_mode else None)
+                                         voice_mode_instructions if is_live_mode else None,
+                                         detach_event=detach_event)
                         )
 
                     elif msg_type == "leave_session":
-                        await _cancel_active_task(active_task)
-                        active_task = None
+                        task_still_running = active_task is not None and not active_task.done()
+                        if task_still_running:
+                            # Signal task to stop sending to WS but finish in background
+                            detach_event.set()
+                            active_task = None
+                            detach_event = asyncio.Event()
+                        else:
+                            active_task = None
+
                         if active_session_id:
-                            result = await pause_session(db, active_session_id)
                             left_session_id = active_session_id
                             active_session_id = None
 
-                            if result == "deleted":
+                            # Check if session should be deleted (no user messages)
+                            from app.services.conversation_manager import has_user_messages
+                            has_msgs = await has_user_messages(db, left_session_id)
+                            if not has_msgs:
+                                from app.services.conversation_manager import delete_session
+                                await delete_session(db, left_session_id)
                                 await websocket.send_json({
                                     "type": "session_deleted",
                                     "payload": {"session_id": str(left_session_id)},
                                 })
                             else:
+                                session = await get_session(db, left_session_id)
+                                if session:
+                                    # "processing" if agent is still generating in background, "paused" otherwise
+                                    session.status = "processing" if task_still_running else "paused"
+                                    await db.commit()
                                 await websocket.send_json({
                                     "type": "session_left",
                                     "payload": {"session_id": None},
@@ -227,8 +276,24 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
 
                     elif msg_type == "resume_session":
                         target_sid = uuid.UUID(data["payload"]["session_id"])
+                        # Detach any in-flight task (let agent finish in background)
+                        task_running = active_task is not None and not active_task.done()
+                        if task_running:
+                            detach_event.set()
+                            active_task = None
+                            detach_event = asyncio.Event()
+                            # Set old session to "processing"
+                            if active_session_id:
+                                old_session = await get_session(db, active_session_id)
+                                if old_session:
+                                    old_session.status = "processing"
+                                    await db.commit()
+                        else:
+                            await _cancel_active_task(active_task)
+                            active_task = None
                         active_session_id = await _do_resume(
-                            websocket, db, user_id, target_sid, active_session_id
+                            websocket, db, user_id, target_sid, active_session_id,
+                            skip_pause=task_running,
                         )
 
                     elif msg_type == "rename_session":
@@ -263,6 +328,7 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                 recv_task.cancel()
 
     except WebSocketDisconnect:
+        _unregister_connection(user_id, websocket)
         if active_session_id:
             try:
                 async with websocket.app.state.db_session() as db:
@@ -270,6 +336,7 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
             except Exception:
                 pass
     except Exception as e:
+        _unregister_connection(user_id, websocket)
         try:
             await websocket.send_json(
                 {"type": "error", "payload": {"message": str(e)}}
@@ -296,6 +363,7 @@ async def _handle_text(
     active_session_id: uuid.UUID | None,
     lobby_history: list[dict],
     voice_mode_instructions: str | None = None,
+    detach_event: asyncio.Event | None = None,
 ) -> uuid.UUID | None:
     """Process user text (from typing or STT). Returns updated active_session_id."""
     # Processing indicator
@@ -324,9 +392,26 @@ async def _handle_text(
     tts_seq = 0
     tts_tasks: list[asyncio.Task] = []
 
+    detached = False
+    detached_session_id = active_session_id
+
     try:
         async for event in handle_session_message_stream(db, active_session_id, text, voice_mode_instructions):
+            # Check if we've been detached (user left mid-stream)
+            if not detached and detach_event and detach_event.is_set():
+                detached = True
+                # Cancel any in-flight TTS tasks — no point synthesizing
+                for t in tts_tasks:
+                    t.cancel()
+                tts_tasks = []
+                tts_provider = None
+                logger.info("[WS] detached — finishing stream in background for session %s", detached_session_id)
+
             etype = event["type"]
+
+            if detached:
+                # Silently consume events — conversation_manager still persists messages
+                continue
 
             if etype == "session_left":
                 active_session_id = None
@@ -413,6 +498,31 @@ async def _handle_text(
         if tts_tasks:
             await asyncio.gather(*tts_tasks, return_exceptions=True)
         raise
+
+    # If we were detached, mark the session as unread and broadcast
+    if detached and detached_session_id:
+        logger.info("[WS] background stream complete for session %s — marking unread", detached_session_id)
+        await mark_session_unread(db, detached_session_id)
+        # Generate summary and set status to "paused"
+        try:
+            await pause_session(db, detached_session_id)
+        except Exception:
+            pass
+        # Broadcast both unread and status change to all clients
+        await _broadcast_to_user(user_id, {
+            "type": "session_unread",
+            "payload": {
+                "session_id": str(detached_session_id),
+                "has_unread": True,
+            },
+        })
+        await _broadcast_to_user(user_id, {
+            "type": "session_status",
+            "payload": {
+                "session_id": str(detached_session_id),
+                "status": "paused",
+            },
+        })
 
     return active_session_id
 
@@ -569,17 +679,27 @@ async def _do_resume(
     user_id: str,
     target_sid: uuid.UUID,
     active_session_id: uuid.UUID | None,
+    skip_pause: bool = False,
 ) -> uuid.UUID | None:
     """Resume a specific session. Returns the new active_session_id."""
     session = await get_session(db, target_sid)
     if not session or session.user_id != user_id:
         return active_session_id
 
-    if active_session_id:
+    if active_session_id and not skip_pause:
         await pause_session(db, active_session_id)
 
+    was_processing = session.status == "processing"
     session.status = "active"
+    if session.has_unread:
+        session.has_unread = False
     await db.commit()
+
+    # Broadcast read state to all clients
+    await _broadcast_to_user(user_id, {
+        "type": "session_unread",
+        "payload": {"session_id": str(session.session_id), "has_unread": False},
+    })
 
     agent = await agent_manager.get_agent_by_id(db, session.agent_id)
     labels = await get_session_labels(db, session.session_id)
@@ -596,6 +716,18 @@ async def _do_resume(
         "type": "session_history",
         "payload": {"messages": messages},
     })
+
+    # If the agent is still generating in the background, show thinking indicator
+    if was_processing:
+        await websocket.send_json({
+            "type": "state_update",
+            "payload": {
+                "active_speaker": agent.name if agent else "agent",
+                "status": "processing",
+                "session_id": str(session.session_id),
+            },
+        })
+
     return session.session_id
 
 

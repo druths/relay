@@ -314,6 +314,20 @@ body {
   scrollbar-color: var(--border) transparent;
 }
 
+/* ── Processing session indicator blink ── */
+@keyframes sessionProcessingBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+.session-processing-dot {
+  animation: sessionProcessingBlink 1.2s ease-in-out infinite;
+}
+[data-theme="tva"] .session-processing-dot,
+[data-theme="tva_mono"] .session-processing-dot {
+  background-color: var(--primary) !important;
+  animation: sessionProcessingBlink 0.8s steps(2) infinite;
+}
+
 @keyframes dotPulse {
   0%, 100% { transform: scale(0.5); opacity: 0.3; }
   50%       { transform: scale(1.0); opacity: 1.0; }

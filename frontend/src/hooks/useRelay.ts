@@ -254,6 +254,28 @@ export function useRelay() {
           }));
           break;
 
+        case "session_status":
+          setState((s) => ({
+            ...s,
+            sessions: s.sessions.map((sess) =>
+              sess.session_id === event.payload.session_id
+                ? { ...sess, status: event.payload.status }
+                : sess
+            ),
+          }));
+          break;
+
+        case "session_unread":
+          setState((s) => ({
+            ...s,
+            sessions: s.sessions.map((sess) =>
+              sess.session_id === event.payload.session_id
+                ? { ...sess, has_unread: event.payload.has_unread }
+                : sess
+            ),
+          }));
+          break;
+
         case "session_deleted":
           audioPlayerRef.current.stop();
           setState((s) => ({

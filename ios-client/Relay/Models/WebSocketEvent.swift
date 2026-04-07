@@ -13,6 +13,8 @@ enum WebSocketEvent {
     case sessionRenamed(SessionRenamedPayload)
     case sessionLabelsUpdated(SessionLabelsUpdatedPayload)
     case sessionDeleted(SessionDeletedPayload)
+    case sessionUnread(SessionUnreadPayload)
+    case sessionStatus(SessionStatusPayload)
     case textStart(TextStartPayload)
     case textDelta(TextDeltaPayload)
     case textDone(TextDonePayload)
@@ -112,6 +114,26 @@ struct SessionDeletedPayload: Codable {
     }
 }
 
+struct SessionUnreadPayload: Codable {
+    let sessionId: String
+    let hasUnread: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case hasUnread = "has_unread"
+    }
+}
+
+struct SessionStatusPayload: Codable {
+    let sessionId: String
+    let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case status
+    }
+}
+
 struct TextStartPayload: Codable {
     let speaker: String
 }
@@ -201,6 +223,10 @@ extension WebSocketEvent {
                 return .sessionLabelsUpdated(try decoder.decode(SessionLabelsUpdatedPayload.self, from: payloadData))
             case "session_deleted":
                 return .sessionDeleted(try decoder.decode(SessionDeletedPayload.self, from: payloadData))
+            case "session_unread":
+                return .sessionUnread(try decoder.decode(SessionUnreadPayload.self, from: payloadData))
+            case "session_status":
+                return .sessionStatus(try decoder.decode(SessionStatusPayload.self, from: payloadData))
             case "text_start":
                 return .textStart(try decoder.decode(TextStartPayload.self, from: payloadData))
             case "text_delta":

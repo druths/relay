@@ -531,6 +531,16 @@ final class RelayViewModel {
                 activeSessionLabels = payload.labels
             }
 
+        case .sessionStatus(let payload):
+            if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
+                sessions[idx].status = payload.status
+            }
+
+        case .sessionUnread(let payload):
+            if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
+                sessions[idx].hasUnread = payload.hasUnread
+            }
+
         case .sessionDeleted(let payload):
             audio.stopAudio()
             audioGapTask?.cancel()

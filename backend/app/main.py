@@ -99,6 +99,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE agents ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0"
         ))
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS has_unread BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ"
+        ))
     # Seed data
     await _seed_agents()
     await _seed_platform_settings()

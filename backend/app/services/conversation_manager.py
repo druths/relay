@@ -55,21 +55,36 @@ async def _operator_llm_config(db: AsyncSession) -> tuple[str, str, str | None, 
 
 async def get_session(db: AsyncSession, session_id: uuid.UUID) -> Session | None:
     result = await db.execute(
-        select(Session).where(Session.session_id == session_id)
+        select(Session).where(Session.session_id == session_id, Session.deleted_at.is_(None))
     )
     return result.scalar_one_or_none()
 
 
 async def delete_session(db: AsyncSession, session_id: uuid.UUID) -> bool:
-    """Delete a session and all its messages. Returns True if found and deleted."""
+    """Soft-delete a session. Returns True if found and deleted."""
     session = await get_session(db, session_id)
     if not session:
         return False
-    await db.execute(delete(Message).where(Message.session_id == session_id))
-    await db.delete(session)
+    session.deleted_at = datetime.now(timezone.utc)
     await db.commit()
     await invalidate_session_cache(session_id)
     return True
+
+
+async def mark_session_unread(db: AsyncSession, session_id: uuid.UUID) -> None:
+    """Mark a session as having unread messages."""
+    session = await get_session(db, session_id)
+    if session:
+        session.has_unread = True
+        await db.commit()
+
+
+async def mark_session_read(db: AsyncSession, session_id: uuid.UUID) -> None:
+    """Clear the unread flag on a session."""
+    session = await get_session(db, session_id)
+    if session and session.has_unread:
+        session.has_unread = False
+        await db.commit()
 
 
 async def rename_session(
@@ -160,7 +175,7 @@ async def list_sessions(db: AsyncSession, user_id: str = "default", label_filter
     query = (
         select(Session, Agent.name)
         .join(Agent, Session.agent_id == Agent.agent_id)
-        .where(Session.user_id == user_id)
+        .where(Session.user_id == user_id, Session.deleted_at.is_(None))
     )
 
     if label_filter:
@@ -187,6 +202,7 @@ async def list_sessions(db: AsyncSession, user_id: str = "default", label_filter
             "name": s.name,
             "summary": s.summary,
             "labels": labels,
+            "has_unread": s.has_unread,
         })
     return sessions
 
@@ -256,7 +272,7 @@ async def pause_session(db: AsyncSession, session_id: uuid.UUID) -> str:
     didn't exist or wasn't active.
     """
     session = await get_session(db, session_id)
-    if not session or session.status != "active":
+    if not session or session.status not in ("active", "processing"):
         return "not_found"
 
     # If the user never sent a message, delete the session entirely
@@ -264,22 +280,36 @@ async def pause_session(db: AsyncSession, session_id: uuid.UUID) -> str:
         await delete_session(db, session_id)
         return "deleted"
 
-    try:
-        messages = await get_session_messages(db, session_id)
-        if messages:
-            agent = await agent_manager.get_agent_by_id(db, session.agent_id)
-            agent_name = agent.name if agent else "Agent"
-            op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
-            session.summary = await generate_session_summary(
-                messages, agent_name,
-                provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
-            )
-    except Exception as exc:
-        logger.warning("Failed to generate session summary: %s", exc)
-
     session.status = "paused"
     await db.commit()
+
+    # Generate summary async only if the session has no name yet
+    if not session.name:
+        import asyncio
+        asyncio.ensure_future(_generate_summary_async(session_id, db))
+
     return "paused"
+
+
+async def _generate_summary_async(session_id: uuid.UUID, db) -> None:
+    """Generate a session summary in the background and update the DB."""
+    try:
+        session = await get_session(db, session_id)
+        if not session:
+            return
+        messages = await get_session_messages(db, session_id)
+        if not messages:
+            return
+        agent = await agent_manager.get_agent_by_id(db, session.agent_id)
+        agent_name = agent.name if agent else "Agent"
+        op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
+        session.summary = await generate_session_summary(
+            messages, agent_name,
+            provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
+        )
+        await db.commit()
+    except Exception as exc:
+        logger.warning("Background summary generation failed: %s", exc)
 
 
 # ── Lobby message handling (Operator) ───────────────────────────────────
@@ -510,18 +540,22 @@ async def handle_session_message(
     await _persist_message(db, session_id, "agent", response_text)
     await invalidate_session_cache(str(session_id))
 
-    # Auto-name the session after the first user exchange
+    # Auto-name the session after 4 turns (2 user + 2 agent)
     if session.name is None:
-        try:
-            op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
-            name = await generate_session_name(
-                text, response_text, agent.name,
-                provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
-            )
-            session.name = name
-            await db.commit()
-        except Exception as exc:
-            logger.warning("Failed to generate session name: %s", exc)
+        msgs = await get_session_messages(db, session_id)
+        user_turn_count = sum(1 for m in msgs if m["role"] == "user")
+        if user_turn_count >= 2:
+            try:
+                transcript = "\n".join(f"{m['role']}: {m['text_content'][:150]}" for m in msgs[-6:])
+                op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
+                name = await generate_session_name(
+                    transcript, "", agent.name,
+                    provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
+                )
+                session.name = name
+                await db.commit()
+            except Exception as exc:
+                logger.warning("Failed to generate session name: %s", exc)
 
     events: list[dict] = [
         _session_state_event(session, agent.name),
@@ -596,25 +630,29 @@ async def handle_session_message_stream(
     await _persist_message(db, session_id, "agent", full_response)
     await invalidate_session_cache(str(session_id))
 
-    # Auto-name the session after the first user exchange
+    # Auto-name the session after 4 turns (2 user + 2 agent)
     if session.name is None:
-        try:
-            op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
-            name = await generate_session_name(
-                text, full_response, agent.name,
-                model=op_model, base_url=op_base_url, api_key=op_api_key,
-            )
-            session.name = name
-            await db.commit()
-            yield {
-                "type": "session_named",
-                "payload": {
-                    "session_id": str(session.session_id),
-                    "name": name,
-                },
-            }
-        except Exception as exc:
-            logger.warning("Failed to generate session name: %s", exc)
+        msgs = await get_session_messages(db, session_id)
+        user_turn_count = sum(1 for m in msgs if m["role"] == "user")
+        if user_turn_count >= 2:
+            try:
+                transcript = "\n".join(f"{m['role']}: {m['text_content'][:150]}" for m in msgs[-6:])
+                op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
+                name = await generate_session_name(
+                    transcript, "", agent.name,
+                    provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
+                )
+                session.name = name
+                await db.commit()
+                yield {
+                    "type": "session_named",
+                    "payload": {
+                        "session_id": str(session.session_id),
+                        "name": name,
+                    },
+                }
+            except Exception as exc:
+                logger.warning("Failed to generate session name: %s", exc)
 
 
 # ── Event builders ──────────────────────────────────────────────────────
