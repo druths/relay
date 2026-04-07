@@ -246,6 +246,15 @@ final class RelayViewModel {
         do {
             try await apiClient.delete(path: "/v1/sessions/\(sessionId)")
             sessions.removeAll { $0.sessionId == sessionId }
+            if activeSessionId == sessionId {
+                activeSessionId = nil
+                activeAgentName = nil
+                activeSessionLabels = []
+                sessionMessages = []
+                activeSpeaker = "operator"
+                status = "ready"
+                audio.handleSessionChange(newSessionId: nil)
+            }
         } catch {
             print("[Relay] Failed to delete session: \(error)")
         }

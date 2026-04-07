@@ -29,3 +29,15 @@ async def get_cached_context(session_id: str) -> list[dict] | None:
 async def invalidate_session_cache(session_id: str) -> None:
     r = get_redis()
     await r.delete(f"session:{session_id}:context")
+
+
+async def get_openclaw_response_id(session_id: str) -> str | None:
+    """Get the last OpenClaw response ID for session chaining."""
+    r = get_redis()
+    return await r.get(f"session:{session_id}:openclaw_response_id")
+
+
+async def set_openclaw_response_id(session_id: str, response_id: str) -> None:
+    """Store the OpenClaw response ID for session chaining."""
+    r = get_redis()
+    await r.set(f"session:{session_id}:openclaw_response_id", response_id, ex=86400)

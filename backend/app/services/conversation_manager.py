@@ -506,7 +506,7 @@ async def handle_session_message(
         return [{"type": "error", "payload": {"message": "Agent not found"}}]
 
     context = await get_session_messages(db, session_id)
-    response_text = await agent_manager.generate_response(agent, text, context, voice_instructions)
+    response_text = await agent_manager.generate_response(agent, text, context, voice_instructions, session_id=session_id)
     await _persist_message(db, session_id, "agent", response_text)
     await invalidate_session_cache(str(session_id))
 
@@ -585,7 +585,7 @@ async def handle_session_message_stream(
     yield {"type": "text_start", "payload": {"speaker": agent.name}}
 
     full_response = ""
-    async for chunk in agent_manager.generate_response_stream(agent, text, context, voice_instructions):
+    async for chunk in agent_manager.generate_response_stream(agent, text, context, voice_instructions, session_id=session_id):
         full_response += chunk
         yield {"type": "text_delta", "payload": {"speaker": agent.name, "delta": chunk}}
 

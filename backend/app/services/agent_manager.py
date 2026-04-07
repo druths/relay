@@ -75,7 +75,11 @@ def _append_voice_note(messages: list[dict], voice_instructions: str) -> list[di
     return modified
 
 
-async def generate_response(agent: Agent, text: str, context: list[dict], voice_instructions: str | None = None) -> str:
+async def generate_response(
+    agent: Agent, text: str, context: list[dict],
+    voice_instructions: str | None = None,
+    session_id: uuid.UUID | None = None,
+) -> str:
     """Generate a text response from an agent using its configured LLM provider."""
     provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
     if provider is None:
@@ -99,6 +103,25 @@ async def generate_response(agent: Agent, text: str, context: list[dict], voice_
     else:
         system_prompt = _build_system_prompt(agent, voice_instructions)
 
+    # OpenClaw: use response chaining
+    if isinstance(provider, OpenClawProvider) and session_id:
+        from app.db.redis import get_openclaw_response_id, set_openclaw_response_id
+
+        prev_id = await get_openclaw_response_id(str(session_id))
+        try:
+            result = await provider.generate_with_chain(
+                system_prompt, messages, agent.llm_model,
+                previous_response_id=prev_id,
+            )
+            if result.response_id:
+                await set_openclaw_response_id(str(session_id), result.response_id)
+            agent_health.set_healthy(agent.agent_id)
+            return result.text
+        except Exception as exc:
+            logger.exception("LLM call failed for agent %s: %s", agent.name, exc)
+            agent_health.set_error(agent.agent_id, str(exc)[:120])
+            return f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
+
     try:
         result = await provider.generate(system_prompt, messages, agent.llm_model)
         agent_health.set_healthy(agent.agent_id)
@@ -112,6 +135,7 @@ async def generate_response(agent: Agent, text: str, context: list[dict], voice_
 async def generate_response_stream(
     agent: Agent, text: str, context: list[dict],
     voice_instructions: str | None = None,
+    session_id: uuid.UUID | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream a text response from an agent using its configured LLM provider."""
     provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
@@ -135,6 +159,29 @@ async def generate_response_stream(
         system_prompt = _build_system_prompt(agent)
     else:
         system_prompt = _build_system_prompt(agent, voice_instructions)
+
+    # OpenClaw: use response chaining instead of sending full history each time
+    if isinstance(provider, OpenClawProvider) and session_id:
+        from app.db.redis import get_openclaw_response_id, set_openclaw_response_id
+        from app.services.llm.openclaw import OpenClawResult
+
+        prev_id = await get_openclaw_response_id(str(session_id))
+        try:
+            async for chunk in provider.generate_stream_with_chain(
+                system_prompt, messages, agent.llm_model,
+                previous_response_id=prev_id,
+            ):
+                if isinstance(chunk, OpenClawResult):
+                    if chunk.response_id:
+                        await set_openclaw_response_id(str(session_id), chunk.response_id)
+                else:
+                    yield chunk
+            agent_health.set_healthy(agent.agent_id)
+        except Exception as exc:
+            logger.exception("LLM stream failed for agent %s: %s", agent.name, exc)
+            agent_health.set_error(agent.agent_id, str(exc)[:120])
+            yield f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
+        return
 
     try:
         async for chunk in provider.generate_stream(system_prompt, messages, agent.llm_model):

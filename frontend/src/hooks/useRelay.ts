@@ -403,10 +403,21 @@ export function useRelay() {
   // Delete a session by ID
   const deleteSession = useCallback(async (sessionId: string) => {
     await apiFetch(`/v1/sessions/${sessionId}`, { method: "DELETE" });
-    setState((s) => ({
-      ...s,
-      sessions: s.sessions.filter((sess) => sess.session_id !== sessionId),
-    }));
+    setState((s) => {
+      const next = {
+        ...s,
+        sessions: s.sessions.filter((sess) => sess.session_id !== sessionId),
+      };
+      if (s.activeSessionId === sessionId) {
+        next.activeSessionId = null;
+        next.activeAgentName = null;
+        next.activeSessionLabels = [];
+        next.sessionMessages = [];
+        next.activeSpeaker = "operator";
+        next.status = "ready";
+      }
+      return next;
+    });
   }, []);
 
   // Rename a session
