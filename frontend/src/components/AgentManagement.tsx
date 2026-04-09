@@ -124,6 +124,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         voice_id: selected.voice_id,
         speed: String(selected.voice_settings?.speed ?? 1),
         model: String(selected.voice_settings?.model ?? "tts-1"),
+        base_url: String(selected.voice_settings?.base_url ?? ""),
         model_id: String(selected.voice_settings?.model_id ?? "eleven_multilingual_v2"),
         stability: String(selected.voice_settings?.stability ?? 0.5),
         similarity_boost: String(selected.voice_settings?.similarity_boost ?? 0.75),
@@ -132,10 +133,33 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     setConfirmDelete(false);
   }, [selectedId, isNew, selected?.agent_id]);
 
-  // Fetch voices when TTS provider, API key, or model changes
+  const [ttsModels, setTtsModels] = useState<{ id: string; name: string }[]>([]);
+
+  // Fetch TTS models when provider, API key, or base URL changes
   const ttsProvider = form.tts_provider ?? "none";
   const ttsFormKey = form.tts_api_key ?? "";
   const ttsModelId = form.model_id ?? "";
+  const ttsBaseUrl = form.base_url ?? "";
+  useEffect(() => {
+    if (ttsProvider !== "openai") {
+      setTtsModels([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      const isRealKey = ttsFormKey && !ttsFormKey.includes("••");
+      const params = new URLSearchParams();
+      if (isRealKey) params.set("api_key", ttsFormKey);
+      if (ttsBaseUrl) params.set("base_url", ttsBaseUrl);
+      const qs = params.size ? `?${params.toString()}` : "";
+      apiFetch(`/v1/agents/tts/models/${ttsProvider}${qs}`)
+        .then((r) => r.json())
+        .then((data: { id: string; name: string }[]) => setTtsModels(data))
+        .catch(() => setTtsModels([]));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [ttsProvider, ttsFormKey, ttsBaseUrl]);
+
+  // Fetch voices when TTS provider, API key, or model changes
   useEffect(() => {
     if (ttsProvider === "none") {
       setVoices([]);
@@ -146,6 +170,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     const params = new URLSearchParams();
     if (isRealKey) params.set("api_key", ttsFormKey);
     if (ttsProvider === "elevenlabs" && ttsModelId) params.set("model_id", ttsModelId);
+    if (ttsBaseUrl) params.set("base_url", ttsBaseUrl);
     const qs = params.size ? `?${params.toString()}` : "";
     const timer = setTimeout(() => {
       apiFetch(`/v1/agents/tts/voices/${ttsProvider}${qs}`)
@@ -166,7 +191,9 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
       const buildVoiceSettings = (): Record<string, unknown> => {
         const provider = form.tts_provider || "none";
         if (provider === "openai") {
-          return { speed: parseFloat(form.speed || "1"), model: form.model || "tts-1" };
+          const settings: Record<string, unknown> = { speed: parseFloat(form.speed || "1"), model: form.model || "tts-1" };
+          if (form.base_url) settings.base_url = form.base_url;
+          return settings;
         }
         if (provider === "elevenlabs") {
           return {
@@ -538,15 +565,41 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                 {ttsSchema?.fields.map((field) => (
                   <div key={field.key}>
                     <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
-                    <input
-                      type={field.type === "password" ? "password" : "text"}
-                      value={form[field.key] ?? ""}
-                      onChange={(e) => setField(field.key, e.target.value)}
-                      placeholder={field.placeholder}
-                      className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                    />
+                    {field.type === "select" && field.options ? (
+                      <select
+                        value={form[field.key] ?? field.options[0]?.value ?? ""}
+                        onChange={(e) => setField(field.key, e.target.value)}
+                        className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+                      >
+                        {field.options.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={field.type === "password" ? "password" : "text"}
+                        value={form[field.key] ?? ""}
+                        onChange={(e) => setField(field.key, e.target.value)}
+                        placeholder={field.placeholder}
+                        className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+                      />
+                    )}
                   </div>
                 ))}
+                {ttsModels.length > 0 && (
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">TTS Model</label>
+                    <select
+                      value={form.model ?? "tts-1"}
+                      onChange={(e) => setField("model", e.target.value)}
+                      className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+                    >
+                      {ttsModels.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {ttsProvider !== "none" && (
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Voice</label>
@@ -575,17 +628,6 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                 )}
                 {ttsProvider === "openai" && (
                   <>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Model</label>
-                      <select
-                        value={form.model ?? "tts-1"}
-                        onChange={(e) => setField("model", e.target.value)}
-                        className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                      >
-                        <option value="tts-1">tts-1 (Standard)</option>
-                        <option value="tts-1-hd">tts-1-hd (HD)</option>
-                      </select>
-                    </div>
                     <div>
                       <label className="flex justify-between text-xs text-gray-500 mb-1">
                         <span>Speed</span>

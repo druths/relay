@@ -16,7 +16,7 @@ struct InputBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .bottom, spacing: 6) {
             if relay.isLiveMode {
                 liveContent
             } else {
@@ -59,8 +59,9 @@ struct InputBar: View {
     private var chatContent: some View {
         goLiveButton
 
-        TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(theme.textQuaternary))
+        TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(theme.textQuaternary), axis: .vertical)
             .textFieldStyle(RelayInputFieldStyle(isDisabled: disabled))
+            .lineLimit(1...6)
             .disabled(disabled)
             .onSubmit { handleSend() }
 

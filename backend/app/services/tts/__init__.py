@@ -9,19 +9,20 @@ from app.services.tts.base import TTSProvider
 logger = logging.getLogger(__name__)
 
 
-def get_tts_provider(provider_name: str, api_key: str | None = None) -> TTSProvider | None:
+def get_tts_provider(provider_name: str, api_key: str | None = None, base_url: str | None = None) -> TTSProvider | None:
     """Return a TTS provider instance, or None if TTS is disabled."""
     logger.info(
-        "get_tts_provider: provider=%s, key_len=%s",
-        provider_name, len(api_key) if api_key else 0,
+        "get_tts_provider: provider=%s, key_len=%s, base_url=%s",
+        provider_name, len(api_key) if api_key else 0, base_url,
     )
     if provider_name == "openai":
         from app.services.tts.openai import OpenAITTSProvider, _get_client
 
-        if _get_client(api_key) is None:
+        # Local TTS (e.g., Kokoro) doesn't need an API key
+        if not base_url and _get_client(api_key) is None:
             logger.warning("get_tts_provider: OpenAI client is None (no key)")
             return None
-        return OpenAITTSProvider(api_key=api_key)
+        return OpenAITTSProvider(api_key=api_key, base_url=base_url)
 
     if provider_name == "elevenlabs":
         from app.services.tts.elevenlabs import ElevenLabsTTSProvider, _get_client

@@ -24,8 +24,9 @@ def _get_client(api_key: str | None = None) -> AsyncOpenAI | None:
 
 
 class OpenAITTSProvider(TTSProvider):
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, base_url: str | None = None):
         self._api_key = api_key
+        self._base_url = base_url
 
     @classmethod
     def available_voices(cls) -> list[dict]:
@@ -43,12 +44,21 @@ class OpenAITTSProvider(TTSProvider):
         ]
 
     async def synthesize(self, text: str, voice_id: str, voice_settings: dict) -> bytes:
-        client = _get_client(self._api_key)
+        # Use custom base_url if set (e.g., Kokoro local TTS)
+        base_url = self._base_url or voice_settings.get("base_url")
+        if base_url:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=self._api_key or "not-needed", base_url=base_url.rstrip("/") + "/v1" if not base_url.rstrip("/").endswith("/v1") else base_url)
+        else:
+            client = _get_client(self._api_key)
         if client is None:
             raise RuntimeError("OpenAI API key not configured")
 
         speed = voice_settings.get("speed", 1.0)
         model = voice_settings.get("model", "tts-1")
+        # "default" means use whatever the server's default is — map to tts-1 for compat
+        if model == "default":
+            model = "tts-1"
 
         logger.info("OpenAI TTS: voice=%s, speed=%.1f, %d chars", voice_id, speed, len(text))
 

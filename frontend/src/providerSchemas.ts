@@ -70,9 +70,10 @@ export const TTS_PROVIDERS: Record<string, ProviderSchema> = {
     fields: [],
   },
   openai: {
-    label: "OpenAI",
+    label: "OpenAI-Compatible",
     fields: [
-      { key: "tts_api_key", label: "API Key", type: "password", placeholder: "sk-… (uses platform key if blank)" },
+      { key: "tts_api_key", label: "API Key", type: "password", placeholder: "sk-… (blank for local TTS)" },
+      { key: "base_url", label: "Base URL", type: "text", placeholder: "Blank for OpenAI, or http://kokoro:8880 for local" },
     ],
   },
   elevenlabs: {

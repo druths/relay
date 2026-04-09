@@ -24,6 +24,7 @@ final class AgentManagementViewModel {
     var isNewAgent = false
     var form: [String: String] = [:]
     var voices: [Voice] = []
+    var ttsModels: [(id: String, name: String)] = []
     var isSaving = false
 
     // Platform settings state
@@ -88,6 +89,7 @@ final class AgentManagementViewModel {
             "voice_id": agent.voiceId,
             "speed": agent.voiceSettings["speed"]?.stringValue ?? "1.0",
             "model": agent.voiceSettings["model"]?.stringValue ?? "tts-1",
+            "base_url": agent.voiceSettings["base_url"]?.stringValue ?? "",
             "model_id": agent.voiceSettings["model_id"]?.stringValue ?? "eleven_multilingual_v2",
             "stability": agent.voiceSettings["stability"]?.stringValue ?? "0.5",
             "similarity_boost": agent.voiceSettings["similarity_boost"]?.stringValue ?? "0.75",
@@ -110,11 +112,44 @@ final class AgentManagementViewModel {
             "voice_id": "",
             "speed": "1",
             "model": "tts-1",
+            "base_url": "",
             "model_id": "eleven_multilingual_v2",
             "stability": "0.5",
             "similarity_boost": "0.75",
         ]
         savedForm = form
+    }
+
+    // MARK: - TTS Models
+
+    func fetchTtsModels() async {
+        let provider = form["tts_provider"] ?? "none"
+        guard provider == "openai" else {
+            ttsModels = []
+            return
+        }
+
+        var params: [String] = []
+        let apiKey = form["tts_api_key"] ?? ""
+        let isRealKey = !apiKey.isEmpty && !apiKey.contains("\u{2022}")
+        if isRealKey, let encoded = apiKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            params.append("api_key=\(encoded)")
+        }
+        if let baseUrl = form["base_url"], !baseUrl.isEmpty, let encoded = baseUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            params.append("base_url=\(encoded)")
+        }
+        let qs = params.isEmpty ? "" : "?\(params.joined(separator: "&"))"
+
+        do {
+            struct TtsModel: Codable {
+                let id: String
+                let name: String
+            }
+            let fetched: [TtsModel] = try await apiClient.request("GET", path: "/v1/agents/tts/models/\(provider)\(qs)")
+            ttsModels = fetched.map { ($0.id, $0.name) }
+        } catch {
+            ttsModels = []
+        }
     }
 
     // MARK: - Voices
@@ -135,6 +170,9 @@ final class AgentManagementViewModel {
         }
         if provider == "elevenlabs", let modelId = form["model_id"], !modelId.isEmpty {
             params.append("model_id=\(modelId)")
+        }
+        if let baseUrl = form["base_url"], !baseUrl.isEmpty, let encoded = baseUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            params.append("base_url=\(encoded)")
         }
         let qs = params.isEmpty ? "" : "?\(params.joined(separator: "&"))"
 
@@ -298,10 +336,14 @@ final class AgentManagementViewModel {
         let provider = form["tts_provider"] ?? "none"
         switch provider {
         case "openai":
-            return [
+            var settings: [String: AnyCodableValue] = [
                 "speed": .double(Double(form["speed"] ?? "1") ?? 1.0),
                 "model": .string(form["model"] ?? "tts-1"),
             ]
+            if let baseUrl = form["base_url"], !baseUrl.isEmpty {
+                settings["base_url"] = .string(baseUrl)
+            }
+            return settings
         case "elevenlabs":
             return [
                 "stability": .double(Double(form["stability"] ?? "0.5") ?? 0.5),

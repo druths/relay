@@ -70,6 +70,8 @@ struct AgentManagementView: View {
             await vm.loadPlatformSettings()
             if let first = sortedAgents.first {
                 vm.selectAgent(first)
+                await vm.fetchTtsModels()
+                await vm.fetchVoices()
             }
         }
     }
@@ -200,7 +202,7 @@ struct AgentManagementView: View {
 
     private func agentPill(_ agent: Agent) -> some View {
         let isActive = !vm.isNewAgent && vm.selectedAgentId == agent.agentId
-        return Button(action: { vm.selectAgent(agent); Task { await vm.fetchVoices() } }) {
+        return Button(action: { vm.selectAgent(agent); Task { await vm.fetchTtsModels(); await vm.fetchVoices() } }) {
             HStack(spacing: 6) {
                 StatusIndicator(color: statusColor(agent.status))
                 if agent.isOperator {
@@ -293,6 +295,11 @@ struct AgentManagementView: View {
             ForEach(schema.fields, id: \.key) { field in
                 sectionLabel(field.label)
                 formTextField(field.key, placeholder: field.placeholder, secure: field.fieldType == .password)
+                    .onChange(of: vm.form[field.key]) { _, _ in
+                        if field.key == "base_url" {
+                            Task { await vm.fetchTtsModels(); await vm.fetchVoices() }
+                        }
+                    }
             }
         }
 
@@ -329,8 +336,10 @@ struct AgentManagementView: View {
 
         // OpenAI voice settings
         if ttsProvider == "openai" {
-            sectionLabel("Model")
-            pickerMenu("model", options: [("tts-1", "tts-1"), ("tts-1-hd", "tts-1-hd")])
+            if !vm.ttsModels.isEmpty {
+                sectionLabel("Model")
+                pickerMenu("model", options: vm.ttsModels.map { ($0.id, $0.name) })
+            }
 
             sliderField("Speed", key: "speed", range: 0.25...4.0, step: 0.25, format: "%.2f")
         }
@@ -584,7 +593,7 @@ struct AgentManagementView: View {
     private func providerPicker(_ key: String, options: [(String, String)]) -> some View {
         Menu {
             ForEach(options, id: \.0) { option in
-                Button(option.1) { vm.form[key] = option.0; Task { await vm.fetchVoices() } }
+                Button(option.1) { vm.form[key] = option.0; Task { await vm.fetchTtsModels(); await vm.fetchVoices() } }
             }
         } label: {
             HStack {

@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useRef, useState, useEffect, type KeyboardEvent } from "react";
 
 // 11x9 pixel grid for ⏎ return arrow — matches iOS PixelIcons.returnArrow
 const RETURN_GRID = [
@@ -42,6 +42,7 @@ interface TextInputProps {
 
 export function TextInput({ onSend, disabled }: TextInputProps) {
   const [value, setValue] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const tva = isTvaTheme();
 
   const handleSend = () => {
@@ -56,22 +57,33 @@ export function TextInput({ onSend, disabled }: TextInputProps) {
       e.preventDefault();
       handleSend();
     }
+    // Shift+Enter inserts a newline (default textarea behavior)
   };
+
+  // Auto-resize textarea to fit content, capped at 6 lines
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const maxHeight = parseInt(getComputedStyle(el).lineHeight) * 6 || 144;
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  }, [value]);
 
   const placeholder = disabled ? "Connect to start…" : "Type a message…";
 
   return (
-    <div className="flex gap-2 p-4 border-t border-gray-800 input-bar">
-      <input
-        type="text"
+    <div className="flex gap-2 p-4 border-t border-gray-800 input-bar items-end">
+      <textarea
+        ref={textareaRef}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKey}
         disabled={disabled}
         placeholder={placeholder}
+        rows={1}
         className="flex-1 bg-gray-800 rounded-lg px-4 py-2 text-sm outline-none
                    focus:ring-2 focus:ring-blue-500 disabled:opacity-50
-                   placeholder-gray-500"
+                   placeholder-gray-500 resize-none overflow-hidden"
       />
       <button
         onClick={handleSend}

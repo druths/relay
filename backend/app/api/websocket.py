@@ -449,7 +449,8 @@ async def _handle_text(
                             setting_key = f"tts_{tts_agent.tts_provider}_api_key"
                             tts_key = await _get_setting(db, setting_key) or None
                             logger.info("Stream TTS key fallback: setting=%s, found=%s", setting_key, bool(tts_key))
-                        tts_provider = get_tts_provider(tts_agent.tts_provider, tts_key)
+                        tts_base_url = tts_agent.voice_settings.get("base_url")
+                        tts_provider = get_tts_provider(tts_agent.tts_provider, tts_key, base_url=tts_base_url)
                 if tts_provider:
                     tts_buffer = ""
                     tts_seq = 0
@@ -634,7 +635,8 @@ async def _tts_for_text(
             "TTS key fallback: setting=%s, found=%s",
             setting_key, bool(api_key),
         )
-    provider = get_tts_provider(agent.tts_provider, api_key)
+    tts_base_url = agent.voice_settings.get("base_url") if agent.voice_settings else None
+    provider = get_tts_provider(agent.tts_provider, api_key, base_url=tts_base_url)
     if not provider:
         logger.warning(
             "TTS: get_tts_provider returned None for provider=%s, has_key=%s",

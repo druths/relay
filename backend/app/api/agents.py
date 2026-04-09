@@ -181,13 +181,108 @@ async def reorder_agents(
     return [_agent_out(a) for a in agents]
 
 
+@router.get("/tts/models/{provider}")
+async def get_tts_models(
+    provider: str,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch available TTS models for a provider."""
+    if provider != "openai":
+        return []
+
+    effective_key = api_key
+    if not effective_key and not base_url:
+        result = await db.execute(
+            select(PlatformSetting).where(
+                PlatformSetting.key == f"tts_{provider}_api_key"
+            )
+        )
+        row = result.scalar_one_or_none()
+        effective_key = row.value if row and row.value else None
+    if not effective_key and not base_url:
+        from app.config import settings
+        effective_key = settings.openai_api_key or None
+
+    if not effective_key and not base_url:
+        # No key and no custom endpoint — return known OpenAI models
+        return [
+            {"id": "tts-1", "name": "TTS-1"},
+            {"id": "tts-1-hd", "name": "TTS-1 HD"},
+            {"id": "gpt-4o-mini-tts", "name": "GPT-4o Mini TTS"},
+        ]
+
+    if base_url:
+        # Custom endpoint — query it, but simplify to "default" if only aliases
+        try:
+            from openai import AsyncOpenAI
+            effective_base = base_url.rstrip("/") + "/v1" if not base_url.rstrip("/").endswith("/v1") else base_url
+            client = AsyncOpenAI(api_key="not-needed", base_url=effective_base)
+            models = await client.models.list()
+            model_ids = [m.id for m in models.data]
+
+            # If server only reports OpenAI-compat aliases (tts-1, tts-1-hd) plus its own name,
+            # just return "default" since they're all the same engine
+            non_alias = [mid for mid in model_ids if mid not in ("tts-1", "tts-1-hd")]
+            if len(non_alias) <= 1:
+                return [{"id": "default", "name": "Default"}]
+
+            # Multiple real models — return them (exclude tts-1/tts-1-hd aliases)
+            return [{"id": mid, "name": mid} for mid in sorted(non_alias)]
+        except Exception:
+            return [{"id": "default", "name": "Default"}]
+
+    # OpenAI with key — query real models
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=effective_key)
+        models = await client.models.list()
+        tts_models = [
+            {"id": m.id, "name": m.id}
+            for m in sorted(models.data, key=lambda x: x.id)
+            if "tts" in m.id.lower()
+        ]
+        return tts_models if tts_models else [
+            {"id": "tts-1", "name": "TTS-1"},
+            {"id": "tts-1-hd", "name": "TTS-1 HD"},
+        ]
+    except Exception:
+        return [
+            {"id": "tts-1", "name": "TTS-1"},
+            {"id": "tts-1-hd", "name": "TTS-1 HD"},
+            {"id": "gpt-4o-mini-tts", "name": "GPT-4o Mini TTS"},
+        ]
+
+
 @router.get("/tts/voices/{provider}")
 async def get_tts_voices(
     provider: str,
     api_key: str | None = None,
     model_id: str | None = None,
+    base_url: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    # If a custom base_url is provided, fetch voices directly from that server
+    if base_url and provider == "openai":
+        try:
+            import httpx
+            url = base_url.rstrip("/") + "/v1/audio/voices"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                # Kokoro returns {"voices": ["name1", "name2", ...]}
+                voice_list = data.get("voices", data) if isinstance(data, dict) else data
+                if isinstance(voice_list, list) and voice_list and isinstance(voice_list[0], str):
+                    return [{"id": v, "name": v, "description": ""} for v in voice_list]
+                return voice_list
+        except Exception:
+            pass
+        # Fallback to static list
+        from app.services.tts.openai import OpenAITTSProvider
+        return OpenAITTSProvider.available_voices()
+
     effective_key = api_key
     if not effective_key:
         result = await db.execute(

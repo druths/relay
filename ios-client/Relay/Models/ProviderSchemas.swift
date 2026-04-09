@@ -65,8 +65,9 @@ enum ProviderSchemas {
 
     static let ttsProviders: [(key: String, schema: ProviderSchema)] = [
         ("none", ProviderSchema(label: "None (No TTS)", fields: [])),
-        ("openai", ProviderSchema(label: "OpenAI", fields: [
-            ProviderField(key: "tts_api_key", label: "API Key", type: .password, placeholder: "sk-... (uses platform key if blank)"),
+        ("openai", ProviderSchema(label: "OpenAI-Compatible", fields: [
+            ProviderField(key: "tts_api_key", label: "API Key", type: .password, placeholder: "sk-... (blank for local TTS)"),
+            ProviderField(key: "base_url", label: "Base URL", type: .text, placeholder: "Blank for OpenAI, or http://kokoro:8880"),
         ])),
         ("elevenlabs", ProviderSchema(label: "ElevenLabs", fields: [
             ProviderField(key: "tts_api_key", label: "API Key", type: .password, placeholder: "xi-... (uses platform key if blank)"),
