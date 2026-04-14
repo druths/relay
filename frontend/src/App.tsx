@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isAuthenticated, clearToken } from "./hooks/useAuth";
 import { LoginPage } from "./components/LoginPage";
 import { useRelay } from "./hooks/useRelay";
