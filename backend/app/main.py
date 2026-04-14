@@ -108,6 +108,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ"
         ))
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS openclaw_response_id VARCHAR(200)"
+        ))
     # Seed data
     await _seed_agents()
     await _seed_platform_settings()

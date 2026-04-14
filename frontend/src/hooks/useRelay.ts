@@ -63,14 +63,27 @@ export function useRelay() {
     }
   }, []);
 
+  // Reconnection state
+  const intentionalDisconnect = useRef(false);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectDelay = useRef(1000);
+
   // Connect to lobby
   const connect = useCallback(() => {
+    // Clean up any pending reconnect
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    // Close existing socket if any
+    if (ws.current && ws.current.readyState <= WebSocket.OPEN) {
+      ws.current.close();
+    }
+
     const socket = new WebSocket(getWsUrl("/v1/lobby"));
 
     socket.onopen = () => {
+      reconnectDelay.current = 1000; // Reset backoff on success
       setState((s) => ({ ...s, connected: true }));
       fetchSessions();
-      // Check STT availability
+      refreshAgents();
       apiFetch("/v1/agents/stt/status")
         .then((r) => r.json())
         .then((data: { available: boolean }) =>
@@ -81,6 +94,15 @@ export function useRelay() {
 
     socket.onclose = () => {
       setState((s) => ({ ...s, connected: false, status: "disconnected" }));
+      // Auto-reconnect unless intentionally disconnected
+      if (!intentionalDisconnect.current) {
+        const delay = reconnectDelay.current;
+        reconnectDelay.current = Math.min(delay * 2, 30000); // Exponential backoff, max 30s
+        reconnectTimer.current = setTimeout(() => {
+          console.log(`[WS] Reconnecting in ${delay}ms...`);
+          connect();
+        }, delay);
+      }
     };
 
     socket.onmessage = (ev) => {
@@ -346,10 +368,23 @@ export function useRelay() {
     ws.current = socket;
   }, [fetchSessions]);
 
-  // Auto-connect on mount, cleanup on unmount
+  // Auto-connect on mount, reconnect on visibility change, cleanup on unmount
   useEffect(() => {
     connect();
+
+    // Reconnect immediately when tab becomes visible (e.g., laptop wake)
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && (!ws.current || ws.current.readyState !== WebSocket.OPEN)) {
+        reconnectDelay.current = 1000;
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      intentionalDisconnect.current = true;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       audioPlayerRef.current.stop();
       ws.current?.close();
       ws.current = null;
@@ -358,6 +393,8 @@ export function useRelay() {
 
   // Disconnect from lobby
   const disconnect = useCallback(() => {
+    intentionalDisconnect.current = true;
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     audioPlayerRef.current.stop();
     ws.current?.close();
     ws.current = null;
