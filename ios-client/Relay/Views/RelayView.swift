@@ -19,7 +19,9 @@ struct RelayView: View {
     @State private var menuLabelFilter: String?
     @State private var sidebarLabelFilter: String?
     @State private var sidebarSessionSearch = ""
+    @State private var sidebarSearchQuery = ""
     @State private var menuSessionSearch = ""
+    @State private var menuSearchQuery = ""
     @FocusState private var sidebarSearchFocused: Bool
 
     init(authService: AuthService, themeManager: ThemeManager) {
@@ -340,9 +342,9 @@ struct RelayView: View {
     private var sidebarSessionsSection: some View {
         let filtered = relay.sessions.filter { session in
             if let filter = sidebarLabelFilter, !session.labels.contains(filter) { return false }
-            if !sidebarSessionSearch.isEmpty {
+            if !sidebarSearchQuery.isEmpty {
                 let name = (session.name ?? session.agentName).lowercased()
-                if !name.contains(sidebarSessionSearch.lowercased()) { return false }
+                if !name.contains(sidebarSearchQuery.lowercased()) { return false }
             }
             return true
         }
@@ -354,12 +356,34 @@ struct RelayView: View {
                     .tracking(1.5)
                     .foregroundStyle(theme.textQuaternary)
 
-                TextField("/", text: $sidebarSessionSearch)
-                    .font(theme.monoFont(size: 14))
-                    .foregroundStyle(theme.textSecondary)
-                    .focused($sidebarSearchFocused)
+                HStack(spacing: 4) {
+                    TextField("/", text: $sidebarSessionSearch)
+                        .font(theme.monoFont(size: 14))
+                        .foregroundStyle(theme.textSecondary)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(theme.elevated)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                        .focused($sidebarSearchFocused)
+                        .onSubmit {
+                            sidebarSearchQuery = sidebarSessionSearch
+                        }
+                    if !sidebarSessionSearch.isEmpty || !sidebarSearchQuery.isEmpty {
+                        Button {
+                            sidebarSessionSearch = ""
+                            sidebarSearchQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(theme.textQuaternary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
                     .onKeyPress(.escape) {
                         sidebarSessionSearch = ""
+                        sidebarSearchQuery = ""
                         sidebarSearchFocused = false
                         return .handled
                     }
@@ -624,9 +648,9 @@ struct RelayView: View {
 
                     let filteredSessions = relay.sessions.filter { session in
                         if let filter = menuLabelFilter, !session.labels.contains(filter) { return false }
-                        if !menuSessionSearch.isEmpty {
+                        if !menuSearchQuery.isEmpty {
                             let name = (session.name ?? session.agentName).lowercased()
-                            if !name.contains(menuSessionSearch.lowercased()) { return false }
+                            if !name.contains(menuSearchQuery.lowercased()) { return false }
                         }
                         return true
                     }
@@ -637,10 +661,30 @@ struct RelayView: View {
                                 .font(theme.labelFont(size: 12))
                                 .tracking(1)
                                 .foregroundStyle(theme.primary)
-                            TextField("Search sessions...", text: $menuSessionSearch)
-                                .font(theme.bodyFont(size: 16))
-                                .foregroundStyle(theme.textSecondary)
-                                .textFieldStyle(.roundedBorder)
+                            HStack(spacing: 4) {
+                                TextField("Search sessions...", text: $menuSessionSearch)
+                                    .font(theme.bodyFont(size: 16))
+                                    .foregroundStyle(theme.textSecondary)
+                                    .textFieldStyle(.plain)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(theme.elevated)
+                                    .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                                    .onSubmit {
+                                        menuSearchQuery = menuSessionSearch
+                                    }
+                                if !menuSessionSearch.isEmpty || !menuSearchQuery.isEmpty {
+                                    Button {
+                                        menuSessionSearch = ""
+                                        menuSearchQuery = ""
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundStyle(theme.textQuaternary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
                         }
                     ) {
                         ForEach(filteredSessions.prefix(10)) { session in

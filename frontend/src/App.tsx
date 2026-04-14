@@ -197,17 +197,31 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider section-label">
                 {labelFilter ? `Sessions: ${labelFilter}` : "Sessions"}
               </h3>
-              <input
-                ref={searchRef}
-                type="text"
-                value={sessionSearch}
-                onChange={(e) => setSessionSearch(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Escape") { setSessionSearch(""); searchRef.current?.blur(); } }}
-                placeholder="/"
-                className="flex-1 bg-transparent border-b border-gray-700 focus:border-gray-500
-                           text-xs text-gray-300 outline-none px-1 py-0.5 placeholder-gray-700
-                           min-w-0"
-              />
+              <div className="flex-1 flex items-center min-w-0">
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={sessionSearch}
+                  onChange={(e) => setSessionSearch(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") { setSessionSearch(""); searchRef.current?.blur(); } }}
+                  placeholder="/"
+                  className="flex-1 outline-none px-1 py-0.5 min-w-0 text-xs"
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: "1px solid var(--border)",
+                    color: "var(--text-secondary)",
+                  }}
+                />
+                {sessionSearch && (
+                  <button
+                    onClick={() => setSessionSearch("")}
+                    className="text-gray-600 hover:text-gray-400 text-xs ml-1"
+                  >
+                    &times;
+                  </button>
+                )}
+              </div>
             </div>
             <div className="space-y-1" ref={menuRef}>
               {filteredSessions.map((s) => (
