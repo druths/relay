@@ -65,7 +65,7 @@ export function useRelay() {
 
   // Reconnection state
   const intentionalDisconnect = useRef(false);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reconnectDelay = useRef(1000);
 
   // Connect to lobby
