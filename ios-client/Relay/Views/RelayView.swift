@@ -18,6 +18,9 @@ struct RelayView: View {
     @State private var labelInputText = ""
     @State private var menuLabelFilter: String?
     @State private var sidebarLabelFilter: String?
+    @State private var sidebarSessionSearch = ""
+    @State private var menuSessionSearch = ""
+    @FocusState private var sidebarSearchFocused: Bool
 
     init(authService: AuthService, themeManager: ThemeManager) {
         self.authService = authService
@@ -97,6 +100,13 @@ struct RelayView: View {
             } else if !relay.isLiveMode {
                 relay.enterLiveMode()
             }
+        }
+        .onKeyPress("/") {
+            if isRegular {
+                sidebarSearchFocused = true
+                return .handled
+            }
+            return .ignored
         }
     }
 
@@ -328,16 +338,40 @@ struct RelayView: View {
     }
 
     private var sidebarSessionsSection: some View {
-        let filtered = sidebarLabelFilter.map { filter in
-            relay.sessions.filter { $0.labels.contains(filter) }
-        } ?? relay.sessions
+        let filtered = relay.sessions.filter { session in
+            if let filter = sidebarLabelFilter, !session.labels.contains(filter) { return false }
+            if !sidebarSessionSearch.isEmpty {
+                let name = (session.name ?? session.agentName).lowercased()
+                if !name.contains(sidebarSessionSearch.lowercased()) { return false }
+            }
+            return true
+        }
 
         return VStack(alignment: .leading, spacing: 6) {
-            Text(sidebarLabelFilter.map { "SESSIONS: \($0.uppercased())" } ?? "SESSIONS")
-                .font(theme.labelFont(size: 12))
-                .tracking(1.5)
-                .foregroundStyle(theme.textQuaternary)
-                .padding(.horizontal, 16)
+            HStack {
+                Text(sidebarLabelFilter.map { "SESSIONS: \($0.uppercased())" } ?? "SESSIONS")
+                    .font(theme.labelFont(size: 12))
+                    .tracking(1.5)
+                    .foregroundStyle(theme.textQuaternary)
+
+                TextField("/", text: $sidebarSessionSearch)
+                    .font(theme.monoFont(size: 14))
+                    .foregroundStyle(theme.textSecondary)
+                    .focused($sidebarSearchFocused)
+                    .onKeyPress(.escape) {
+                        sidebarSessionSearch = ""
+                        sidebarSearchFocused = false
+                        return .handled
+                    }
+                    .onKeyPress("/") {
+                        if !sidebarSearchFocused {
+                            sidebarSearchFocused = true
+                            return .handled
+                        }
+                        return .ignored
+                    }
+            }
+            .padding(.horizontal, 16)
 
             VStack(spacing: 2) {
                 ForEach(filtered.prefix(15)) { session in
@@ -588,11 +622,27 @@ struct RelayView: View {
                         }
                     }
 
-                    let filteredSessions = menuLabelFilter.map { filter in
-                        relay.sessions.filter { $0.labels.contains(filter) }
-                    } ?? Array(relay.sessions.prefix(10))
+                    let filteredSessions = relay.sessions.filter { session in
+                        if let filter = menuLabelFilter, !session.labels.contains(filter) { return false }
+                        if !menuSessionSearch.isEmpty {
+                            let name = (session.name ?? session.agentName).lowercased()
+                            if !name.contains(menuSessionSearch.lowercased()) { return false }
+                        }
+                        return true
+                    }
 
-                    Section(header: Text(menuLabelFilter.map { "Sessions: \($0)" } ?? "Recent Sessions").font(theme.labelFont(size: 12)).tracking(1).foregroundStyle(theme.primary)) {
+                    Section(header:
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(menuLabelFilter.map { "Sessions: \($0)" } ?? "Recent Sessions")
+                                .font(theme.labelFont(size: 12))
+                                .tracking(1)
+                                .foregroundStyle(theme.primary)
+                            TextField("Search sessions...", text: $menuSessionSearch)
+                                .font(theme.bodyFont(size: 16))
+                                .foregroundStyle(theme.textSecondary)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    ) {
                         ForEach(filteredSessions.prefix(10)) { session in
                             Button(action: {
                                 showMenu = false

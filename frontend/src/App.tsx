@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { isAuthenticated, clearToken } from "./hooks/useAuth";
 import { LoginPage } from "./components/LoginPage";
 import { useRelay } from "./hooks/useRelay";
@@ -26,6 +26,8 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const [renameValue, setRenameValue] = useState("");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // In-session state
   const [showSessionMenu, setShowSessionMenu] = useState(false);
@@ -45,10 +47,30 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
     new Set(relay.sessions.flatMap((s) => s.labels || []))
   ).sort();
 
-  // Filter sessions by label
-  const filteredSessions = labelFilter
-    ? relay.sessions.filter((s) => s.labels?.includes(labelFilter))
-    : relay.sessions;
+  // Filter sessions by label and search
+  const filteredSessions = relay.sessions.filter((s) => {
+    if (labelFilter && !s.labels?.includes(labelFilter)) return false;
+    if (sessionSearch) {
+      const q = sessionSearch.toLowerCase();
+      const name = (s.name || s.agent_name).toLowerCase();
+      if (!name.includes(q)) return false;
+    }
+    return true;
+  });
+
+  // Global "/" shortcut to focus search
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   // Close menu when clicking outside
   const menuRef = useRef<HTMLDivElement>(null);
@@ -171,9 +193,22 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         {/* Session list */}
         {relay.connected && filteredSessions.length > 0 && (
           <div className="space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1 section-label">
-              {labelFilter ? `Sessions: ${labelFilter}` : "Sessions"}
-            </h3>
+            <div className="flex items-center gap-2 px-1">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider section-label">
+                {labelFilter ? `Sessions: ${labelFilter}` : "Sessions"}
+              </h3>
+              <input
+                ref={searchRef}
+                type="text"
+                value={sessionSearch}
+                onChange={(e) => setSessionSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") { setSessionSearch(""); searchRef.current?.blur(); } }}
+                placeholder="/"
+                className="flex-1 bg-transparent border-b border-gray-700 focus:border-gray-500
+                           text-xs text-gray-300 outline-none px-1 py-0.5 placeholder-gray-700
+                           min-w-0"
+              />
+            </div>
             <div className="space-y-1" ref={menuRef}>
               {filteredSessions.map((s) => (
                 <div key={s.session_id} className="group relative">
