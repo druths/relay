@@ -177,11 +177,11 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                 <button
                   key={label}
                   onClick={() => setLabelFilter(labelFilter === label ? null : label)}
-                  className={`text-xs px-2 py-0.5 rounded-full transition-colors ${
-                    labelFilter === label
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                  }`}
+                  className="text-xs px-2 py-0.5 rounded-full transition-colors label-chip"
+                  style={labelFilter === label
+                    ? { backgroundColor: "var(--primary)", color: "var(--bg)" }
+                    : { backgroundColor: "var(--elevated)", color: "var(--text-tertiary)" }
+                  }
                 >
                   {label}
                 </button>
@@ -191,7 +191,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         )}
 
         {/* Session list */}
-        {relay.connected && filteredSessions.length > 0 && (
+        {relay.connected && relay.sessions.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 px-1">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider section-label">
