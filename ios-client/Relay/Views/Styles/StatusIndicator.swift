@@ -76,6 +76,8 @@ struct ThemedIcon: View {
             PixelIcons.returnArrow(color: theme.sendButtonInverted ? theme.background : .white, size: 2.5)
         case "ellipsis":
             PixelIcons.kebab(color: theme.textPrimary, size: 3.5)
+        case "gearshape":
+            PixelIcons.gear(color: theme.textPrimary, size: 1.5)
         case "xmark.circle.fill":
             PixelIcons.xMark(color: theme.error, size: 3)
         case "mic.fill":

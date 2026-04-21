@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
@@ -172,8 +173,22 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                         logger.info("[WS] set_live_mode=%s", is_live_mode)
 
                     elif msg_type == "text_input":
-                        await _cancel_active_task(active_task)
                         text = data["payload"]["text"]
+                        file_ids = data["payload"].get("file_ids", [])
+
+                        # Check if the active session uses the channel provider
+                        if active_session_id:
+                            session_obj = await get_session(db, active_session_id)
+                            if session_obj:
+                                agent_obj = await agent_manager.get_agent_by_id(db, session_obj.agent_id)
+                                if agent_obj and agent_obj.llm_provider == "openclaw-channel":
+                                    await _handle_channel_message(
+                                        websocket, db, user_id, text, active_session_id,
+                                        agent_obj, file_ids,
+                                    )
+                                    continue
+
+                        await _cancel_active_task(active_task)
                         detach_event = asyncio.Event()  # Fresh event for each task
                         active_task = asyncio.create_task(
                             _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
@@ -266,13 +281,6 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                                     "session_id": None,
                                 },
                             })
-                            reply = "You're back with the Operator. What can I do for you?"
-                            lobby_history.append({"role": "assistant", "content": reply})
-                            await websocket.send_json({
-                                "type": "text",
-                                "payload": {"speaker": "operator", "text": reply},
-                            })
-                            await _tts_for_text(websocket, db, reply, "operator")
 
                     elif msg_type == "resume_session":
                         target_sid = uuid.UUID(data["payload"]["session_id"])
@@ -322,9 +330,11 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                         })
 
             finally:
-                # Clean up on disconnect or error
+                # Detach active task instead of cancelling — let the agent finish
+                # in the background. The streaming loop will notice the detach event,
+                # stop sending to the (now-closed) WS, and persist the full response.
                 if active_task and not active_task.done():
-                    active_task.cancel()
+                    detach_event.set()
                 recv_task.cancel()
 
     except WebSocketDisconnect:
@@ -332,7 +342,13 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
         if active_session_id:
             try:
                 async with websocket.app.state.db_session() as db:
-                    await pause_session(db, active_session_id)
+                    # If an active task is still running, mark session as "processing"
+                    # so the background completion logic can take over.
+                    task_running = active_task is not None and not active_task.done()
+                    session = await get_session(db, active_session_id)
+                    if session:
+                        session.status = "processing" if task_running else "paused"
+                        await db.commit()
             except Exception:
                 pass
     except Exception as e:
@@ -343,6 +359,67 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
             )
         except Exception:
             pass
+
+
+async def _handle_channel_message(
+    websocket: WebSocket,
+    db,
+    user_id: str,
+    text: str,
+    session_id: uuid.UUID,
+    agent,
+    file_ids: list[str] | None = None,
+) -> None:
+    """Route a user message through the OpenClaw channel plugin instead of the HTTP provider."""
+    from app.api.channel import send_to_plugin, is_plugin_connected
+    from app.services.conversation_manager import _persist_message, invalidate_session_cache
+
+    # Check plugin connection
+    agent_model = agent.llm_model  # e.g., "main", "april"
+    if not is_plugin_connected(agent_model):
+        await websocket.send_json({
+            "type": "text",
+            "payload": {
+                "speaker": agent.name,
+                "text": f"[{agent.name}] Channel not connected. The OpenClaw plugin may not be running.",
+            },
+        })
+        return
+
+    # Persist the user message
+    await _persist_message(db, session_id, "user", text)
+    await invalidate_session_cache(str(session_id))
+
+    # Show processing state
+    await websocket.send_json({
+        "type": "state_update",
+        "payload": {
+            "active_speaker": "system",
+            "status": "processing",
+            "session_id": str(session_id),
+        },
+    })
+
+    # Build file URLs from file_ids
+    file_urls = []
+    if file_ids:
+        # Construct public URLs for uploaded files
+        for fid in file_ids:
+            file_urls.append(f"/v1/files/{fid}")
+
+    # Send to the plugin
+    await send_to_plugin(agent_model, {
+        "type": "user_message",
+        "sessionId": str(session_id),
+        "userId": user_id,
+        "text": text,
+        "fileUrls": file_urls if file_urls else None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    # The response will come back asynchronously through the channel endpoint
+    # (_handle_agent_text / _handle_agent_media in channel.py)
+    # which broadcasts to the user's connected clients.
 
 
 async def _cancel_active_task(active_task: asyncio.Task | None) -> None:
@@ -502,21 +579,29 @@ async def _handle_text(
 
     # If we were detached, mark the session as unread and broadcast
     if detached and detached_session_id:
-        logger.info("[WS] background stream complete for session %s — marking unread", detached_session_id)
-        await mark_session_unread(db, detached_session_id)
+        logger.info("[WS] background stream complete for session %s", detached_session_id)
+        # Check if the user has re-entered the session — if so, don't mark unread
+        current_session = await get_session(db, detached_session_id)
+        user_re_entered = current_session is not None and current_session.status == "active"
+
+        if not user_re_entered:
+            await mark_session_unread(db, detached_session_id)
+
         # Generate summary and set status to "paused"
         try:
             await pause_session(db, detached_session_id)
         except Exception:
             pass
-        # Broadcast both unread and status change to all clients
-        await _broadcast_to_user(user_id, {
-            "type": "session_unread",
-            "payload": {
-                "session_id": str(detached_session_id),
-                "has_unread": True,
-            },
-        })
+
+        # Broadcast unread only if the user didn't re-enter
+        if not user_re_entered:
+            await _broadcast_to_user(user_id, {
+                "type": "session_unread",
+                "payload": {
+                    "session_id": str(detached_session_id),
+                    "has_unread": True,
+                },
+            })
         await _broadcast_to_user(user_id, {
             "type": "session_status",
             "payload": {

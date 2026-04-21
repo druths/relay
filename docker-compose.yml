@@ -49,6 +49,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app
+      - relay_uploads:/app/uploads
 
   frontend:
     build: ./frontend
@@ -82,3 +83,4 @@ services:
 volumes:
   pgdata:
   kokoro_models:
+  relay_uploads:

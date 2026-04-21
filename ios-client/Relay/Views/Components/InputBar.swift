@@ -2,10 +2,12 @@ import SwiftUI
 
 struct InputBar: View {
     @Bindable var relay: RelayViewModel
+    var externalFocus: FocusState<Bool>.Binding? = nil
     @Environment(\.relayTheme) private var theme
     @State private var text = ""
     @State private var showInputPicker = false
     @State private var showOutputPicker = false
+    @FocusState private var localFocus: Bool
 
     private var recorderState: AudioRecorderService.State {
         relay.audio.recorderState
@@ -63,6 +65,7 @@ struct InputBar: View {
             .textFieldStyle(RelayInputFieldStyle(isDisabled: disabled))
             .lineLimit(1...6)
             .disabled(disabled)
+            .focused(externalFocus ?? $localFocus)
             .onSubmit { handleSend() }
 
         Button(action: handleSend) {

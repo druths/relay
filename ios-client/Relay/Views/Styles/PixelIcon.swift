@@ -129,6 +129,23 @@ enum PixelIcons {
         ], color: color, pixelSize: size)
     }
 
+    // Gear (11x11)
+    static func gear(color: Color, size: CGFloat = 3) -> PixelIcon {
+        .from([
+            "...##.##...",
+            ".#########.",
+            "###.###.###",
+            "##..###..##",
+            "####...####",
+            "##.......##",
+            "####...####",
+            "##..###..##",
+            "###.###.###",
+            ".#########.",
+            "...##.##...",
+        ], color: color, pixelSize: size)
+    }
+
     // Mic muted (7x9)
     static func micMuted(color: Color, size: CGFloat = 2.5) -> PixelIcon {
         .from([

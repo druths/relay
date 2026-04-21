@@ -153,6 +153,18 @@ final class RelayViewModel {
         }
     }
 
+    /// Resync state after returning from background. The connection may appear alive
+    /// but the client could have missed messages (especially agent responses that
+    /// completed in the background). Re-fetch session list and resume the active
+    /// session if there is one to pull down the latest history.
+    func resync() async {
+        await fetchSessions()
+        if let sessionId = activeSessionId {
+            suppressNextGreeting = true
+            await resumeSession(sessionId)
+        }
+    }
+
     // MARK: - Actions
 
     func sendMessage(_ text: String) async {
@@ -429,6 +441,13 @@ final class RelayViewModel {
                     Task { await ThinkingToneService.shared.stop() }
                 }
             }
+            // Restore the streaming placeholder (three-dot indicator) when resuming
+            // a session whose agent is still working in the background. The placeholder
+            // was lost when session_history overwrote sessionMessages.
+            if isInSession, payload.status == "processing",
+               sessionMessages.last?.isStreaming != true {
+                sessionMessages.append(Message(role: .agent, textContent: "", isStreaming: true))
+            }
 
         case .text(let payload):
             if suppressNextGreeting && payload.speaker == "operator" {
@@ -535,6 +554,12 @@ final class RelayViewModel {
             if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
                 sessions[idx].status = payload.status
             }
+            // If the active session transitioned from processing → paused, a
+            // background-completed response just finished. Re-resume to pull fresh history
+            // and clear the thinking indicator.
+            if payload.sessionId == activeSessionId && payload.status == "paused" {
+                Task { await resumeSession(payload.sessionId) }
+            }
 
         case .sessionUnread(let payload):
             if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
@@ -558,6 +583,10 @@ final class RelayViewModel {
             if suppressNextGreeting && payload.speaker == "operator" { break }
             guard isInSession else { break }
             let role: Message.MessageRole = payload.speaker == "operator" ? .operator : .agent
+            // Reuse the placeholder added by the processing state_update if present.
+            if let last = sessionMessages.last, last.isStreaming, last.textContent.isEmpty, last.role == role {
+                break
+            }
             sessionMessages.append(Message(role: role, textContent: "", isStreaming: true))
 
         case .textDelta(let payload):

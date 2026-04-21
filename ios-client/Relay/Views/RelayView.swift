@@ -23,6 +23,7 @@ struct RelayView: View {
     @State private var menuSessionSearch = ""
     @State private var menuSearchQuery = ""
     @FocusState private var sidebarSearchFocused: Bool
+    @FocusState private var messageInputFocused: Bool
 
     init(authService: AuthService, themeManager: ThemeManager) {
         self.authService = authService
@@ -78,8 +79,17 @@ struct RelayView: View {
         .task { await relay.connect() }
         .onDisappear { Task { await relay.disconnect() } }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active && !relay.connected {
-                Task { await relay.reconnect() }
+            if phase == .active {
+                Task {
+                    // Always resync on foreground — the app may have missed messages
+                    // while backgrounded, especially if the agent finished in the background.
+                    if !relay.connected {
+                        await relay.reconnect()
+                    } else {
+                        // Connection appears alive but may be stale — resync session state
+                        await relay.resync()
+                    }
+                }
             }
         }
         .onChange(of: relay.connected) { _, isConnected in
@@ -104,7 +114,8 @@ struct RelayView: View {
             }
         }
         .onKeyPress("/") {
-            if isRegular {
+            // Only handle if iPad layout AND no text field is currently focused
+            if isRegular && !messageInputFocused && !sidebarSearchFocused {
                 sidebarSearchFocused = true
                 return .handled
             }
@@ -142,7 +153,7 @@ struct RelayView: View {
             )
             .frame(maxHeight: .infinity)
 
-            InputBar(relay: relay)
+            InputBar(relay: relay, externalFocus: $messageInputFocused)
         }
     }
 
@@ -222,8 +233,11 @@ struct RelayView: View {
 
                 Button(action: { showSettings = true }) {
                     ThemedIcon(systemName: "gearshape")
-                        .font(theme.bodyFont(size: 16))
-                        .foregroundStyle(theme.textTertiary)
+                        .font(theme.bodyFont(size: 14, weight: .bold))
+                        .foregroundStyle(theme.textPrimary)
+                        .frame(width: 24, height: 24)
+                        .background(theme.elevated)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                 }
             }
             .padding(.horizontal, 16)
@@ -488,7 +502,7 @@ struct RelayView: View {
             )
             .frame(maxHeight: .infinity)
 
-            InputBar(relay: relay)
+            InputBar(relay: relay, externalFocus: $messageInputFocused)
         }
     }
 

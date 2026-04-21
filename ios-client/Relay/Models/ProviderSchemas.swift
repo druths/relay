@@ -59,6 +59,9 @@ enum ProviderSchemas {
             ProviderField(key: "llm_api_key", label: "API Key", type: .password, placeholder: "(optional)"),
             ProviderField(key: "llm_model", label: "Model", type: .text, placeholder: "model-name", required: true),
         ])),
+        ("openclaw-channel", ProviderSchema(label: "OpenClaw (Channel)", fields: [
+            ProviderField(key: "llm_model", label: "Agent ID", type: .text, placeholder: "main", required: true),
+        ])),
     ]
 
     // MARK: - TTS Providers

@@ -12,9 +12,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 
-from app.api import agents, auth, platform, sessions, websocket
+from app.api import agents, auth, channel, files, platform, sessions, websocket
 from app.db.database import async_session, engine
-from app.models import Agent, Base, PlatformSetting
+from app.models import Agent, Base, File, PlatformSetting
 from app.services import agent_health
 
 
@@ -137,6 +137,8 @@ app.include_router(agents.router)
 app.include_router(platform.router)
 app.include_router(sessions.router)
 app.include_router(sessions.labels_router)
+app.include_router(files.router)
+app.include_router(channel.router)
 app.include_router(websocket.router)
 
 
