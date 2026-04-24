@@ -16,6 +16,7 @@ final class RelayViewModel {
     var sessionMessages: [Message] = []
     var agents: [Agent] = []
     var sessions: [Session] = []
+    var allLabels: [String] = []
     var sttAvailable = false
     var sttSettings: PlatformSettings?
     var outputMode: OutputMode = .speaker
@@ -119,6 +120,7 @@ final class RelayViewModel {
         // Fetch initial data
         await refreshAgents()
         await fetchSessions()
+        await fetchLabels()
         await checkSttStatus()
         await fetchPlatformSettings()
     }
@@ -281,9 +283,30 @@ final class RelayViewModel {
         }
     }
 
-    func fetchSessions() async {
+    func fetchLabels() async {
+        struct LabelDTO: Decodable { let label_id: String; let name: String }
         do {
-            let fetched: [Session] = try await apiClient.request("GET", path: "/v1/sessions")
+            let fetched: [LabelDTO] = try await apiClient.request("GET", path: "/v1/labels")
+            allLabels = fetched.map(\.name).sorted()
+        } catch {
+            print("[Relay] Failed to fetch labels: \(error)")
+        }
+    }
+
+    func fetchSessions(search: String? = nil, label: String? = nil) async {
+        do {
+            var path = "/v1/sessions"
+            var params: [String] = []
+            if let s = search, !s.isEmpty,
+               let encoded = s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                params.append("search=\(encoded)")
+            }
+            if let l = label, !l.isEmpty,
+               let encoded = l.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                params.append("label=\(encoded)")
+            }
+            if !params.isEmpty { path += "?" + params.joined(separator: "&") }
+            let fetched: [Session] = try await apiClient.request("GET", path: path)
             sessions = fetched
         } catch {
             print("[Relay] Failed to fetch sessions: \(error)")
@@ -549,6 +572,7 @@ final class RelayViewModel {
             if activeSessionId == payload.sessionId {
                 activeSessionLabels = payload.labels
             }
+            Task { await fetchLabels() }
 
         case .sessionStatus(let payload):
             if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {

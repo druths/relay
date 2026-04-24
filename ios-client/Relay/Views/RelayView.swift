@@ -97,6 +97,18 @@ struct RelayView: View {
                 Task { await relay.reconnect() }
             }
         }
+        .onChange(of: sidebarSearchQuery) { _, q in
+            Task { await relay.fetchSessions(search: q, label: sidebarLabelFilter) }
+        }
+        .onChange(of: sidebarLabelFilter) { _, l in
+            Task { await relay.fetchSessions(search: sidebarSearchQuery, label: l) }
+        }
+        .onChange(of: menuSearchQuery) { _, q in
+            Task { await relay.fetchSessions(search: q, label: menuLabelFilter) }
+        }
+        .onChange(of: menuLabelFilter) { _, l in
+            Task { await relay.fetchSessions(search: menuSearchQuery, label: l) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .relayToggleMute)) { _ in
             relay.toggleMute()
         }
@@ -254,7 +266,7 @@ struct RelayView: View {
                     }
 
                     // Label filter
-                    let allLabels = Array(Set(relay.sessions.flatMap(\.labels))).sorted()
+                    let allLabels = relay.allLabels
                     if !allLabels.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("LABELS")
@@ -634,7 +646,7 @@ struct RelayView: View {
 
                 if !relay.sessions.isEmpty {
                     // Label filter chips
-                    let allLabels = Array(Set(relay.sessions.flatMap(\.labels))).sorted()
+                    let allLabels = relay.allLabels
                     if !allLabels.isEmpty {
                         Section(header: Text("Labels").font(theme.labelFont(size: 12)).tracking(1).foregroundStyle(theme.primary)) {
                             ScrollView(.horizontal, showsIndicators: false) {

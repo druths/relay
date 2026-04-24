@@ -72,9 +72,10 @@ class LabelOut(BaseModel):
 async def get_sessions(
     user_id: str = "default",
     label: str | None = Query(None, description="Filter sessions by label name"),
+    search: str | None = Query(None, description="Search by session name, summary, or agent name"),
     db: AsyncSession = Depends(get_db),
 ):
-    sessions = await list_sessions(db, user_id, label_filter=label)
+    sessions = await list_sessions(db, user_id, label_filter=label, search=search)
     return [SessionOut(**s) for s in sessions]
 
 

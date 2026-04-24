@@ -1,10 +1,10 @@
 /** Theme system — manages appearance switching and localStorage persistence. */
 
-export type ThemeName = "default" | "tva" | "tva_mono";
+export type ThemeName = "default" | "light" | "tva" | "tva_mono";
 
 const STORAGE_KEY = "relay_appearance_theme";
 
-const VALID_THEMES: ThemeName[] = ["default", "tva", "tva_mono"];
+const VALID_THEMES: ThemeName[] = ["default", "light", "tva", "tva_mono"];
 
 export function getStoredTheme(): ThemeName {
   const stored = localStorage.getItem(STORAGE_KEY);

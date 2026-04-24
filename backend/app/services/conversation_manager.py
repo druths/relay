@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.redis import cache_session_context, get_cached_context, invalidate_session_cache
@@ -170,8 +170,17 @@ async def has_user_messages(db: AsyncSession, session_id: uuid.UUID) -> bool:
     return (result.scalar() or 0) > 0
 
 
-async def list_sessions(db: AsyncSession, user_id: str = "default", label_filter: str | None = None) -> list[dict]:
-    """Return sessions with agent names and labels for display."""
+async def list_sessions(
+    db: AsyncSession,
+    user_id: str = "default",
+    label_filter: str | None = None,
+    search: str | None = None,
+) -> list[dict]:
+    """Return sessions with agent names and labels for display.
+
+    Default caps at 20 most-recent sessions. When `search` or `label_filter`
+    is set, the cap is raised to 500 so older sessions remain reachable.
+    """
     query = (
         select(Session, Agent.name)
         .join(Agent, Session.agent_id == Agent.agent_id)
@@ -186,7 +195,18 @@ async def list_sessions(db: AsyncSession, user_id: str = "default", label_filter
             .where(Label.name == label_filter)
         )
 
-    query = query.order_by(Session.last_active.desc()).limit(20)
+    if search:
+        pattern = f"%{search.lower()}%"
+        query = query.where(
+            or_(
+                func.lower(Session.name).like(pattern),
+                func.lower(Session.summary).like(pattern),
+                func.lower(Agent.name).like(pattern),
+            )
+        )
+
+    limit = 500 if (search or label_filter) else 20
+    query = query.order_by(Session.last_active.desc()).limit(limit)
     result = await db.execute(query)
 
     sessions = []

@@ -29,6 +29,36 @@
   --border-w: 1px;
 }
 
+/* ── Light theme ── */
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f9fafb;
+  --elevated: #f3f4f6;
+  --border: #e5e7eb;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-tertiary: #64748b;
+  --text-quaternary: #94a3b8;
+  --text-quinary: #cbd5e1;
+  --primary: #2563eb;
+  --primary-light: #3b82f6;
+  --success: #059669;
+  --success-light: #10b981;
+  --error: #dc2626;
+  --warning: #d97706;
+  --agent-bubble: rgba(5, 150, 105, 0.10);
+  --agent-active: rgba(5, 150, 105, 0.18);
+  --operator-bubble: rgba(37, 99, 235, 0.08);
+
+  --font-body: system-ui, -apple-system, sans-serif;
+  --font-heading: system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --radius: 0.5rem;
+  --border-w: 1px;
+
+  color-scheme: light;
+}
+
 /* ── TVA theme ── */
 [data-theme="tva"] {
   --bg: #0a0806;
@@ -453,6 +483,75 @@ body {
 [data-theme="tva"] .send-btn, [data-theme="tva_mono"] .send-btn {
   background-color: var(--primary) !important;
   color: var(--bg) !important;
+}
+
+/* ── Light theme Tailwind overrides ── */
+/* Flip the dark-assumed utility classes used across the app to light equivalents. */
+[data-theme="light"] body {
+  background: var(--bg);
+  color: var(--text-primary);
+}
+[data-theme="light"] .bg-gray-900\/50,
+[data-theme="light"] .bg-gray-900\/30,
+[data-theme="light"] .bg-gray-900 {
+  background-color: var(--surface) !important;
+}
+[data-theme="light"] .bg-gray-800\/50,
+[data-theme="light"] .bg-gray-800 {
+  background-color: var(--elevated) !important;
+}
+[data-theme="light"] .bg-gray-700 {
+  background-color: #e5e7eb !important;
+}
+[data-theme="light"] .hover\:bg-gray-800:hover,
+[data-theme="light"] .hover\:bg-gray-700:hover {
+  background-color: #e5e7eb !important;
+}
+[data-theme="light"] .border-gray-800,
+[data-theme="light"] .border-gray-700,
+[data-theme="light"] .border-gray-600 {
+  border-color: var(--border) !important;
+}
+[data-theme="light"] .text-white {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .text-gray-200,
+[data-theme="light"] .text-gray-300 {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .text-gray-400,
+[data-theme="light"] .text-gray-500 {
+  color: var(--text-tertiary) !important;
+}
+[data-theme="light"] .text-gray-600 {
+  color: var(--text-quaternary) !important;
+}
+[data-theme="light"] .hover\:text-gray-300:hover,
+[data-theme="light"] .hover\:text-gray-400:hover {
+  color: var(--text-primary) !important;
+}
+/* Accent tints that don't read well on white */
+[data-theme="light"] .bg-emerald-900\/40 {
+  background-color: rgba(5, 150, 105, 0.12) !important;
+}
+[data-theme="light"] .ring-emerald-800 {
+  --tw-ring-color: #059669 !important;
+}
+[data-theme="light"] .text-emerald-300,
+[data-theme="light"] .text-emerald-400 {
+  color: #059669 !important;
+}
+[data-theme="light"] .text-blue-300,
+[data-theme="light"] .text-blue-400,
+[data-theme="light"] .text-blue-500 {
+  color: var(--primary) !important;
+}
+[data-theme="light"] .text-red-300,
+[data-theme="light"] .text-red-400 {
+  color: var(--error) !important;
+}
+[data-theme="light"] .text-amber-700 {
+  color: #b45309 !important;
 }
 
 /* TVA Mono: stronger vignette */

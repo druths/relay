@@ -14,6 +14,7 @@ export interface RelayState {
   sessionMessages: Message[];
   agents: Agent[];
   sessions: Session[];
+  allLabels: string[];
   sttAvailable: boolean;
 }
 
@@ -34,6 +35,7 @@ export function useRelay() {
     sessionMessages: [],
     agents: [],
     sessions: [],
+    allLabels: [],
     sttAvailable: false,
   });
 
@@ -52,10 +54,26 @@ export function useRelay() {
     refreshAgents();
   }, [refreshAgents]);
 
-  // Fetch sessions list
-  const fetchSessions = useCallback(async () => {
+  // Fetch all labels across the user's sessions (not just the 20 most-recent).
+  const fetchLabels = useCallback(async () => {
     try {
-      const res = await apiFetch("/v1/sessions");
+      const res = await apiFetch("/v1/labels");
+      const labels: { label_id: string; name: string }[] = await res.json();
+      setState((s) => ({ ...s, allLabels: labels.map((l) => l.name).sort() }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Fetch sessions list. When `search` or `label` is non-empty, the server
+  // returns matches beyond the default 20 most-recent.
+  const fetchSessions = useCallback(async (opts?: { search?: string; label?: string }) => {
+    try {
+      const params = new URLSearchParams();
+      if (opts?.search) params.set("search", opts.search);
+      if (opts?.label) params.set("label", opts.label);
+      const qs = params.toString();
+      const res = await apiFetch(`/v1/sessions${qs ? `?${qs}` : ""}`);
       const sessions: Session[] = await res.json();
       setState((s) => ({ ...s, sessions }));
     } catch {
@@ -83,6 +101,7 @@ export function useRelay() {
       reconnectDelay.current = 1000; // Reset backoff on success
       setState((s) => ({ ...s, connected: true }));
       fetchSessions();
+      fetchLabels();
       refreshAgents();
       apiFetch("/v1/agents/stt/status")
         .then((r) => r.json())
@@ -271,6 +290,7 @@ export function useRelay() {
                 ? event.payload.labels
                 : s.activeSessionLabels,
           }));
+          fetchLabels();
           break;
 
         case "session_status":
@@ -529,6 +549,7 @@ export function useRelay() {
     updateAgentConfig,
     refreshAgents,
     fetchSessions,
+    fetchLabels,
     stopAudio,
     muted: audioPlayer.muted,
     toggleMute,

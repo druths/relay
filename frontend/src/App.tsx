@@ -42,10 +42,9 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
   const inSession = relay.activeSessionId !== null;
 
-  // Collect all known labels from sessions
-  const allLabels = Array.from(
-    new Set(relay.sessions.flatMap((s) => s.labels || []))
-  ).sort();
+  // All labels across the user's full session history (server-side, not
+  // limited to the 20 most-recent sessions currently in state).
+  const allLabels = relay.allLabels;
 
   // Filter sessions by label and search
   const filteredSessions = relay.sessions.filter((s) => {
@@ -57,6 +56,15 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
     }
     return true;
   });
+
+  // Debounced server-side refetch so sessions outside the 20-most-recent
+  // cap remain findable when searching or filtering by label.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      relay.fetchSessions({ search: sessionSearch, label: labelFilter ?? undefined });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [sessionSearch, labelFilter, relay.fetchSessions]);
 
   // Global "/" shortcut to focus search
   useEffect(() => {

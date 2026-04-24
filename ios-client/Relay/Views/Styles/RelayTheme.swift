@@ -141,6 +141,55 @@ extension RelayTheme {
     )
 }
 
+// MARK: - Light Theme
+
+extension RelayTheme {
+    static let lightTheme = RelayTheme(
+        background: Color(hex: 0xffffff),
+        surface: Color(hex: 0xf9fafb),
+        elevated: Color(hex: 0xf3f4f6),
+        border: Color(hex: 0xe5e7eb),
+
+        textPrimary: Color(hex: 0x0f172a),
+        textSecondary: Color(hex: 0x334155),
+        textTertiary: Color(hex: 0x64748b),
+        textQuaternary: Color(hex: 0x94a3b8),
+        textQuinary: Color(hex: 0xcbd5e1),
+
+        primary: Color(hex: 0x2563eb),
+        primaryLight: Color(hex: 0x3b82f6),
+        primaryLighter: Color(hex: 0x60a5fa),
+        success: Color(hex: 0x059669),
+        successLight: Color(hex: 0x10b981),
+        error: Color(hex: 0xdc2626),
+        warning: Color(hex: 0xd97706),
+        recording: Color(hex: 0xdc2626),
+
+        operatorBubble: Color(.sRGB, red: 37/255, green: 99/255, blue: 235/255, opacity: 0.08),
+        agentBubble: Color(.sRGB, red: 5/255, green: 150/255, blue: 105/255, opacity: 0.10),
+        agentActive: Color(.sRGB, red: 5/255, green: 150/255, blue: 105/255, opacity: 0.18),
+
+        mutedButton: Color(.sRGB, red: 220/255, green: 38/255, blue: 38/255, opacity: 0.12),
+        lobbyButton: Color(hex: 0xfef3c7),
+        newAgentPill: Color(hex: 0xdbeafe),
+
+        bodyFontName: nil,
+        headingFontName: nil,
+        monoFontName: nil,
+
+        cornerRadius: 10,
+        borderWidth: 1,
+
+        showScanlines: false,
+        showCRTVignette: false,
+        glowColor: nil,
+
+        bubbleBorderColor: nil,
+        sendButtonInverted: false,
+        liveButtonInverted: false
+    )
+}
+
 // MARK: - TVA Theme
 
 extension RelayTheme {
@@ -245,12 +294,14 @@ extension RelayTheme {
 
 enum ThemeName: String, CaseIterable {
     case `default` = "default"
+    case light = "light"
     case tva = "tva"
     case tvaMono = "tva_mono"
 
     var displayName: String {
         switch self {
         case .default: "Default"
+        case .light: "Light"
         case .tva: "TVA"
         case .tvaMono: "TVA Mono"
         }
@@ -259,6 +310,7 @@ enum ThemeName: String, CaseIterable {
     var theme: RelayTheme {
         switch self {
         case .default: .defaultTheme
+        case .light: .lightTheme
         case .tva: .tvaTheme
         case .tvaMono: .tvaMonoTheme
         }
