@@ -75,6 +75,7 @@ export function TextInput({ onSend, disabled }: TextInputProps) {
     <div className="flex gap-2 p-4 border-t border-gray-800 input-bar items-end">
       <textarea
         ref={textareaRef}
+        data-message-input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKey}

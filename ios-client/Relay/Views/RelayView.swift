@@ -133,6 +133,18 @@ struct RelayView: View {
             }
             return .ignored
         }
+        .onKeyPress("m") {
+            if !messageInputFocused && !sidebarSearchFocused {
+                messageInputFocused = true
+                return .handled
+            }
+            return .ignored
+        }
+        .onKeyPress(.escape) {
+            if messageInputFocused { messageInputFocused = false; return .handled }
+            if sidebarSearchFocused { sidebarSearchFocused = false; return .handled }
+            return .ignored
+        }
     }
 
     // MARK: - iPhone Layout (unchanged)

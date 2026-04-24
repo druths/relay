@@ -66,14 +66,32 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
     return () => clearTimeout(timer);
   }, [sessionSearch, labelFilter, relay.fetchSessions]);
 
-  // Global "/" shortcut to focus search
+  // Global keyboard shortcuts: "/" focuses search, "m" focuses message input,
+  // Escape blurs the current text field.
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "/" && !e.metaKey && !e.ctrlKey) {
-        const tag = (e.target as HTMLElement)?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+      if (e.key === "Escape" && inField) {
+        e.preventDefault();
+        target?.blur();
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (inField) return;
+
+      if (e.key === "/") {
         e.preventDefault();
         searchRef.current?.focus();
+      } else if (e.key === "m" || e.key === "M") {
+        const el = document.querySelector<HTMLTextAreaElement>("[data-message-input]");
+        if (el) {
+          e.preventDefault();
+          el.focus();
+        }
       }
     };
     document.addEventListener("keydown", handler);
