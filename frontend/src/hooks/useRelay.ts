@@ -85,6 +85,14 @@ export function useRelay() {
   const intentionalDisconnect = useRef(false);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reconnectDelay = useRef(1000);
+  // Tracks current activeSessionId so reconnect callbacks can re-resume.
+  const activeSessionIdRef = useRef<string | null>(null);
+  activeSessionIdRef.current = state.activeSessionId;
+  // Suppress the operator greeting + its TTS audio after a reconnect — the
+  // greeting is sent unconditionally on every new WS connection and would
+  // otherwise pollute the active session's conversation log.
+  const suppressNextGreeting = useRef(false);
+  const suppressNextAudio = useRef(false);
 
   // Connect to lobby
   const connect = useCallback(() => {
@@ -93,6 +101,14 @@ export function useRelay() {
     // Close existing socket if any
     if (ws.current && ws.current.readyState <= WebSocket.OPEN) {
       ws.current.close();
+    }
+
+    // Capture the in-session state BEFORE opening the new socket so the
+    // onopen callback can decide whether this is a reconnect-mid-session.
+    const resumingSessionId = activeSessionIdRef.current;
+    if (resumingSessionId) {
+      suppressNextGreeting.current = true;
+      suppressNextAudio.current = true;
     }
 
     const socket = new WebSocket(getWsUrl("/v1/lobby"));
@@ -109,6 +125,14 @@ export function useRelay() {
           setState((s) => ({ ...s, sttAvailable: data.available }))
         )
         .catch(() => {});
+      // Re-establish the previously-active session on the server side so
+      // subsequent messages aren't routed to the lobby.
+      if (resumingSessionId) {
+        socket.send(JSON.stringify({
+          type: "resume_session",
+          payload: { session_id: resumingSessionId },
+        }));
+      }
     };
 
     socket.onclose = () => {
@@ -149,6 +173,10 @@ export function useRelay() {
           break;
 
         case "text":
+          if (suppressNextGreeting.current && event.payload.speaker === "operator") {
+            suppressNextGreeting.current = false;
+            break;
+          }
           setState((s) => {
             if (s.activeSessionId) {
               return {
@@ -342,14 +370,20 @@ export function useRelay() {
           break;
 
         case "audio_start":
+          if (suppressNextAudio.current) break;
           audioPlayerRef.current.start();
           break;
 
         case "audio_chunk":
+          if (suppressNextAudio.current) break;
           audioPlayerRef.current.enqueue(event.payload.data, event.payload.sequence);
           break;
 
         case "audio_done":
+          if (suppressNextAudio.current) {
+            suppressNextAudio.current = false;
+            break;
+          }
           audioPlayerRef.current.done();
           break;
 
