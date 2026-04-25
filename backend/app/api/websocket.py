@@ -771,7 +771,22 @@ async def _do_resume(
     """Resume a specific session. Returns the new active_session_id."""
     session = await get_session(db, target_sid)
     if not session or session.user_id != user_id:
-        return active_session_id
+        # Session is gone (auto-pruned, deleted elsewhere, wrong user). Tell the
+        # client to clear its in-session UI so its next message doesn't get
+        # routed to the lobby while the UI still claims to be in a session.
+        await websocket.send_json({
+            "type": "session_left",
+            "payload": {"session_id": None},
+        })
+        await websocket.send_json({
+            "type": "state_update",
+            "payload": {
+                "active_speaker": "operator",
+                "status": "ready",
+                "session_id": None,
+            },
+        })
+        return None
 
     if active_session_id and not skip_pause:
         await pause_session(db, active_session_id)

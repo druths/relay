@@ -118,7 +118,10 @@ struct RelayView: View {
         .onReceive(NotificationCenter.default.publisher(for: .relayEnterLive)) { _ in
             if !relay.connected {
                 Task {
-                    await relay.connect()
+                    // Use reconnect (not connect) so any previously-active session
+                    // is re-established on the server side — otherwise the next
+                    // message would be routed to the lobby.
+                    await relay.reconnect()
                     relay.enterLiveMode()
                 }
             } else if !relay.isLiveMode {
