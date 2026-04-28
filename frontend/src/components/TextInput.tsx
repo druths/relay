@@ -32,7 +32,7 @@ function ReturnIcon({ color }: { color: string }) {
 function isTvaTheme(): boolean {
   if (typeof document === "undefined") return false;
   const t = document.documentElement.getAttribute("data-theme") ?? "";
-  return t === "tva" || t === "tva_mono";
+  return t === "tva" || t === "tva_mono" || t === "retro_green";
 }
 
 interface TextInputProps {

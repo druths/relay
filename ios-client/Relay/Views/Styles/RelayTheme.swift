@@ -290,6 +290,57 @@ extension RelayTheme {
     )
 }
 
+// MARK: - Retro Green Theme — phosphor green-on-black monochrome
+
+extension RelayTheme {
+    private static let phosphor = Color(hex: 0x33ff33)
+
+    static let retroGreenTheme = RelayTheme(
+        background: Color(hex: 0x001000),
+        surface: Color(hex: 0x001800),
+        elevated: Color(hex: 0x002000),
+        border: phosphor.opacity(0.25),
+
+        textPrimary: phosphor,
+        textSecondary: phosphor.opacity(0.8),
+        textTertiary: phosphor.opacity(0.5),
+        textQuaternary: phosphor.opacity(0.3),
+        textQuinary: phosphor.opacity(0.15),
+
+        primary: phosphor,
+        primaryLight: Color(hex: 0x66ff66),
+        primaryLighter: Color(hex: 0x99ff99),
+        success: phosphor,
+        successLight: phosphor.opacity(0.8),
+        error: phosphor,          // Errors distinguished by blink, not color
+        warning: phosphor,
+        recording: phosphor,
+
+        operatorBubble: phosphor.opacity(0.08),
+        agentBubble: phosphor.opacity(0.12),
+        agentActive: phosphor.opacity(0.10),
+
+        mutedButton: phosphor.opacity(0.2),
+        lobbyButton: phosphor.opacity(0.15),
+        newAgentPill: phosphor.opacity(0.1),
+
+        bodyFontName: "VT323-Regular",
+        headingFontName: "PressStart2P-Regular",
+        monoFontName: "VT323-Regular",
+
+        cornerRadius: 0,
+        borderWidth: 1,
+
+        showScanlines: true,
+        showCRTVignette: true,
+        glowColor: phosphor,
+
+        bubbleBorderColor: phosphor.opacity(0.3),
+        sendButtonInverted: true,
+        liveButtonInverted: true
+    )
+}
+
 // MARK: - Theme Name (for persistence)
 
 enum ThemeName: String, CaseIterable {
@@ -297,6 +348,7 @@ enum ThemeName: String, CaseIterable {
     case light = "light"
     case tva = "tva"
     case tvaMono = "tva_mono"
+    case retroGreen = "retro_green"
 
     var displayName: String {
         switch self {
@@ -304,6 +356,7 @@ enum ThemeName: String, CaseIterable {
         case .light: "Light"
         case .tva: "TVA"
         case .tvaMono: "TVA Mono"
+        case .retroGreen: "Retro Green"
         }
     }
 
@@ -313,6 +366,7 @@ enum ThemeName: String, CaseIterable {
         case .light: .lightTheme
         case .tva: .tvaTheme
         case .tvaMono: .tvaMonoTheme
+        case .retroGreen: .retroGreenTheme
         }
     }
 }

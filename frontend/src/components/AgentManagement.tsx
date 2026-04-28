@@ -983,7 +983,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
             <div>
               <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Theme</h3>
               <div className="flex gap-3">
-                {(["default", "light", "tva", "tva_mono"] as ThemeName[]).map((name) => (
+                {(["default", "light", "tva", "tva_mono", "retro_green"] as ThemeName[]).map((name) => (
                   <button
                     key={name}
                     onClick={() => {
@@ -996,7 +996,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                         : "bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800"
                     }`}
                   >
-                    {{ default: "Default", light: "Light", tva: "TVA", tva_mono: "TVA Mono" }[name]}
+                    {{ default: "Default", light: "Light", tva: "TVA", tva_mono: "TVA Mono", retro_green: "Retro Green" }[name]}
                   </button>
                 ))}
               </div>
@@ -1007,6 +1007,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                   ? "FOR ALL TIME. ALWAYS."
                   : currentTheme === "light"
                   ? "Bright and clean."
+                  : currentTheme === "retro_green"
+                  ? "Phosphor on glass."
                   : "The standard Relay experience."}
               </p>
             </div>

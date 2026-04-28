@@ -562,3 +562,280 @@ body {
     rgba(0,0,0,0.5) 100%
   ) !important;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Retro Green theme — phosphor green-on-black monochrome.
+   Mirrors the TVA Mono structure with green tint instead of amber.
+   ════════════════════════════════════════════════════════════════════ */
+
+[data-theme="retro_green"] {
+  --bg: #001000;
+  --surface: #001800;
+  --elevated: #002000;
+  --border: rgba(51, 255, 51, 0.25);
+  --text-primary: #33ff33;
+  --text-secondary: rgba(51, 255, 51, 0.8);
+  --text-tertiary: rgba(51, 255, 51, 0.5);
+  --text-quaternary: rgba(51, 255, 51, 0.3);
+  --text-quinary: rgba(51, 255, 51, 0.15);
+  --primary: #33ff33;
+  --primary-light: #66ff66;
+  --success: #33ff33;
+  --success-light: rgba(51, 255, 51, 0.8);
+  --error: #33ff33;
+  --warning: #33ff33;
+  --agent-bubble: rgba(51, 255, 51, 0.12);
+  --agent-active: rgba(51, 255, 51, 0.10);
+  --operator-bubble: rgba(51, 255, 51, 0.08);
+
+  --font-body: 'VT323', monospace;
+  --font-heading: 'Press Start 2P', monospace;
+  --font-mono: 'VT323', monospace;
+  --radius: 0px;
+  --border-w: 1px;
+}
+
+[data-theme="retro_green"] body {
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+
+[data-theme="retro_green"] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0,0,0,0.1) 0px,
+    rgba(0,0,0,0.1) 2px,
+    transparent 2px,
+    transparent 4px
+  );
+  z-index: 9999;
+}
+[data-theme="retro_green"] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 40%,
+    rgba(0,0,0,0.5) 100%
+  );
+  z-index: 9998;
+}
+
+[data-theme="retro_green"] h1,
+[data-theme="retro_green"] h2,
+[data-theme="retro_green"] h3,
+[data-theme="retro_green"] .tva-heading {
+  font-family: var(--font-heading);
+  letter-spacing: 2px;
+}
+
+[data-theme="retro_green"] .section-label {
+  font-family: var(--font-heading);
+  font-size: 11px !important;
+  letter-spacing: 2px;
+}
+
+[data-theme="retro_green"] .status-dot {
+  border-radius: 0 !important;
+  background-color: var(--primary) !important;
+}
+
+[data-theme="retro_green"] .message-bubble {
+  border: 1px solid var(--border) !important;
+  border-radius: 0 !important;
+}
+
+[data-theme="retro_green"] .tva-glow {
+  text-shadow: 0 0 8px rgba(51, 255, 51, 0.25);
+}
+
+[data-theme="retro_green"] input,
+[data-theme="retro_green"] textarea {
+  font-family: var(--font-body) !important;
+  background-color: var(--bg) !important;
+  border-color: var(--border) !important;
+  color: var(--text-primary) !important;
+  border-radius: 0 !important;
+  border-width: 1px !important;
+}
+[data-theme="retro_green"] input:focus,
+[data-theme="retro_green"] textarea:focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 8px rgba(51, 255, 51, 0.15) !important;
+}
+[data-theme="retro_green"] input::placeholder {
+  color: var(--text-quaternary) !important;
+}
+
+[data-theme="retro_green"] button {
+  font-family: var(--font-body) !important;
+  border-radius: 0 !important;
+}
+
+[data-theme="retro_green"] aside {
+  background-color: var(--surface) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="retro_green"] main {
+  background-color: var(--bg) !important;
+}
+
+[data-theme="retro_green"] .dropdown-menu {
+  background-color: var(--elevated) !important;
+  border-color: var(--border) !important;
+  border-radius: 0 !important;
+  border-width: 1px !important;
+}
+[data-theme="retro_green"] .modal-panel {
+  background-color: var(--surface) !important;
+  border-color: var(--border) !important;
+  border-radius: 0 !important;
+}
+
+[data-theme="retro_green"] .msg-user {
+  background-color: rgba(51, 255, 51, 0.05) !important;
+  border: 1px solid rgba(51, 255, 51, 0.3) !important;
+  border-radius: 0 !important;
+}
+[data-theme="retro_green"] .msg-agent {
+  background-color: rgba(51, 255, 51, 0.12) !important;
+  border: 1px solid rgba(51, 255, 51, 0.25) !important;
+  border-radius: 0 !important;
+}
+[data-theme="retro_green"] .msg-operator {
+  background-color: rgba(51, 255, 51, 0.08) !important;
+  border: 1px solid rgba(51, 255, 51, 0.2) !important;
+  border-radius: 0 !important;
+}
+[data-theme="retro_green"] .session-active {
+  background-color: rgba(51, 255, 51, 0.10) !important;
+  border: 1px solid rgba(51, 255, 51, 0.4) !important;
+  border-radius: 0 !important;
+}
+
+[data-theme="retro_green"] .label-chip {
+  border-radius: 0 !important;
+  border: 1px solid rgba(51, 255, 51, 0.3);
+}
+
+[data-theme="retro_green"] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+[data-theme="retro_green"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-theme="retro_green"] ::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 0;
+}
+[data-theme="retro_green"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--text-quaternary);
+}
+[data-theme="retro_green"] * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+[data-theme="retro_green"] .session-processing-dot {
+  background-color: var(--primary) !important;
+  animation: sessionProcessingBlink 0.8s steps(2) infinite;
+}
+
+/* Force monochrome — flatten all text colors to phosphor green */
+[data-theme="retro_green"] * {
+  color: var(--text-primary);
+}
+[data-theme="retro_green"] aside *:not([style*="color"]) {
+  color: var(--text-primary) !important;
+}
+[data-theme="retro_green"] aside .text-gray-300,
+[data-theme="retro_green"] aside .text-gray-400,
+[data-theme="retro_green"] aside .text-gray-500,
+[data-theme="retro_green"] aside .text-gray-600,
+[data-theme="retro_green"] aside .text-emerald-300,
+[data-theme="retro_green"] aside .text-blue-400,
+[data-theme="retro_green"] aside .text-blue-300 {
+  color: var(--text-primary) !important;
+}
+[data-theme="retro_green"] aside .text-amber-700,
+[data-theme="retro_green"] aside .text-red-400,
+[data-theme="retro_green"] aside .text-red-300 {
+  color: var(--text-primary) !important;
+}
+[data-theme="retro_green"] aside .bg-amber-700,
+[data-theme="retro_green"] aside .bg-amber-600 {
+  background-color: rgba(51, 255, 51, 0.2) !important;
+}
+[data-theme="retro_green"] aside .bg-emerald-900\/40 {
+  background-color: rgba(51, 255, 51, 0.1) !important;
+}
+[data-theme="retro_green"] aside .bg-gray-800 {
+  background-color: var(--elevated) !important;
+}
+[data-theme="retro_green"] aside .ring-emerald-800 {
+  --tw-ring-color: rgba(51, 255, 51, 0.4) !important;
+}
+[data-theme="retro_green"] .bg-blue-600 {
+  background-color: var(--primary) !important;
+}
+[data-theme="retro_green"] .text-blue-400,
+[data-theme="retro_green"] .text-blue-300,
+[data-theme="retro_green"] .text-blue-500 {
+  color: var(--text-primary) !important;
+}
+[data-theme="retro_green"] .bg-emerald-400,
+[data-theme="retro_green"] .bg-green-500 {
+  background-color: var(--primary) !important;
+}
+[data-theme="retro_green"] .text-emerald-300,
+[data-theme="retro_green"] .text-emerald-400 {
+  color: var(--text-primary) !important;
+}
+[data-theme="retro_green"] .text-red-400,
+[data-theme="retro_green"] .text-red-300 {
+  color: var(--text-primary) !important;
+}
+[data-theme="retro_green"] .bg-gray-900\/50 {
+  background-color: var(--surface) !important;
+}
+[data-theme="retro_green"] .border-gray-800 {
+  border-color: var(--border) !important;
+}
+[data-theme="retro_green"] .hover\:bg-gray-800:hover {
+  background-color: var(--elevated) !important;
+}
+[data-theme="retro_green"] .bg-gray-800\/50 {
+  background-color: rgba(51, 255, 51, 0.05) !important;
+}
+
+/* Settings icon: pixel glyph instead of SVG */
+[data-theme="retro_green"] .gear-icon {
+  display: none;
+}
+[data-theme="retro_green"] .pixel-gear {
+  display: inline;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  letter-spacing: 2px;
+  color: var(--text-tertiary);
+}
+
+/* Send button: pixel return arrow */
+[data-theme="retro_green"] .send-label {
+  display: none !important;
+}
+[data-theme="retro_green"] .send-pixel {
+  display: inline-block !important;
+}
+[data-theme="retro_green"] .save-btn,
+[data-theme="retro_green"] .send-btn {
+  background-color: var(--primary) !important;
+  color: var(--bg) !important;
+}

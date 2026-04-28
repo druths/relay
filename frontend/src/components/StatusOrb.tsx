@@ -186,7 +186,7 @@ export function StatusOrb({ activeSpeaker, displayName, status, connected }: Sta
   const isProcessing = status === "processing";
   const isTvaTheme =
     typeof document !== "undefined" &&
-    ["tva", "tva_mono"].includes(
+    ["tva", "tva_mono", "retro_green"].includes(
       document.documentElement.getAttribute("data-theme") ?? ""
     );
 
