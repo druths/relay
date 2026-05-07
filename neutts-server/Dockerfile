@@ -1,27 +1,32 @@
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
-# System deps: ffmpeg for audio, build-base for any C extensions, curl for healthcheck,
-# espeak-ng for phonemizer (grapheme→phoneme), libsndfile for soundfile.
-# Using Alpine so the pre-built llama-cpp-python musl wheel is compatible.
-RUN apk add --no-cache \
+# System deps. We also install `musl` so the pre-built llama-cpp-python wheel
+# (which links against musl libc) can run on this glibc-based image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
-        build-base \
+        build-essential \
         curl \
-        espeak-ng \
-        libsndfile \
-        libstdc++ \
-        openblas
+        musl \
+    && ln -sf /lib/x86_64-linux-musl/libc.so /lib/libc.musl-x86_64.so.1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt .
 # Pre-install llama-cpp-python from a pre-built CPU wheel to avoid
 # compiling from source (which requires 8GB+ RAM and many minutes).
-# The wheel at abetlen.github.io is built against musl libc (Alpine-compatible).
+# The wheel links against musl libc — the symlink above makes it work on Debian.
 RUN pip install --no-cache-dir \
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
     "llama-cpp-python==0.3.19" && \
     pip install --no-cache-dir -r requirements.txt
+
+# espeak-ng is required by the `phonemizer` package neutts uses for
+# grapheme→phoneme conversion. Installed separately to avoid invalidating
+# the pip layer when this set of packages changes.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        espeak-ng \
+    && rm -rf /var/lib/apt/lists/*
 
 # Pre-download the Nano GGUF backbone + full PyTorch codec so first-request
 # latency isn't dominated by a HuggingFace download. The full codec (not the
