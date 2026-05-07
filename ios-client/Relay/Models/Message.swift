@@ -12,6 +12,7 @@ struct Message: Identifiable, Equatable {
         case user
         case `operator`
         case agent
+        case system  // client-side markers (e.g., "Session ended")
     }
 
     init(role: MessageRole, textContent: String, createdAt: Date? = nil, isStreaming: Bool = false, isInterrupted: Bool = false) {

@@ -26,8 +26,13 @@ async def get_agent_by_name(db: AsyncSession, name: str) -> Agent | None:
 
 
 async def get_agent_by_id(db: AsyncSession, agent_id: uuid.UUID) -> Agent | None:
+    # `populate_existing()` forces SQLAlchemy to refresh attributes on any
+    # object that's already in the identity map. Without it, long-lived
+    # sessions (e.g. the WebSocket session) keep returning a stale Agent
+    # whose voice_id / tts_provider / etc. were captured at first load,
+    # because `expire_on_commit=False` is set on the sessionmaker.
     result = await db.execute(
-        select(Agent).where(Agent.agent_id == agent_id)
+        select(Agent).where(Agent.agent_id == agent_id).execution_options(populate_existing=True)
     )
     return result.scalar_one_or_none()
 

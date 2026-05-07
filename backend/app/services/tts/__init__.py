@@ -34,6 +34,11 @@ def get_tts_provider(provider_name: str, api_key: str | None = None, base_url: s
         logger.info("get_tts_provider: ElevenLabs client ready")
         return ElevenLabsTTSProvider(api_key=api_key)
 
+    if provider_name == "neutts":
+        from app.services.tts.neutts import NeuTTSProvider
+
+        return NeuTTSProvider(base_url=base_url)
+
     # "none" or unknown provider
     logger.debug("get_tts_provider: unknown provider=%s", provider_name)
     return None
@@ -61,5 +66,13 @@ async def fetch_voices_async(provider_name: str, api_key: str, model_id: str | N
         from app.services.tts.elevenlabs import ElevenLabsTTSProvider
 
         return await ElevenLabsTTSProvider.fetch_voices(api_key, model_id=model_id)
+
+    if provider_name == "neutts":
+        from app.services.tts.neutts import NeuTTSProvider
+
+        # `api_key` slot is unused for NeuTTS; the optional override URL is
+        # carried via the agent's voice_settings.base_url which we don't have
+        # access to here. Server URL falls back to settings/env.
+        return await NeuTTSProvider.fetch_voices()
 
     return []

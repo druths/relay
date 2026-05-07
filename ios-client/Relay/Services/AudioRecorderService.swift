@@ -57,6 +57,14 @@ actor AudioRecorderService {
 
     func startListening() async {
         print("[STT][lifecycle] startListening called (stopping=\(isStopping), active=\(isActive), state=\(state))")
+        let priorState = state
+        let priorActive = isActive
+        Task { @MainActor in
+            ActivityLog.shared.add("recording_start_requested", context: [
+                "prior_state": String(describing: priorState),
+                "prior_active": priorActive,
+            ])
+        }
         await cleanup()
 
         let granted: Bool
@@ -96,6 +104,14 @@ actor AudioRecorderService {
 
     func stopListening() async {
         print("[STT][lifecycle] stopListening called (speech=\(speechDetected), active=\(isActive), stopping=\(isStopping))")
+        let hadSpeech = speechDetected
+        let priorState = state
+        Task { @MainActor in
+            ActivityLog.shared.add("recording_stop_requested", context: [
+                "had_speech": hadSpeech,
+                "prior_state": String(describing: priorState),
+            ])
+        }
         isStopping = true
         isActive = false
         stopMeteringPoll()

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
     elevenlabs_api_key: str = ""
+    neutts_url: str = "http://neutts:8000"
     auth_username: str = "admin"
     auth_password: str = "changeme"
     auth_jwt_secret: str = "relay-dev-secret-change-in-production"

@@ -493,7 +493,7 @@ async def _execute_handoff(
     session = await _create_agent_session(db, user_id, agent, labels=labels)
 
     confirm = operator_connect_message(agent.name)
-    greeting = f"Hi, I'm {agent.name}. How can I help you?"
+    greeting = "Hello. Where should we start?"
     await _persist_message(db, session.session_id, "agent", greeting)
 
     session_labels = await get_session_labels(db, session.session_id)

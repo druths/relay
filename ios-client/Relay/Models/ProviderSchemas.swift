@@ -75,6 +75,9 @@ enum ProviderSchemas {
         ("elevenlabs", ProviderSchema(label: "ElevenLabs", fields: [
             ProviderField(key: "tts_api_key", label: "API Key", type: .password, placeholder: "xi-... (uses platform key if blank)"),
         ])),
+        ("neutts", ProviderSchema(label: "NeuTTS (self-hosted)", fields: [
+            ProviderField(key: "base_url", label: "Server URL", type: .text, placeholder: "Blank to use default neutts:8000"),
+        ])),
     ]
 
     // MARK: - STT Providers

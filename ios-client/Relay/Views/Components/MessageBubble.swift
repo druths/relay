@@ -7,12 +7,14 @@ struct MessageBubble: View {
     @State private var animating = false
 
     private var isUser: Bool { message.role == .user }
+    private var isSystem: Bool { message.role == .system }
 
     private var roleLabel: String {
         switch message.role {
         case .user: "You"
         case .operator: "Operator"
         case .agent: "Agent"
+        case .system: ""
         }
     }
 
@@ -21,10 +23,27 @@ struct MessageBubble: View {
         case .user: theme.elevated
         case .operator: theme.operatorBubble
         case .agent: theme.agentBubble
+        case .system: .clear
         }
     }
 
     var body: some View {
+        if isSystem {
+            HStack(spacing: 8) {
+                Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+                Text(message.textContent)
+                    .font(theme.monoFont(size: 12))
+                    .foregroundStyle(theme.textQuaternary)
+                    .fixedSize()
+                Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+            }
+            .padding(.vertical, 4)
+        } else {
+            messageBody
+        }
+    }
+
+    private var messageBody: some View {
         HStack {
             if isUser { Spacer(minLength: 48) }
 

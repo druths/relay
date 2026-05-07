@@ -88,6 +88,12 @@ export const TTS_PROVIDERS: Record<string, ProviderSchema> = {
       { key: "tts_api_key", label: "API Key", type: "password", placeholder: "xi-… (uses platform key if blank)" },
     ],
   },
+  neutts: {
+    label: "NeuTTS (self-hosted)",
+    fields: [
+      { key: "base_url", label: "Server URL", type: "text", placeholder: "Blank to use default neutts:8000" },
+    ],
+  },
 };
 
 export const LLM_PROVIDER_OPTIONS = Object.entries(LLM_PROVIDERS).map(([value, schema]) => ({

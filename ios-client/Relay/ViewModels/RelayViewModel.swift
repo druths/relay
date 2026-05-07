@@ -17,6 +17,9 @@ final class RelayViewModel {
     var agents: [Agent] = []
     var sessions: [Session] = []
     var allLabels: [String] = []
+    /// Client-side system markers keyed by sessionId — appended to sessionMessages
+    /// on resume so the user can see when a session ended within the app's lifetime.
+    private var sessionMarkers: [String: [Message]] = [:]
     var sttAvailable = false
     var sttSettings: PlatformSettings?
     var outputMode: OutputMode = .speaker
@@ -333,15 +336,20 @@ final class RelayViewModel {
         if isLiveMode { updateLiveActivity() }
     }
 
-    func enterLiveMode() {
+    func enterLiveMode(trigger: String = "user") {
         isLiveMode = true
         ChimeGenerator.playLiveStart()
         audio.startListening()
         startLiveActivity()
         Task { try? await webSocketService.send(.setLiveMode(enabled: true)) }
+        ActivityLog.shared.add("live_mode_entered", context: [
+            "trigger": trigger,
+            "active_session_id": activeSessionId as Any,
+            "active_agent": activeAgentName as Any,
+        ])
     }
 
-    func exitLiveMode() {
+    func exitLiveMode(trigger: String = "user") {
         isLiveMode = false
         ChimeGenerator.playLiveEnd()
         audioGapTask?.cancel()
@@ -352,6 +360,10 @@ final class RelayViewModel {
         Task { await SilentKeepAlive.shared.stop() }
         Task { await ThinkingToneService.shared.stop() }
         Task { try? await webSocketService.send(.setLiveMode(enabled: false)) }
+        ActivityLog.shared.add("live_mode_exited", context: [
+            "trigger": trigger,
+            "active_session_id": activeSessionId as Any,
+        ])
     }
 
     func stopAudio() {
@@ -491,6 +503,12 @@ final class RelayViewModel {
             }
 
         case .sessionEntered(let payload):
+            ActivityLog.shared.add("session_entered", context: [
+                "session_id": payload.sessionId,
+                "agent_name": payload.agentName,
+                "labels": payload.labels,
+                "in_live_mode": isLiveMode,
+            ])
             if isLiveMode {
                 // Stage the session immediately so incoming events route to sessionMessages.
                 // The UI swap (activeSessionId) waits for operator audio to finish.
@@ -537,11 +555,31 @@ final class RelayViewModel {
             audioGapTask?.cancel()
             audioGapTask = nil
             let oldSessionId = activeSessionId
+            let oldAgentName = activeAgentName
             pendingSessionId = nil
             pendingAgentName = nil
             pendingAudioHasStart = false
             pendingAudioChunks = []
             pendingAudioHasDone = false
+
+            // Build a system marker capturing what just happened so the user
+            // can see (in both the now-cleared session log on resume, and in
+            // the lobby) that they were dumped out.
+            if let sid = oldSessionId {
+                let now = Date()
+                let sessionMarker = Message(role: .system, textContent: "Left session", createdAt: now)
+                let lobbyLabel = oldAgentName.map { "Left session with \($0)" } ?? "Left session"
+                let lobbyMarker = Message(role: .system, textContent: lobbyLabel, createdAt: now)
+                sessionMarkers[sid, default: []].append(sessionMarker)
+                lobbyMessages.append(lobbyMarker)
+                if isLiveMode { ChimeGenerator.playSessionLeave() }
+            }
+            ActivityLog.shared.add("session_left", context: [
+                "previous_session_id": oldSessionId as Any,
+                "previous_agent": oldAgentName as Any,
+                "in_live_mode": isLiveMode,
+            ])
+
             activeSessionId = nil
             activeAgentName = nil
             activeSessionLabels = []
@@ -553,7 +591,12 @@ final class RelayViewModel {
             }
 
         case .sessionHistory(let payload):
-            sessionMessages = payload.messages.map { $0.toMessage() }
+            var messages = payload.messages.map { $0.toMessage() }
+            if let sid = activeSessionId ?? pendingSessionId,
+               let markers = sessionMarkers[sid], !markers.isEmpty {
+                messages.append(contentsOf: markers)
+            }
+            sessionMessages = messages
 
         case .sessionNamed(let payload):
             if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {

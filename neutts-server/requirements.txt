@@ -1,0 +1,5 @@
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30
+neutts[llama,onnx]==1.1.0
+pydub>=0.25
+huggingface-hub>=0.25

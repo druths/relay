@@ -11,6 +11,7 @@ struct RelayView: View {
     @State private var relay: RelayViewModel
     @State private var showSettings = false
     @State private var showMenu = false
+    @State private var showActivityLog = false
     @State private var showRenameAlert = false
     @State private var renameSessionId: String?
     @State private var renameText = ""
@@ -63,6 +64,10 @@ struct RelayView: View {
         }
         .fullScreenCover(isPresented: $showMenu) {
             menuSheet
+        }
+        .fullScreenCover(isPresented: $showActivityLog) {
+            ActivityLogView()
+                .environment(\.relayTheme, themeManager.current)
         }
         .sheet(isPresented: $showLabelEditor) {
             labelEditorSheet
@@ -647,6 +652,16 @@ struct RelayView: View {
                         }
                     }) {
                         ThemedLabel(title: "Settings", systemImage: "gearshape")
+                            .foregroundStyle(theme.textPrimary)
+                    }
+
+                    Button(action: {
+                        showMenu = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showActivityLog = true
+                        }
+                    }) {
+                        ThemedLabel(title: "Activity Log", systemImage: "list.bullet.rectangle")
                             .foregroundStyle(theme.textPrimary)
                     }
 
