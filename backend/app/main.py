@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 
-from app.api import agents, auth, channel, files, platform, sessions, websocket
+from app.api import agents, auth, files, platform, sessions, websocket
 from app.db.database import async_session, engine
 from app.models import Agent, Base, File, PlatformSetting
 from app.services import agent_health
@@ -120,12 +120,20 @@ async def lifespan(app: FastAPI):
             "UPDATE sessions SET provider_state = jsonb_build_object('openclaw', openclaw_response_id) "
             "WHERE openclaw_response_id IS NOT NULL AND NOT (provider_state ? 'openclaw')"
         ))
+        # Distinguishes user-uploaded attachments from agent-shared files in
+        # session history replay.
+        await conn.execute(text(
+            "ALTER TABLE files ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user'"
+        ))
     # Seed data
     await _seed_agents()
     await _seed_platform_settings()
     # Expose session factory on app state for the WebSocket handler
     app.state.db_session = async_session
     yield
+    # Tear down any live ark WebSocket connections before closing the engine.
+    from app.services.llm.ark import close_all_connections
+    await close_all_connections()
     await engine.dispose()
 
 
@@ -147,7 +155,6 @@ app.include_router(platform.router)
 app.include_router(sessions.router)
 app.include_router(sessions.labels_router)
 app.include_router(files.router)
-app.include_router(channel.router)
 app.include_router(websocket.router)
 
 

@@ -12,7 +12,10 @@ export async function apiFetch(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  if (!headers.has("Content-Type") && init?.body) {
+  // Only default to JSON for string bodies. FormData / Blob / etc. need the
+  // browser to set Content-Type itself (FormData includes the multipart
+  // boundary parameter, which we can't construct here).
+  if (!headers.has("Content-Type") && typeof init?.body === "string") {
     headers.set("Content-Type", "application/json");
   }
 

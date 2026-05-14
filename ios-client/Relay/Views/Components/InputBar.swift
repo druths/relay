@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct InputBar: View {
     @Bindable var relay: RelayViewModel
@@ -7,6 +8,8 @@ struct InputBar: View {
     @State private var text = ""
     @State private var showInputPicker = false
     @State private var showOutputPicker = false
+    @State private var showFilePicker = false
+    @State private var isUploading = false
     @FocusState private var localFocus: Bool
 
     private var recorderState: AudioRecorderService.State {
@@ -61,6 +64,10 @@ struct InputBar: View {
     private var chatContent: some View {
         goLiveButton
 
+        if relay.activeSessionId != nil {
+            attachButton
+        }
+
         TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(theme.textQuaternary), axis: .vertical)
             .textFieldStyle(RelayInputFieldStyle(isDisabled: disabled))
             .lineLimit(1...6)
@@ -77,6 +84,54 @@ struct InputBar: View {
                 .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
         .disabled(!sendButtonEnabled)
+    }
+
+    private var attachButton: some View {
+        Button {
+            showFilePicker = true
+        } label: {
+            Image(systemName: "paperclip")
+                .font(theme.bodyFont(size: 18, weight: .semibold))
+                .foregroundStyle(theme.textSecondary)
+                .frame(width: 44, height: 44)
+                .background(theme.elevated)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                .opacity(isUploading ? 0.5 : 1.0)
+        }
+        .disabled(disabled || isUploading)
+        .fileImporter(
+            isPresented: $showFilePicker,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true,
+        ) { result in
+            switch result {
+            case .success(let urls):
+                Task { await handleFiles(urls) }
+            case .failure(let err):
+                print("[Relay] File picker error: \(err)")
+            }
+        }
+    }
+
+    private func handleFiles(_ urls: [URL]) async {
+        isUploading = true
+        defer { isUploading = false }
+        for url in urls {
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                let mime = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.preferredMIMEType)
+                    ?? "application/octet-stream"
+                _ = await relay.uploadAttachment(
+                    data: data,
+                    filename: url.lastPathComponent,
+                    mimeType: mime,
+                )
+            } catch {
+                print("[Relay] Failed to read picked file \(url.lastPathComponent): \(error)")
+            }
+        }
     }
 
     // MARK: - Live Mode

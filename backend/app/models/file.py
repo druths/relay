@@ -22,6 +22,10 @@ class File(Base):
     mime_type: Mapped[str] = mapped_column(String(200), nullable=False, default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    # "user" for an upload from the Relay client, "agent" for a file the
+    # agent shared back via ark's share_with_client tool. Used to render the
+    # attachment under the right speaker on history replay.
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user", server_default="user")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

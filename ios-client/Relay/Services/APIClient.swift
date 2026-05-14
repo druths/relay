@@ -55,6 +55,44 @@ actor APIClient {
         let _ = try await rawRequest("DELETE", path: path)
     }
 
+    /// Upload a single file via multipart/form-data and decode the JSON response.
+    func uploadMultipart<T: Decodable>(
+        _ method: String, path: String,
+        field: String, filename: String, mimeType: String, data: Data,
+    ) async throws -> T {
+        let token = await authService.token
+        let url = URL(string: "\(AppConfig.apiBase)\(path)")!
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(field)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (respData, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        if http.statusCode == 401 {
+            await authService.handleUnauthorized()
+            throw APIError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw APIError.httpError(http.statusCode)
+        }
+        return try JSONDecoder().decode(T.self, from: respData)
+    }
+
     enum APIError: LocalizedError {
         case invalidResponse
         case unauthorized

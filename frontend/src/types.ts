@@ -41,6 +41,14 @@ export interface Session {
   has_unread: boolean;
 }
 
+export interface FileAttachment {
+  file_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  url: string;
+}
+
 export interface Message {
   message_id?: string;
   role: string;
@@ -48,6 +56,7 @@ export interface Message {
   created_at?: string;
   streaming?: boolean;
   interrupted?: boolean;
+  attachments?: FileAttachment[];
 }
 
 // WebSocket event types
@@ -209,6 +218,17 @@ export interface WsError {
   };
 }
 
+export interface WsAgentFile {
+  type: "agent_file";
+  payload: {
+    session_id: string;
+    agent_name: string;
+    path: string;
+    description?: string | null;
+    size?: number | null;
+  };
+}
+
 export type WsEvent =
   | WsStateUpdate
   | WsTextEvent
@@ -229,4 +249,5 @@ export type WsEvent =
   | WsSessionDeleted
   | WsSessionStatus
   | WsSessionUnread
+  | WsAgentFile
   | WsError;

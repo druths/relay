@@ -189,6 +189,50 @@ final class RelayViewModel {
         }
     }
 
+    /// Upload a file for the active session. The bytes are POSTed to
+    /// `/v1/files`; if the session is ark-backed, the backend forwards them
+    /// to ark on our behalf and the upload itself becomes the agent-visible
+    /// "user attached a file" event. Appends a user message with the resulting
+    /// attachment to the conversation log.
+    @discardableResult
+    func uploadAttachment(data: Data, filename: String, mimeType: String) async -> FileAttachment? {
+        struct UploadResponse: Decodable {
+            let file_id: String
+            let filename: String
+            let mime_type: String
+            let size_bytes: Int
+            let url: String
+        }
+        var path = "/v1/files"
+        if let sid = activeSessionId,
+           let encoded = sid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            path += "?session_id=\(encoded)"
+        }
+        do {
+            let resp: UploadResponse = try await apiClient.uploadMultipart(
+                "POST", path: path,
+                field: "file", filename: filename, mimeType: mimeType, data: data,
+            )
+            let att = FileAttachment(
+                fileId: resp.file_id,
+                filename: resp.filename,
+                mimeType: resp.mime_type,
+                sizeBytes: resp.size_bytes,
+                url: resp.url,
+            )
+            let msg = Message(role: .user, textContent: "", attachments: [att])
+            if activeSessionId != nil {
+                sessionMessages.append(msg)
+            } else {
+                lobbyMessages.append(msg)
+            }
+            return att
+        } catch {
+            print("[Relay] Upload failed: \(error)")
+            return nil
+        }
+    }
+
     func sendAudio(_ base64: String, format: String) async {
         print("[STT] sending audio_input: \(base64.count) base64 chars, format=\(format)")
         do {
@@ -733,6 +777,31 @@ final class RelayViewModel {
             } else {
                 lobbyMessages.append(msg)
             }
+
+        case .agentFile(let payload):
+            // Agent pushed a workspace file via ark's share_with_client tool.
+            // Render as an agent message with a single attachment whose URL
+            // routes through Relay's ark passthrough.
+            guard isInSession, payload.sessionId == activeSessionId else { break }
+            let filename = (payload.path.split(separator: "/").last).map(String.init) ?? payload.path
+            let encodedAgent = payload.agentName
+                .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? payload.agentName
+            let encodedPath = payload.path
+                .split(separator: "/")
+                .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+                .joined(separator: "/")
+            let attachment = FileAttachment(
+                fileId: nil,
+                filename: filename,
+                mimeType: "application/octet-stream",
+                sizeBytes: payload.size ?? 0,
+                url: "/v1/files/ark/\(encodedAgent)/\(encodedPath)"
+            )
+            sessionMessages.append(Message(
+                role: .agent,
+                textContent: payload.description ?? "",
+                attachments: [attachment]
+            ))
 
         case .error(let payload):
             print("[Relay] Server error: \(payload.message)")

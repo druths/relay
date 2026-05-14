@@ -147,10 +147,12 @@ async def generate_response(
         try:
             result = await provider.generate_with_chain(
                 system_prompt, messages, agent.llm_model,
+                relay_session_id=str(session_id),
                 previous_session_id=prev_sid,
             )
             if result.session_id:
                 await set_provider_state(str(session_id), "ark", result.session_id)
+            await _ensure_ark_async_listener(agent, session_id, result.session_id)
             agent_health.set_healthy(agent.agent_id)
             return result.text
         except Exception as exc:
@@ -225,17 +227,22 @@ async def generate_response_stream(
         from app.services.llm.ark import ArkResult
 
         prev_sid = await get_provider_state(str(session_id), "ark")
+        final_ark_sid: str | None = None
         try:
             async for chunk in provider.generate_stream_with_chain(
                 system_prompt, messages, agent.llm_model,
+                relay_session_id=str(session_id),
                 previous_session_id=prev_sid,
             ):
                 if isinstance(chunk, ArkResult):
                     if chunk.session_id:
                         await set_provider_state(str(session_id), "ark", chunk.session_id)
+                        final_ark_sid = chunk.session_id
                 else:
                     yield chunk
             agent_health.set_healthy(agent.agent_id)
+            if final_ark_sid:
+                await _ensure_ark_async_listener(agent, session_id, final_ark_sid)
         except Exception as exc:
             logger.exception("LLM stream failed for agent %s: %s", agent.name, exc)
             agent_health.set_error(agent.agent_id, str(exc)[:120])
@@ -250,3 +257,117 @@ async def generate_response_stream(
         logger.exception("LLM stream failed for agent %s: %s", agent.name, exc)
         agent_health.set_error(agent.agent_id, str(exc)[:120])
         yield f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
+
+
+# ── Ark async-event fan-out ─────────────────────────────────────────
+
+async def _ensure_ark_async_listener(
+    agent: Agent, relay_session_id: uuid.UUID, ark_session_id: str,
+) -> None:
+    """Make sure the ArkSessionConnection for this Relay session has a
+    callback wired that fans out file_available / injected_message events to
+    the user's Relay WS clients."""
+    from app.services.llm.ark import get_connection
+
+    conn = get_connection(str(relay_session_id))
+    if conn is None:
+        return
+    # Idempotent — the connection holds a single slot; we just overwrite.
+    user_id = await _resolve_session_user_id(relay_session_id)
+    if not user_id:
+        return
+
+    sid_str = str(relay_session_id)
+    agent_name = agent.name
+
+    async def _fanout(event: dict) -> None:
+        await _broadcast_ark_async_event(user_id, sid_str, agent_name, event)
+
+    conn.set_async_callback(_fanout)
+
+
+async def _resolve_session_user_id(relay_session_id: uuid.UUID) -> str | None:
+    """Look up the user_id that owns a Relay session."""
+    from app.db.database import async_session
+    from app.models.session import Session
+    async with async_session() as db:
+        result = await db.execute(
+            select(Session.user_id).where(Session.session_id == relay_session_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def _broadcast_ark_async_event(
+    user_id: str, session_id_str: str, agent_name: str, event: dict,
+) -> None:
+    """Translate an ark async event into a Relay WS event and broadcast to all
+    of the user's connected clients. Also persists agent-pushed files so they
+    survive session reload."""
+    from app.api.websocket import _broadcast_to_user
+
+    etype = event.get("type")
+    if etype == "file_available":
+        path = event.get("path")
+        size = event.get("size") or 0
+        if not path:
+            return
+        # Persist as a File row so resume-after-disconnect shows the pill.
+        file_id = await _persist_agent_shared_file(
+            user_id=user_id,
+            session_id_str=session_id_str,
+            agent_name=agent_name,
+            path=path,
+            size=size,
+        )
+        await _broadcast_to_user(user_id, {
+            "type": "agent_file",
+            "payload": {
+                "session_id": session_id_str,
+                "agent_name": agent_name,
+                "path": path,
+                "description": event.get("description"),
+                "size": size,
+                "file_id": file_id,
+            },
+        })
+    elif etype == "injected_message":
+        text = event.get("text") or event.get("message") or ""
+        if not text:
+            return
+        await _broadcast_to_user(user_id, {
+            "type": "text",
+            "payload": {"speaker": agent_name, "text": text},
+        })
+
+
+async def _persist_agent_shared_file(
+    *, user_id: str, session_id_str: str, agent_name: str, path: str, size: int,
+) -> str | None:
+    """Record an agent-pushed file as a `files` row so session history can
+    replay it. Returns the new file_id (string) or None on failure."""
+    from app.db.database import async_session
+    from app.db.redis import invalidate_session_cache
+    from app.models.file import File as FileModel
+    import uuid as _uuid
+
+    filename = path.rsplit("/", 1)[-1] or "file"
+    storage_path = f"ark:{agent_name}:{path}"
+    try:
+        async with async_session() as db:
+            db_file = FileModel(
+                file_id=_uuid.uuid4(),
+                session_id=_uuid.UUID(session_id_str),
+                user_id=user_id,
+                filename=filename,
+                mime_type="application/octet-stream",
+                size_bytes=int(size or 0),
+                storage_path=storage_path,
+                role="agent",
+            )
+            db.add(db_file)
+            await db.commit()
+            await invalidate_session_cache(session_id_str)
+            return str(db_file.file_id)
+    except Exception:
+        logger.exception("Failed to persist agent-shared file")
+        return None

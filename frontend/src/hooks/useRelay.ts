@@ -369,6 +369,38 @@ export function useRelay() {
           }));
           break;
 
+        case "agent_file": {
+          // The agent shared a workspace file. Render it as an agent message
+          // with a file attachment so it appears inline in the conversation.
+          const path = event.payload.path;
+          const filename = path.split("/").pop() || path;
+          const attachment = {
+            file_id: "",  // we don't have a Relay file_id for agent-pushed files
+            filename,
+            mime_type: "application/octet-stream",
+            size_bytes: event.payload.size ?? 0,
+            // Relay-internal proxy URL: /v1/files supports ark fetch only by
+            // file_id, so we use a direct path-based variant here. The download
+            // route below interprets `agent/path` form.
+            url: `/v1/files/ark/${encodeURIComponent(event.payload.agent_name)}/${path.split("/").map(encodeURIComponent).join("/")}`,
+          };
+          setState((s) => {
+            if (s.activeSessionId !== event.payload.session_id) return s;
+            return {
+              ...s,
+              sessionMessages: [
+                ...s.sessionMessages,
+                {
+                  role: "agent",
+                  text_content: event.payload.description || "",
+                  attachments: [attachment],
+                },
+              ],
+            };
+          });
+          break;
+        }
+
         case "audio_start":
           if (suppressNextAudio.current) break;
           audioPlayerRef.current.start();
@@ -483,6 +515,20 @@ export function useRelay() {
     ws.current.send(JSON.stringify({ type: "text_input", payload: { text } }));
   }, []);
 
+  // Append a user attachment to the conversation log. The file is already
+  // uploaded server-side (and proxied to ark if applicable); this just makes
+  // it visible. Returns no events to the server — ark already knows about
+  // the upload via the REST POST path.
+  const appendUserAttachment = useCallback((attachment: import("../types").FileAttachment) => {
+    setState((s) => {
+      const msg: Message = { role: "user", text_content: "", attachments: [attachment] };
+      if (s.activeSessionId) {
+        return { ...s, sessionMessages: [...s.sessionMessages, msg] };
+      }
+      return { ...s, lobbyMessages: [...s.lobbyMessages, msg] };
+    });
+  }, []);
+
   // Send audio for STT transcription
   const sendAudio = useCallback((audioBase64: string, format: string) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
@@ -584,6 +630,7 @@ export function useRelay() {
     refreshAgents,
     fetchSessions,
     fetchLabels,
+    appendUserAttachment,
     stopAudio,
     muted: audioPlayer.muted,
     toggleMute,

@@ -68,6 +68,9 @@ async def delete_session(db: AsyncSession, session_id: uuid.UUID) -> bool:
     session.deleted_at = datetime.now(timezone.utc)
     await db.commit()
     await invalidate_session_cache(session_id)
+    # Close any live ark connection for this session.
+    from app.services.llm.ark import close_connection
+    await close_connection(str(session_id))
     return True
 
 
@@ -230,7 +233,9 @@ async def list_sessions(
 async def get_session_messages(
     db: AsyncSession, session_id: uuid.UUID, limit: int = 50
 ) -> list[dict]:
-    """Return messages for a session, trying Redis cache first."""
+    """Return messages for a session, merged with any file attachments for
+    the same session so the conversation replay includes upload pills and
+    agent-shared files. Tries Redis cache first."""
     cached = await get_cached_context(str(session_id))
     if cached is not None:
         return cached
@@ -241,15 +246,55 @@ async def get_session_messages(
         .order_by(Message.created_at)
         .limit(limit)
     )
-    messages = [
+    text_entries = [
         {
             "message_id": str(m.message_id),
             "role": m.role,
             "text_content": m.text_content,
             "created_at": m.created_at.isoformat(),
+            "_ts": m.created_at,
         }
         for m in result.scalars().all()
     ]
+
+    # Fold in file attachments as their own synthetic messages, ordered by
+    # upload/share timestamp.
+    from app.models.file import File as FileModel
+    file_result = await db.execute(
+        select(FileModel)
+        .where(FileModel.session_id == session_id)
+        .order_by(FileModel.created_at)
+    )
+    file_entries: list[dict] = []
+    for f in file_result.scalars().all():
+        # Agent-shared files go through the /v1/files/ark/... passthrough
+        # because there isn't always a Relay-side file_id at the moment ark
+        # pushes; user uploads use the file-id route.
+        url: str
+        if f.role == "agent" and f.storage_path.startswith("ark:"):
+            # ark:<agent>:<workspace-path>
+            rest = f.storage_path[len("ark:"):]
+            agent_name, _, ark_path = rest.partition(":")
+            url = f"/v1/files/ark/{agent_name}/{ark_path}"
+        else:
+            url = f"/v1/files/{f.file_id}/{f.filename}"
+        file_entries.append({
+            "role": f.role,
+            "text_content": "",
+            "created_at": f.created_at.isoformat(),
+            "_ts": f.created_at,
+            "attachments": [{
+                "file_id": str(f.file_id),
+                "filename": f.filename,
+                "mime_type": f.mime_type,
+                "size_bytes": f.size_bytes,
+                "url": url,
+            }],
+        })
+
+    messages = sorted(text_entries + file_entries, key=lambda e: e["_ts"])
+    for m in messages:
+        m.pop("_ts", None)
     await cache_session_context(str(session_id), messages)
     return messages
 
@@ -302,6 +347,10 @@ async def pause_session(db: AsyncSession, session_id: uuid.UUID) -> str:
 
     session.status = "paused"
     await db.commit()
+
+    # Close any live ark connection for this session.
+    from app.services.llm.ark import close_connection
+    await close_connection(str(session_id))
 
     # Generate summary async only if the session has no name yet
     if not session.name:

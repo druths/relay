@@ -1,5 +1,37 @@
 import { useEffect, useRef } from "react";
-import type { Message } from "../types";
+import type { Message, FileAttachment } from "../types";
+import { apiFetch } from "../api";
+
+function _formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function _downloadAttachment(att: FileAttachment) {
+  // The download endpoint requires the bearer token, which can't be attached
+  // to a plain <a href>. Fetch as Blob and trigger a synthetic click.
+  try {
+    const resp = await apiFetch(att.url);
+    if (!resp.ok) {
+      console.error("Download failed", resp.status, await resp.text());
+      return;
+    }
+    const blob = await resp.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = att.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoke a bit later — Safari needs the URL to stay alive until the
+    // download starts.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch (err) {
+    console.error("Download error", err);
+  }
+}
 
 interface ConversationLogProps {
   lobbyMessages: Message[];
@@ -49,6 +81,26 @@ export function ConversationLog({
         >
           <div className="whitespace-pre-wrap">
             {msg.text_content}
+            {msg.attachments && msg.attachments.length > 0 && (
+              <div className={`flex flex-col gap-1 ${msg.text_content ? "mt-2" : ""}`}>
+                {msg.attachments.map((att, ai) => (
+                  <button
+                    key={ai}
+                    type="button"
+                    onClick={() => _downloadAttachment(att)}
+                    className="inline-flex items-center gap-2 self-start px-2 py-1 rounded bg-gray-900/60 hover:bg-gray-900 border border-gray-700 text-xs text-gray-200"
+                  >
+                    <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" className="text-gray-400">
+                      <path d="M9.5 0a.5.5 0 0 1 .5.5V3h2.5a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H6V.5a.5.5 0 0 1 .5-.5h3ZM4 4v10h8V4H4Z"/>
+                    </svg>
+                    <span className="truncate max-w-[20rem]">{att.filename}</span>
+                    {att.size_bytes > 0 && (
+                      <span className="text-gray-500">({_formatSize(att.size_bytes)})</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
             {msg.streaming && (
               <span className="inline-flex items-end gap-0.5 ml-1.5 mb-0.5">
                 {[0, 1, 2].map((i) => (

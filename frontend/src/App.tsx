@@ -560,6 +560,8 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         <TextInput
           onSend={relay.sendMessage}
           disabled={!relay.connected}
+          sessionId={relay.activeSessionId}
+          onAttachment={relay.appendUserAttachment}
         />
       </main>
 

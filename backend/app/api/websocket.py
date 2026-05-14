@@ -8,7 +8,6 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
@@ -174,19 +173,6 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
 
                     elif msg_type == "text_input":
                         text = data["payload"]["text"]
-                        file_ids = data["payload"].get("file_ids", [])
-
-                        # Check if the active session uses the channel provider
-                        if active_session_id:
-                            session_obj = await get_session(db, active_session_id)
-                            if session_obj:
-                                agent_obj = await agent_manager.get_agent_by_id(db, session_obj.agent_id)
-                                if agent_obj and agent_obj.llm_provider == "openclaw-channel":
-                                    await _handle_channel_message(
-                                        websocket, db, user_id, text, active_session_id,
-                                        agent_obj, file_ids,
-                                    )
-                                    continue
 
                         await _cancel_active_task(active_task)
                         detach_event = asyncio.Event()  # Fresh event for each task
@@ -359,67 +345,6 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
             )
         except Exception:
             pass
-
-
-async def _handle_channel_message(
-    websocket: WebSocket,
-    db,
-    user_id: str,
-    text: str,
-    session_id: uuid.UUID,
-    agent,
-    file_ids: list[str] | None = None,
-) -> None:
-    """Route a user message through the OpenClaw channel plugin instead of the HTTP provider."""
-    from app.api.channel import send_to_plugin, is_plugin_connected
-    from app.services.conversation_manager import _persist_message, invalidate_session_cache
-
-    # Check plugin connection
-    agent_model = agent.llm_model  # e.g., "main", "april"
-    if not is_plugin_connected(agent_model):
-        await websocket.send_json({
-            "type": "text",
-            "payload": {
-                "speaker": agent.name,
-                "text": f"[{agent.name}] Channel not connected. The OpenClaw plugin may not be running.",
-            },
-        })
-        return
-
-    # Persist the user message
-    await _persist_message(db, session_id, "user", text)
-    await invalidate_session_cache(str(session_id))
-
-    # Show processing state
-    await websocket.send_json({
-        "type": "state_update",
-        "payload": {
-            "active_speaker": "system",
-            "status": "processing",
-            "session_id": str(session_id),
-        },
-    })
-
-    # Build file URLs from file_ids
-    file_urls = []
-    if file_ids:
-        # Construct public URLs for uploaded files
-        for fid in file_ids:
-            file_urls.append(f"/v1/files/{fid}")
-
-    # Send to the plugin
-    await send_to_plugin(agent_model, {
-        "type": "user_message",
-        "sessionId": str(session_id),
-        "userId": user_id,
-        "text": text,
-        "fileUrls": file_urls if file_urls else None,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
-
-    # The response will come back asynchronously through the channel endpoint
-    # (_handle_agent_text / _handle_agent_media in channel.py)
-    # which broadcasts to the user's connected clients.
 
 
 async def _cancel_active_task(active_task: asyncio.Task | None) -> None:

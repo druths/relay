@@ -22,6 +22,7 @@ enum WebSocketEvent {
     case audioChunk(AudioChunkPayload)
     case audioDone(AudioDonePayload)
     case transcription(TranscriptionPayload)
+    case agentFile(AgentFilePayload)
     case error(ErrorPayload)
 }
 
@@ -171,6 +172,22 @@ struct ErrorPayload: Codable {
     let message: String
 }
 
+struct AgentFilePayload: Codable {
+    let sessionId: String
+    let agentName: String
+    let path: String
+    let description: String?
+    let size: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case agentName = "agent_name"
+        case path
+        case description
+        case size
+    }
+}
+
 // MARK: - Decoding
 
 extension WebSocketEvent {
@@ -241,6 +258,8 @@ extension WebSocketEvent {
                 return .audioDone(try decoder.decode(AudioDonePayload.self, from: payloadData))
             case "transcription":
                 return .transcription(try decoder.decode(TranscriptionPayload.self, from: payloadData))
+            case "agent_file":
+                return .agentFile(try decoder.decode(AgentFilePayload.self, from: payloadData))
             case "error":
                 return .error(try decoder.decode(ErrorPayload.self, from: payloadData))
             default:

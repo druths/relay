@@ -62,12 +62,6 @@ export const LLM_PROVIDERS: Record<string, ProviderSchema> = {
       { key: "llm_model", label: "Model", type: "text", placeholder: "model-name", required: true },
     ],
   },
-  "openclaw-channel": {
-    label: "OpenClaw (Channel)",
-    fields: [
-      { key: "llm_model", label: "Agent ID", type: "text", placeholder: "main", required: true },
-    ],
-  },
   ark: {
     label: "Ark",
     fields: [

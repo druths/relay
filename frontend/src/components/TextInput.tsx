@@ -1,4 +1,6 @@
 import { useRef, useState, useEffect, type KeyboardEvent } from "react";
+import { apiFetch } from "../api";
+import type { FileAttachment } from "../types";
 
 // 11x9 pixel grid for ⏎ return arrow — matches iOS PixelIcons.returnArrow
 const RETURN_GRID = [
@@ -38,11 +40,15 @@ function isTvaTheme(): boolean {
 interface TextInputProps {
   onSend: (text: string) => void;
   disabled: boolean;
+  sessionId?: string | null;
+  onAttachment?: (attachment: FileAttachment) => void;
 }
 
-export function TextInput({ onSend, disabled }: TextInputProps) {
+export function TextInput({ onSend, disabled, sessionId, onAttachment }: TextInputProps) {
   const [value, setValue] = useState("");
+  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const tva = isTvaTheme();
 
   const handleSend = () => {
@@ -69,10 +75,60 @@ export function TextInput({ onSend, disabled }: TextInputProps) {
     el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
   }, [value]);
 
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !onAttachment) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.append("file", file);
+        const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+        try {
+          const resp = await apiFetch(`/v1/files${qs}`, { method: "POST", body: form });
+          if (!resp.ok) {
+            console.error("Upload failed", resp.status, await resp.text());
+            continue;
+          }
+          const att: FileAttachment = await resp.json();
+          onAttachment(att);
+        } catch (err) {
+          console.error("Upload error", err);
+        }
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const placeholder = disabled ? "Connect to start…" : "Type a message…";
 
   return (
     <div className="flex gap-2 p-4 border-t border-gray-800 input-bar items-end">
+      {onAttachment && (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => handleFiles(e.target.files)}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || uploading}
+            title="Attach file"
+            className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 rounded-lg
+                       h-9 px-3 text-gray-300 transition-colors
+                       flex items-center justify-center"
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+              <path d="M10.5 1a2.5 2.5 0 0 0-2.5 2.5V11a1.5 1.5 0 0 0 3 0V4a.5.5 0 0 0-1 0v7a.5.5 0 0 1-1 0V3.5a1.5 1.5 0 0 1 3 0V11a2.5 2.5 0 0 1-5 0V3.5a.5.5 0 0 0-1 0V11a3.5 3.5 0 0 0 7 0V3.5A2.5 2.5 0 0 0 10.5 1Z"/>
+            </svg>
+          </button>
+        </>
+      )}
       <textarea
         ref={textareaRef}
         data-message-input
