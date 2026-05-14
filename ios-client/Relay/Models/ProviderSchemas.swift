@@ -62,6 +62,11 @@ enum ProviderSchemas {
         ("openclaw-channel", ProviderSchema(label: "OpenClaw (Channel)", fields: [
             ProviderField(key: "llm_model", label: "Agent ID", type: .text, placeholder: "main", required: true),
         ])),
+        ("ark", ProviderSchema(label: "Ark", fields: [
+            ProviderField(key: "llm_base_url", label: "Server URL", type: .text, placeholder: "http://localhost:7777", required: true),
+            ProviderField(key: "llm_model", label: "Agent Name", type: .text, placeholder: "assistant", required: true),
+            ProviderField(key: "llm_api_key", label: "Auth Token", type: .password, placeholder: "(shared bearer secret)"),
+        ])),
     ]
 
     // MARK: - TTS Providers

@@ -111,6 +111,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS openclaw_response_id VARCHAR(200)"
         ))
+        # Per-provider continuation state. Backfill the legacy openclaw column
+        # into the new JSON dict so live sessions don't lose chain context.
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS provider_state JSONB NOT NULL DEFAULT '{}'::jsonb"
+        ))
+        await conn.execute(text(
+            "UPDATE sessions SET provider_state = jsonb_build_object('openclaw', openclaw_response_id) "
+            "WHERE openclaw_response_id IS NOT NULL AND NOT (provider_state ? 'openclaw')"
+        ))
     # Seed data
     await _seed_agents()
     await _seed_platform_settings()

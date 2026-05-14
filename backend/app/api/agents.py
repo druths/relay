@@ -255,6 +255,56 @@ async def get_tts_models(
         ]
 
 
+@router.get("/llm/models/{provider}")
+async def get_llm_models(
+    provider: str,
+    base_url: str | None = None,
+    api_key: str | None = None,
+):
+    """Return the list of agent/model names a provider exposes for selection.
+
+    Currently implemented for `ark` (lists agents on the configured server).
+    Other providers return an empty list, which the UI takes as a signal to
+    fall back to a free-form text field.
+    """
+    if provider == "ark":
+        if not base_url:
+            return []
+        import httpx
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                resp = await client.get(base_url.rstrip("/") + "/agents", headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception:
+            return []
+        # Ark's response shape: list of {name, ...} entries (with summary status).
+        # Be lenient about wrapping shapes.
+        items = data if isinstance(data, list) else data.get("agents", [])
+        out = []
+        for entry in items:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if not name:
+                continue
+            desc_parts = []
+            if isinstance(entry, dict):
+                model = entry.get("model")
+                if model:
+                    desc_parts.append(str(model))
+                hb = entry.get("heartbeat_interval") or entry.get("heartbeat_seconds")
+                if hb:
+                    desc_parts.append(f"heartbeat {hb}s")
+            out.append({
+                "id": name,
+                "name": name,
+                "description": " · ".join(desc_parts),
+            })
+        return out
+
+    return []
+
+
 @router.get("/tts/voices/{provider}")
 async def get_tts_voices(
     provider: str,

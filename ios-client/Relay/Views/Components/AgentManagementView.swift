@@ -72,6 +72,7 @@ struct AgentManagementView: View {
                 vm.selectAgent(first)
                 await vm.fetchTtsModels()
                 await vm.fetchVoices()
+                await vm.fetchLlmModels()
             }
         }
     }
@@ -202,7 +203,7 @@ struct AgentManagementView: View {
 
     private func agentPill(_ agent: Agent) -> some View {
         let isActive = !vm.isNewAgent && vm.selectedAgentId == agent.agentId
-        return Button(action: { vm.selectAgent(agent); Task { await vm.fetchTtsModels(); await vm.fetchVoices() } }) {
+        return Button(action: { vm.selectAgent(agent); Task { await vm.fetchTtsModels(); await vm.fetchVoices(); await vm.fetchLlmModels() } }) {
             HStack(spacing: 6) {
                 StatusIndicator(color: statusColor(agent.status))
                 if agent.isOperator {
@@ -281,11 +282,20 @@ struct AgentManagementView: View {
             ForEach(schema.fields.filter { $0.key != "llm_model" }, id: \.key) { field in
                 sectionLabel(field.label)
                 formTextField(field.key, placeholder: field.placeholder, secure: field.fieldType == .password)
+                    .onChange(of: vm.form[field.key]) { _, _ in
+                        if field.key == "llm_base_url" || field.key == "llm_api_key" {
+                            Task { await vm.fetchLlmModels() }
+                        }
+                    }
             }
         }
 
-        sectionLabel("Model")
-        formTextField("llm_model", placeholder: ProviderSchemas.llmSchema(for: vm.form["llm_provider"] ?? "openai")?.fields.first { $0.key == "llm_model" }?.placeholder ?? "model")
+        sectionLabel(vm.form["llm_provider"] == "ark" ? "Agent" : "Model")
+        if !vm.llmModels.isEmpty {
+            llmModelPicker
+        } else {
+            formTextField("llm_model", placeholder: ProviderSchemas.llmSchema(for: vm.form["llm_provider"] ?? "openai")?.fields.first { $0.key == "llm_model" }?.placeholder ?? "model")
+        }
 
         // TTS Provider
         sectionTitle("TTS PROVIDER")
@@ -593,11 +603,50 @@ struct AgentManagementView: View {
     private func providerPicker(_ key: String, options: [(String, String)]) -> some View {
         Menu {
             ForEach(options, id: \.0) { option in
-                Button(option.1) { vm.form[key] = option.0; Task { await vm.fetchTtsModels(); await vm.fetchVoices() } }
+                Button(option.1) {
+                    vm.form[key] = option.0
+                    Task {
+                        await vm.fetchTtsModels()
+                        await vm.fetchVoices()
+                        if key == "llm_provider" { await vm.fetchLlmModels() }
+                    }
+                }
             }
         } label: {
             HStack {
                 Text(options.first { $0.0 == vm.form[key] }?.1 ?? vm.form[key] ?? "")
+                    .font(theme.bodyFont(size: 21))
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(theme.bodyFont(size: 18))
+                    .foregroundStyle(theme.textQuaternary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .background(theme.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        }
+    }
+
+    private var llmModelPicker: some View {
+        let current = vm.form["llm_model"] ?? ""
+        let inList = vm.llmModels.contains { $0.id == current }
+        return Menu {
+            ForEach(vm.llmModels, id: \.id) { model in
+                Button {
+                    vm.form["llm_model"] = model.id
+                } label: {
+                    if model.description.isEmpty {
+                        Text(model.name)
+                    } else {
+                        Text("\(model.name) — \(model.description)")
+                    }
+                }
+            }
+        } label: {
+            HStack {
+                Text(current.isEmpty ? "Select…" : (inList ? current : "\(current) (not on server)"))
                     .font(theme.bodyFont(size: 21))
                     .foregroundStyle(theme.textSecondary)
                 Spacer()

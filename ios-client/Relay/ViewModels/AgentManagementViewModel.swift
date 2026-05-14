@@ -25,6 +25,7 @@ final class AgentManagementViewModel {
     var form: [String: String] = [:]
     var voices: [Voice] = []
     var ttsModels: [(id: String, name: String)] = []
+    var llmModels: [(id: String, name: String, description: String)] = []
     var isSaving = false
 
     // Platform settings state
@@ -121,6 +122,43 @@ final class AgentManagementViewModel {
     }
 
     // MARK: - TTS Models
+
+    /// Fetch the list of available LLM agents/models for providers that
+    /// expose one (currently only ark). Empty list signals the UI to fall
+    /// back to a free-form text field.
+    func fetchLlmModels() async {
+        let provider = form["llm_provider"] ?? "openai"
+        guard provider == "ark" else {
+            llmModels = []
+            return
+        }
+        let baseUrl = form["llm_base_url"] ?? ""
+        guard !baseUrl.isEmpty,
+              let encodedUrl = baseUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        else {
+            llmModels = []
+            return
+        }
+        var params = ["base_url=\(encodedUrl)"]
+        let apiKey = form["llm_api_key"] ?? ""
+        let isRealKey = !apiKey.isEmpty && !apiKey.contains("\u{2022}")
+        if isRealKey, let encodedKey = apiKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            params.append("api_key=\(encodedKey)")
+        }
+        do {
+            struct LlmModel: Codable {
+                let id: String
+                let name: String
+                let description: String?
+            }
+            let fetched: [LlmModel] = try await apiClient.request(
+                "GET", path: "/v1/agents/llm/models/\(provider)?\(params.joined(separator: "&"))"
+            )
+            llmModels = fetched.map { ($0.id, $0.name, $0.description ?? "") }
+        } catch {
+            llmModels = []
+        }
+    }
 
     func fetchTtsModels() async {
         let provider = form["tts_provider"] ?? "none"

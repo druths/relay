@@ -31,8 +31,9 @@ async def invalidate_session_cache(session_id: str) -> None:
     await r.delete(f"session:{session_id}:context")
 
 
-async def get_openclaw_response_id(session_id: str) -> str | None:
-    """Get the last OpenClaw response ID for session chaining (from DB)."""
+async def get_provider_state(session_id: str, provider: str) -> str | None:
+    """Get per-provider continuation state for a session (e.g. an OpenClaw
+    response_id or an ark session_id). Returns None if absent."""
     from sqlalchemy import select
     from app.db.database import async_session
     from app.models.session import Session
@@ -40,13 +41,15 @@ async def get_openclaw_response_id(session_id: str) -> str | None:
 
     async with async_session() as db:
         result = await db.execute(
-            select(Session.openclaw_response_id).where(Session.session_id == uuid.UUID(session_id))
+            select(Session.provider_state).where(Session.session_id == uuid.UUID(session_id))
         )
-        return result.scalar_one_or_none()
+        state = result.scalar_one_or_none() or {}
+        value = state.get(provider)
+        return value if isinstance(value, str) else None
 
 
-async def set_openclaw_response_id(session_id: str, response_id: str) -> None:
-    """Store the OpenClaw response ID for session chaining (in DB)."""
+async def set_provider_state(session_id: str, provider: str, value: str) -> None:
+    """Store per-provider continuation state for a session."""
     from sqlalchemy import select
     from app.db.database import async_session
     from app.models.session import Session
@@ -57,6 +60,21 @@ async def set_openclaw_response_id(session_id: str, response_id: str) -> None:
             select(Session).where(Session.session_id == uuid.UUID(session_id))
         )
         session = result.scalar_one_or_none()
-        if session:
-            session.openclaw_response_id = response_id
-            await db.commit()
+        if session is None:
+            return
+        # Copy-then-assign so SQLAlchemy detects the JSONB mutation.
+        new_state = dict(session.provider_state or {})
+        new_state[provider] = value
+        session.provider_state = new_state
+        await db.commit()
+
+
+# ── Legacy single-provider shims ─────────────────────────────────────
+# Existing callers continue to work while we migrate them over.
+
+async def get_openclaw_response_id(session_id: str) -> str | None:
+    return await get_provider_state(session_id, "openclaw")
+
+
+async def set_openclaw_response_id(session_id: str, response_id: str) -> None:
+    await set_provider_state(session_id, "openclaw", response_id)

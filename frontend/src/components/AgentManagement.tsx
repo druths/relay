@@ -159,6 +159,34 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     return () => clearTimeout(timer);
   }, [ttsProvider, ttsFormKey, ttsBaseUrl]);
 
+  // Fetch the available LLM agents/models for providers that list them
+  // (currently just ark — list is empty for everyone else).
+  const [llmModels, setLlmModels] = useState<{ id: string; name: string; description?: string }[]>([]);
+  useEffect(() => {
+    const provider = form.llm_provider ?? "openai";
+    if (provider !== "ark") {
+      setLlmModels([]);
+      return;
+    }
+    const baseUrl = form.llm_base_url || "";
+    if (!baseUrl) {
+      setLlmModels([]);
+      return;
+    }
+    const apiKey = form.llm_api_key || "";
+    const isRealKey = apiKey && !apiKey.includes("•");
+    const params = new URLSearchParams();
+    params.set("base_url", baseUrl);
+    if (isRealKey) params.set("api_key", apiKey);
+    const timer = setTimeout(() => {
+      apiFetch(`/v1/agents/llm/models/${provider}?${params.toString()}`)
+        .then((r) => r.json())
+        .then((data) => setLlmModels(Array.isArray(data) ? data : []))
+        .catch(() => setLlmModels([]));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [form.llm_provider, form.llm_base_url, form.llm_api_key]);
+
   // Fetch voices when TTS provider, API key, or model changes
   useEffect(() => {
     if (ttsProvider === "none") {
@@ -536,15 +564,37 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                     </div>
                   ))}
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Model</label>
-                  <input
-                    value={form.llm_model ?? ""}
-                    onChange={(e) => setField("llm_model", e.target.value)}
-                    placeholder={
-                      llmSchema?.fields.find((f) => f.key === "llm_model")?.placeholder ?? "model"
-                    }
-                    className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                  />
+                  <label className="block text-xs text-gray-500 mb-1">
+                    {form.llm_provider === "ark" ? "Agent" : "Model"}
+                  </label>
+                  {llmModels.length > 0 ? (
+                    <select
+                      value={form.llm_model ?? ""}
+                      onChange={(e) => setField("llm_model", e.target.value)}
+                      className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+                    >
+                      {/* Allow current value even if it's no longer on the server,
+                          so we don't silently drop it on save. */}
+                      {form.llm_model && !llmModels.find((m) => m.id === form.llm_model) && (
+                        <option value={form.llm_model}>{form.llm_model} (not on server)</option>
+                      )}
+                      <option value="" disabled>Select…</option>
+                      {llmModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.description ? `${m.name} — ${m.description}` : m.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={form.llm_model ?? ""}
+                      onChange={(e) => setField("llm_model", e.target.value)}
+                      placeholder={
+                        llmSchema?.fields.find((f) => f.key === "llm_model")?.placeholder ?? "model"
+                      }
+                      className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+                    />
+                  )}
                 </div>
               </fieldset>
 

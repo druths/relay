@@ -46,6 +46,12 @@ def get_provider(
         from app.services.llm.openclaw import OpenClawProvider
         return OpenClawProvider(base_url=base_url, api_key=api_key)
 
+    if provider_name == "ark":
+        if not base_url:
+            return None
+        from app.services.llm.ark import ArkProvider
+        return ArkProvider(base_url=base_url, api_key=api_key)
+
     if provider_name == "ollama":
         from app.services.llm.openai import OpenAIProvider
         url = base_url or "http://localhost:11434/v1"

@@ -68,6 +68,14 @@ export const LLM_PROVIDERS: Record<string, ProviderSchema> = {
       { key: "llm_model", label: "Agent ID", type: "text", placeholder: "main", required: true },
     ],
   },
+  ark: {
+    label: "Ark",
+    fields: [
+      { key: "llm_base_url", label: "Server URL", type: "text", placeholder: "http://localhost:7777", required: true },
+      { key: "llm_model", label: "Agent Name", type: "text", placeholder: "assistant", required: true },
+      { key: "llm_api_key", label: "Auth Token", type: "password", placeholder: "(shared bearer secret)" },
+    ],
+  },
 };
 
 export const TTS_PROVIDERS: Record<string, ProviderSchema> = {

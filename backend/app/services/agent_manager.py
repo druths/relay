@@ -12,17 +12,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent import Agent
 from app.services import agent_health
 from app.services.llm import get_provider
+from app.services.llm.ark import ArkProvider
 from app.services.llm.openclaw import OpenClawProvider
 
 logger = logging.getLogger(__name__)
 
 
 async def get_agent_by_name(db: AsyncSession, name: str) -> Agent | None:
-    """Case-insensitive lookup by agent display name."""
+    """Case-insensitive lookup by agent display name (skipping soft-deletes).
+
+    There can be multiple rows with the same name if an agent was deleted and
+    recreated, so we explicitly filter out soft-deleted rows and pick the
+    most-recently-created remaining match if more than one is live.
+    """
     result = await db.execute(
-        select(Agent).where(Agent.name.ilike(name))
+        select(Agent)
+            .where(Agent.name.ilike(name), Agent.deleted_at.is_(None))
+            .order_by(Agent.agent_id.desc())
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def get_agent_by_id(db: AsyncSession, agent_id: uuid.UUID) -> Agent | None:
@@ -130,6 +138,26 @@ async def generate_response(
             agent_health.set_error(agent.agent_id, str(exc)[:120])
             return f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
 
+    # Ark: each Relay session pins to a server-side ark session_id stored in
+    # provider_state['ark']. Ark owns history; we only send the last turn.
+    if isinstance(provider, ArkProvider) and session_id:
+        from app.db.redis import get_provider_state, set_provider_state
+
+        prev_sid = await get_provider_state(str(session_id), "ark")
+        try:
+            result = await provider.generate_with_chain(
+                system_prompt, messages, agent.llm_model,
+                previous_session_id=prev_sid,
+            )
+            if result.session_id:
+                await set_provider_state(str(session_id), "ark", result.session_id)
+            agent_health.set_healthy(agent.agent_id)
+            return result.text
+        except Exception as exc:
+            logger.exception("LLM call failed for agent %s: %s", agent.name, exc)
+            agent_health.set_error(agent.agent_id, str(exc)[:120])
+            return f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
+
     try:
         result = await provider.generate(system_prompt, messages, agent.llm_model)
         agent_health.set_healthy(agent.agent_id)
@@ -182,6 +210,29 @@ async def generate_response_stream(
                 if isinstance(chunk, OpenClawResult):
                     if chunk.response_id:
                         await set_openclaw_response_id(str(session_id), chunk.response_id)
+                else:
+                    yield chunk
+            agent_health.set_healthy(agent.agent_id)
+        except Exception as exc:
+            logger.exception("LLM stream failed for agent %s: %s", agent.name, exc)
+            agent_health.set_error(agent.agent_id, str(exc)[:120])
+            yield f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
+        return
+
+    # Ark: same chain pattern but with a server-issued session_id.
+    if isinstance(provider, ArkProvider) and session_id:
+        from app.db.redis import get_provider_state, set_provider_state
+        from app.services.llm.ark import ArkResult
+
+        prev_sid = await get_provider_state(str(session_id), "ark")
+        try:
+            async for chunk in provider.generate_stream_with_chain(
+                system_prompt, messages, agent.llm_model,
+                previous_session_id=prev_sid,
+            ):
+                if isinstance(chunk, ArkResult):
+                    if chunk.session_id:
+                        await set_provider_state(str(session_id), "ark", chunk.session_id)
                 else:
                     yield chunk
             agent_health.set_healthy(agent.agent_id)
