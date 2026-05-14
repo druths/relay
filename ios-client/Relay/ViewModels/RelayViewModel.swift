@@ -56,6 +56,10 @@ final class RelayViewModel {
 
     // Gap detection: fires the thinking tone if no audio_chunk arrives within 300 ms.
     private var audioGapTask: Task<Void, Never>?
+    /// Whether the operator/agent is currently "thinking" from a status
+    /// perspective. The thinking tone may still be paused while TTS audio is
+    /// playing — see `syncThinkingTone`.
+    private var wantThinkingTone = false
 
     private var isInSession: Bool {
         activeSessionId != nil || pendingSessionId != nil
@@ -86,8 +90,9 @@ final class RelayViewModel {
                         self.sessionMessages[idx].isStreaming = false
                         self.sessionMessages[idx].isInterrupted = true
                     }
+                    self.wantThinkingTone = false
+                    self.syncThinkingTone()
                 }
-                Task { await ThinkingToneService.shared.stop() }
                 // Signal backend to cancel the current agent turn
                 print("[Relay] speech detected — sending interrupt")
                 try? await self.webSocketService.send(.interrupt)
@@ -393,15 +398,33 @@ final class RelayViewModel {
         ])
     }
 
+    /// Re-evaluate whether the thinking tone should be playing right now.
+    /// The tone is gated on `wantThinkingTone` (status-driven) AND the
+    /// absence of active TTS playback (so it never overlaps the agent's
+    /// voice). Safe to call from any context; the work happens in a Task.
+    private func syncThinkingTone() {
+        let want = wantThinkingTone && isLiveMode
+        Task {
+            if want {
+                let playing = await audio.player.isPlaying()
+                if !playing {
+                    await ThinkingToneService.shared.start()
+                    return
+                }
+            }
+            await ThinkingToneService.shared.stop()
+        }
+    }
+
     func exitLiveMode(trigger: String = "user") {
         isLiveMode = false
-        ChimeGenerator.playLiveEnd()
         audioGapTask?.cancel()
         audioGapTask = nil
         audio.stopListening()
         audio.stopAudio()
         endLiveActivity()
         Task { await SilentKeepAlive.shared.stop() }
+        wantThinkingTone = false
         Task { await ThinkingToneService.shared.stop() }
         Task { try? await webSocketService.send(.setLiveMode(enabled: false)) }
         ActivityLog.shared.add("live_mode_exited", context: [
@@ -513,12 +536,12 @@ final class RelayViewModel {
             status = payload.status
             if isLiveMode { updateLiveActivity() }
             if isLiveMode {
-                if payload.status == "processing" {
-                    print("[ThinkingTone] status=processing → start")
-                    Task { await ThinkingToneService.shared.start() }
-                } else {
-                    Task { await ThinkingToneService.shared.stop() }
+                let nowThinking = payload.status == "processing"
+                if nowThinking != wantThinkingTone {
+                    print("[ThinkingTone] status=\(payload.status) → want=\(nowThinking)")
                 }
+                wantThinkingTone = nowThinking
+                syncThinkingTone()
             }
             // Restore the streaming placeholder (three-dot indicator) when resuming
             // a session whose agent is still working in the background. The placeholder
@@ -724,26 +747,33 @@ final class RelayViewModel {
             }
             print("[TTS][relay] audio_start from \(payload.speaker)")
             Task { await audio.player.start() }
+            // TTS playback is starting — sync so the thinking tone steps aside.
+            syncThinkingTone()
 
         case .audioChunk(let payload):
             guard isLiveMode else { break }
             if suppressNextGreeting { break }
-            // Cancel any pending gap timer and stop thinking tone — real audio is arriving.
+            // Cancel any pending gap timer; real audio is arriving and the
+            // sync() below will suppress the thinking tone.
             audioGapTask?.cancel()
             audioGapTask = nil
-            Task { await ThinkingToneService.shared.stop() }
             if pendingSessionId != nil {
                 pendingAudioChunks.append((data: payload.data, sequence: payload.sequence))
                 break
             }
             print("[TTS][relay] audio_chunk seq=\(payload.sequence) (\(payload.data.count) b64 chars)")
             Task { await audio.player.enqueue(data: payload.data, sequence: payload.sequence) }
-            // Start gap timer: if no chunk arrives within 300 ms, re-arm the thinking tone.
+            syncThinkingTone()
+            // Gap timer: if no chunk arrives within 300 ms, the player will
+            // have drained and sync will restore the thinking tone (only if
+            // we still want it and nothing is actually playing).
             audioGapTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
-                audioGapTask = nil
-                Task { await ThinkingToneService.shared.start() }
+                await MainActor.run {
+                    self.audioGapTask = nil
+                    self.syncThinkingTone()
+                }
             }
 
         case .audioDone(let payload):
@@ -763,6 +793,9 @@ final class RelayViewModel {
             Task {
                 await audio.player.done()
                 await audio.player.waitUntilFinished()
+                // Playback fully complete — if status is still "processing"
+                // (mid-turn tool call, etc.), the thinking tone should resume.
+                await MainActor.run { self.syncThinkingTone() }
             }
 
         case .transcription(let payload):

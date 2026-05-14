@@ -4,7 +4,6 @@ enum ChimeGenerator {
     // Keep strong references until playback finishes
     nonisolated(unsafe) private static var responsePlayer: AVAudioPlayer?
     nonisolated(unsafe) private static var liveStartPlayer: AVAudioPlayer?
-    nonisolated(unsafe) private static var liveEndPlayer: AVAudioPlayer?
     nonisolated(unsafe) private static var sessionLeaveEngine: AVAudioEngine?
 
     /// Plays when the user's response has been received and is being processed.
@@ -14,10 +13,6 @@ enum ChimeGenerator {
 
     static func playLiveStart() {
         playSound("live_start_1", playerRef: &liveStartPlayer)
-    }
-
-    static func playLiveEnd() {
-        playSound("live_end_1", playerRef: &liveEndPlayer)
     }
 
     /// Synthesised descending two-note tone for leaving a session in live mode.

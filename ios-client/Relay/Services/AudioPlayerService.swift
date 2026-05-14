@@ -73,6 +73,13 @@ actor AudioPlayerService {
         nextSeq = 0
     }
 
+    /// True if TTS audio is currently being drained — i.e., the user would
+    /// hear it. Used by the thinking-tone gating so we don't play the tone
+    /// over agent speech.
+    func isPlaying() -> Bool {
+        isDraining
+    }
+
     /// Returns once all queued audio (including pending) has finished playing.
     /// If nothing is playing, returns immediately.
     func waitUntilFinished() async {
