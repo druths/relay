@@ -9,12 +9,18 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "./api";
 
+export interface ProviderFieldOption {
+  value: string;
+  label: string;
+}
+
 export interface ProviderField {
   key: string;
   label: string;
   type: "text" | "password" | "select";
   placeholder?: string;
   required?: boolean;
+  options?: ProviderFieldOption[];
 }
 
 export interface ProviderSchemaEntry {
