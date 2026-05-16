@@ -112,8 +112,10 @@ async def generate_response(
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": msg["text_content"]})
 
-    if voice_instructions and isinstance(provider, OpenClawProvider):
-        # OpenClaw manages its own system prompt — inject via user message instead
+    if voice_instructions and isinstance(provider, (OpenClawProvider, ArkProvider)):
+        # OpenClaw and ark manage their own system prompts server-side and
+        # ignore the one Relay constructs — so inject the voice/live style
+        # nudge onto the last user message instead.
         messages = _append_voice_note(messages, voice_instructions)
         system_prompt = _build_system_prompt(agent)
     else:
@@ -191,8 +193,10 @@ async def generate_response_stream(
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": msg["text_content"]})
 
-    if voice_instructions and isinstance(provider, OpenClawProvider):
-        # OpenClaw manages its own system prompt — inject via user message instead
+    if voice_instructions and isinstance(provider, (OpenClawProvider, ArkProvider)):
+        # OpenClaw and ark manage their own system prompts server-side and
+        # ignore the one Relay constructs — so inject the voice/live style
+        # nudge onto the last user message instead.
         messages = _append_voice_note(messages, voice_instructions)
         system_prompt = _build_system_prompt(agent)
     else:

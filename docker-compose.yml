@@ -43,6 +43,7 @@ services:
       AUTH_PASSWORD: ${AUTH_PASSWORD:-changeme}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-relay-dev-secret-change-in-production}
       NEUTTS_URL: ${NEUTTS_URL:-http://neutts:8000}
+      GOOGLE_TTS_API_KEY: ${GOOGLE_TTS_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

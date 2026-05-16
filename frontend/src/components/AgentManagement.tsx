@@ -1,12 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Agent, PlatformSettings } from "../types";
-import {
-  LLM_PROVIDERS,
-  TTS_PROVIDERS,
-  LLM_PROVIDER_OPTIONS,
-  TTS_PROVIDER_OPTIONS,
-  STT_PROVIDER_OPTIONS,
-} from "../providerSchemas";
+import { useProviderSchemas, findSchema } from "../providerSchemas";
 import { apiFetch } from "../api";
 import { type ThemeName, getStoredTheme, applyTheme } from "../theme";
 
@@ -27,6 +21,7 @@ type Tab = "agents" | "tts" | "stt" | "appearance";
 export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
   const [tab, setTab] = useState<Tab>("agents");
   const [currentTheme, setCurrentTheme] = useState<ThemeName>(getStoredTheme());
+  const schemas = useProviderSchemas();
 
   // ── Agent state ──
   const sorted = [...agents].sort((a, b) => {
@@ -159,33 +154,6 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     return () => clearTimeout(timer);
   }, [ttsProvider, ttsFormKey, ttsBaseUrl]);
 
-  // Fetch the available LLM agents/models for providers that list them
-  // (currently just ark — list is empty for everyone else).
-  const [llmModels, setLlmModels] = useState<{ id: string; name: string; description?: string }[]>([]);
-  useEffect(() => {
-    const provider = form.llm_provider ?? "openai";
-    if (provider !== "ark") {
-      setLlmModels([]);
-      return;
-    }
-    const baseUrl = form.llm_base_url || "";
-    if (!baseUrl) {
-      setLlmModels([]);
-      return;
-    }
-    const apiKey = form.llm_api_key || "";
-    const isRealKey = apiKey && !apiKey.includes("•");
-    const params = new URLSearchParams();
-    params.set("base_url", baseUrl);
-    if (isRealKey) params.set("api_key", apiKey);
-    const timer = setTimeout(() => {
-      apiFetch(`/v1/agents/llm/models/${provider}?${params.toString()}`)
-        .then((r) => r.json())
-        .then((data) => setLlmModels(Array.isArray(data) ? data : []))
-        .catch(() => setLlmModels([]));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [form.llm_provider, form.llm_base_url, form.llm_api_key]);
 
   // Fetch voices when TTS provider, API key, or model changes
   useEffect(() => {
@@ -196,7 +164,13 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     // Pass the agent's per-agent key if it's a real key (not masked "••••…")
     const isRealKey = ttsFormKey && !ttsFormKey.includes("\u2022");
     const params = new URLSearchParams();
-    if (isRealKey) params.set("api_key", ttsFormKey);
+    if (isRealKey) {
+      params.set("api_key", ttsFormKey);
+    } else if (selectedId && !isNew) {
+      // The displayed key is masked, so we can't resend it \u2014 but the server
+      // can look it up by agent_id and use that as a fallback.
+      params.set("agent_id", selectedId);
+    }
     if (ttsProvider === "elevenlabs" && ttsModelId) params.set("model_id", ttsModelId);
     if (ttsBaseUrl) params.set("base_url", ttsBaseUrl);
     const qs = params.size ? `?${params.toString()}` : "";
@@ -207,7 +181,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         .catch(() => setVoices([]));
     }, 300);
     return () => clearTimeout(timer);
-  }, [ttsProvider, ttsFormKey, ttsModelId]);
+  }, [ttsProvider, ttsFormKey, ttsModelId, selectedId, isNew]);
 
   const setField = (key: string, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -381,8 +355,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     }
   };
 
-  const llmSchema = LLM_PROVIDERS[form.llm_provider ?? "openai"];
-  const ttsSchema = TTS_PROVIDERS[form.tts_provider ?? "none"];
+  const llmSchema = findSchema(schemas?.llm, form.llm_provider ?? "openai");
+  const ttsSchema = findSchema(schemas?.tts, form.tts_provider ?? "none");
 
   return (
     <div className="fixed inset-0 z-50 bg-gray-950/90 flex items-start justify-center pt-12">
@@ -545,57 +519,22 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                   onChange={(e) => setField("llm_provider", e.target.value)}
                   className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
                 >
-                  {LLM_PROVIDER_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
+                  {(schemas?.llm ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
                   ))}
                 </select>
-                {llmSchema?.fields
-                  .filter((f) => f.key !== "llm_model")
-                  .map((field) => (
-                    <div key={field.key}>
-                      <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
-                      <input
-                        type={field.type === "password" ? "password" : "text"}
-                        value={form[field.key] ?? ""}
-                        onChange={(e) => setField(field.key, e.target.value)}
-                        placeholder={field.placeholder}
-                        className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                      />
-                    </div>
-                  ))}
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">
-                    {form.llm_provider === "ark" ? "Agent" : "Model"}
-                  </label>
-                  {llmModels.length > 0 ? (
-                    <select
-                      value={form.llm_model ?? ""}
-                      onChange={(e) => setField("llm_model", e.target.value)}
-                      className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                    >
-                      {/* Allow current value even if it's no longer on the server,
-                          so we don't silently drop it on save. */}
-                      {form.llm_model && !llmModels.find((m) => m.id === form.llm_model) && (
-                        <option value={form.llm_model}>{form.llm_model} (not on server)</option>
-                      )}
-                      <option value="" disabled>Select…</option>
-                      {llmModels.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.description ? `${m.name} — ${m.description}` : m.name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
+                {llmSchema?.fields.map((field) => (
+                  <div key={field.key}>
+                    <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
                     <input
-                      value={form.llm_model ?? ""}
-                      onChange={(e) => setField("llm_model", e.target.value)}
-                      placeholder={
-                        llmSchema?.fields.find((f) => f.key === "llm_model")?.placeholder ?? "model"
-                      }
+                      type={field.type === "password" ? "password" : "text"}
+                      value={form[field.key] ?? ""}
+                      onChange={(e) => setField(field.key, e.target.value)}
+                      placeholder={field.placeholder}
                       className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
                     />
-                  )}
-                </div>
+                  </div>
+                ))}
               </fieldset>
 
               {/* ── TTS Section ── */}
@@ -608,8 +547,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                   onChange={(e) => setField("tts_provider", e.target.value)}
                   className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
                 >
-                  {TTS_PROVIDER_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
+                  {(schemas?.tts ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
                   ))}
                 </select>
                 {ttsSchema?.fields.map((field) => (
@@ -892,8 +831,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                 }
                 className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
               >
-                {STT_PROVIDER_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                {(schemas?.stt ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
                 ))}
               </select>
               <div>

@@ -13,6 +13,7 @@ struct AgentManagementView: View {
     @State private var errorMessage: String?
     @State private var showUnsavedAlert = false
     @State private var pendingAction: (() -> Void)?
+    @State private var catalog = ProviderCatalog.shared
 
     init(agents: [Agent], authService: AuthService, themeManager: ThemeManager? = nil, onChanged: @escaping () -> Void) {
         self.agents = agents
@@ -67,12 +68,12 @@ struct AgentManagementView: View {
             }
         }
         .task {
+            await catalog.ensureLoaded(via: APIClient(authService: authService))
             await vm.loadPlatformSettings()
             if let first = sortedAgents.first {
                 vm.selectAgent(first)
                 await vm.fetchTtsModels()
                 await vm.fetchVoices()
-                await vm.fetchLlmModels()
             }
         }
     }
@@ -203,7 +204,7 @@ struct AgentManagementView: View {
 
     private func agentPill(_ agent: Agent) -> some View {
         let isActive = !vm.isNewAgent && vm.selectedAgentId == agent.agentId
-        return Button(action: { vm.selectAgent(agent); Task { await vm.fetchTtsModels(); await vm.fetchVoices(); await vm.fetchLlmModels() } }) {
+        return Button(action: { vm.selectAgent(agent); Task { await vm.fetchTtsModels(); await vm.fetchVoices() } }) {
             HStack(spacing: 6) {
                 StatusIndicator(color: statusColor(agent.status))
                 if agent.isOperator {
@@ -276,32 +277,20 @@ struct AgentManagementView: View {
 
         // LLM Provider
         sectionTitle("LLM PROVIDER")
-        providerPicker("llm_provider", options: ProviderSchemas.llmProviders.map { ($0.key, $0.schema.label) })
+        providerPicker("llm_provider", options: catalog.llm.map { ($0.id, $0.label) })
 
-        if let schema = ProviderSchemas.llmSchema(for: vm.form["llm_provider"] ?? "openai") {
-            ForEach(schema.fields.filter { $0.key != "llm_model" }, id: \.key) { field in
+        if let schema = catalog.llmSchema(for: vm.form["llm_provider"] ?? "openai") {
+            ForEach(schema.fields, id: \.key) { field in
                 sectionLabel(field.label)
                 formTextField(field.key, placeholder: field.placeholder, secure: field.fieldType == .password)
-                    .onChange(of: vm.form[field.key]) { _, _ in
-                        if field.key == "llm_base_url" || field.key == "llm_api_key" {
-                            Task { await vm.fetchLlmModels() }
-                        }
-                    }
             }
-        }
-
-        sectionLabel(vm.form["llm_provider"] == "ark" ? "Agent" : "Model")
-        if !vm.llmModels.isEmpty {
-            llmModelPicker
-        } else {
-            formTextField("llm_model", placeholder: ProviderSchemas.llmSchema(for: vm.form["llm_provider"] ?? "openai")?.fields.first { $0.key == "llm_model" }?.placeholder ?? "model")
         }
 
         // TTS Provider
         sectionTitle("TTS PROVIDER")
-        providerPicker("tts_provider", options: ProviderSchemas.ttsProviders.map { ($0.key, $0.schema.label) })
+        providerPicker("tts_provider", options: catalog.tts.map { ($0.id, $0.label) })
 
-        if let schema = ProviderSchemas.ttsSchema(for: vm.form["tts_provider"] ?? "none") {
+        if let schema = catalog.ttsSchema(for: vm.form["tts_provider"] ?? "none") {
             ForEach(schema.fields, id: \.key) { field in
                 sectionLabel(field.label)
                 formTextField(field.key, placeholder: field.placeholder, secure: field.fieldType == .password)
@@ -485,7 +474,7 @@ struct AgentManagementView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 sectionTitle("PROVIDER")
-                pickerMenuPlatform("stt_provider", options: ProviderSchemas.sttProviders.map { ($0.key, $0.schema.label) })
+                pickerMenuPlatform("stt_provider", options: catalog.stt.map { ($0.id, $0.label) })
 
                 if sttProvider == "apple" {
                     hintText("Uses iOS on-device speech recognition. No API key or server-side STT required.")
@@ -608,45 +597,12 @@ struct AgentManagementView: View {
                     Task {
                         await vm.fetchTtsModels()
                         await vm.fetchVoices()
-                        if key == "llm_provider" { await vm.fetchLlmModels() }
                     }
                 }
             }
         } label: {
             HStack {
                 Text(options.first { $0.0 == vm.form[key] }?.1 ?? vm.form[key] ?? "")
-                    .font(theme.bodyFont(size: 21))
-                    .foregroundStyle(theme.textSecondary)
-                Spacer()
-                Image(systemName: "chevron.down")
-                    .font(theme.bodyFont(size: 18))
-                    .foregroundStyle(theme.textQuaternary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .background(theme.elevated)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-        }
-    }
-
-    private var llmModelPicker: some View {
-        let current = vm.form["llm_model"] ?? ""
-        let inList = vm.llmModels.contains { $0.id == current }
-        return Menu {
-            ForEach(vm.llmModels, id: \.id) { model in
-                Button {
-                    vm.form["llm_model"] = model.id
-                } label: {
-                    if model.description.isEmpty {
-                        Text(model.name)
-                    } else {
-                        Text("\(model.name) — \(model.description)")
-                    }
-                }
-            }
-        } label: {
-            HStack {
-                Text(current.isEmpty ? "Select…" : (inList ? current : "\(current) (not on server)"))
                     .font(theme.bodyFont(size: 21))
                     .foregroundStyle(theme.textSecondary)
                 Spacer()

@@ -255,54 +255,27 @@ async def get_tts_models(
         ]
 
 
-@router.get("/llm/models/{provider}")
-async def get_llm_models(
-    provider: str,
-    base_url: str | None = None,
-    api_key: str | None = None,
-):
-    """Return the list of agent/model names a provider exposes for selection.
+@router.get("/llm/providers")
+async def get_llm_providers():
+    """Return the catalog of LLM providers + their UI schemas. Clients drive
+    their picker entirely from this list — no hardcoded provider knowledge."""
+    from app.services.llm import list_provider_schemas
+    return list_provider_schemas()
 
-    Currently implemented for `ark` (lists agents on the configured server).
-    Other providers return an empty list, which the UI takes as a signal to
-    fall back to a free-form text field.
-    """
-    if provider == "ark":
-        if not base_url:
-            return []
-        import httpx
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                resp = await client.get(base_url.rstrip("/") + "/agents", headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception:
-            return []
-        # Ark's response shape: list of {name, ...} entries (with summary status).
-        # Be lenient about wrapping shapes.
-        items = data if isinstance(data, list) else data.get("agents", [])
-        out = []
-        for entry in items:
-            name = entry.get("name") if isinstance(entry, dict) else None
-            if not name:
-                continue
-            desc_parts = []
-            if isinstance(entry, dict):
-                model = entry.get("model")
-                if model:
-                    desc_parts.append(str(model))
-                hb = entry.get("heartbeat_interval") or entry.get("heartbeat_seconds")
-                if hb:
-                    desc_parts.append(f"heartbeat {hb}s")
-            out.append({
-                "id": name,
-                "name": name,
-                "description": " · ".join(desc_parts),
-            })
-        return out
 
-    return []
+@router.get("/tts/providers")
+async def get_tts_providers():
+    """Return the catalog of TTS providers + their UI schemas."""
+    from app.services.tts import list_provider_schemas
+    return list_provider_schemas()
+
+
+@router.get("/stt/providers")
+async def get_stt_providers():
+    """Return the catalog of STT providers + their UI schemas."""
+    from app.services.stt import list_provider_schemas
+    return list_provider_schemas()
+
 
 
 @router.get("/tts/voices/{provider}")
@@ -311,6 +284,7 @@ async def get_tts_voices(
     api_key: str | None = None,
     model_id: str | None = None,
     base_url: str | None = None,
+    agent_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     # If a custom base_url is provided, fetch voices directly from that server
@@ -334,6 +308,16 @@ async def get_tts_voices(
         return OpenAITTSProvider.available_voices()
 
     effective_key = api_key
+    # Per-agent key takes precedence over platform/env when supplied — the
+    # iOS/web UI masks the key so it can't be re-sent on the voice-fetch
+    # request, but we can read it server-side via agent_id.
+    if not effective_key and agent_id is not None:
+        agent_result = await db.execute(
+            select(Agent).where(Agent.agent_id == agent_id)
+        )
+        agent_row = agent_result.scalar_one_or_none()
+        if agent_row and agent_row.tts_api_key:
+            effective_key = agent_row.tts_api_key
     if not effective_key:
         result = await db.execute(
             select(PlatformSetting).where(
@@ -345,6 +329,9 @@ async def get_tts_voices(
     if not effective_key and provider == "openai":
         from app.config import settings
         effective_key = settings.openai_api_key or None
+    if not effective_key and provider == "google":
+        from app.config import settings
+        effective_key = settings.google_tts_api_key or None
     return await fetch_voices_async(provider, effective_key or "", model_id=model_id)
 
 

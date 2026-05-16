@@ -1,4 +1,9 @@
-"""STT provider factory."""
+"""STT provider factory and UI schema registry.
+
+Schemas here are the single source of truth for the client picker — see
+`/v1/agents/stt/providers`. Adding a provider means editing PROVIDER_SCHEMAS
+below and (if it needs a server-side implementation) get_stt_provider().
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,30 @@ from app.models.platform_setting import PlatformSetting
 from app.services.stt.base import STTProvider
 
 logger = logging.getLogger(__name__)
+
+
+PROVIDER_SCHEMAS: list[dict] = [
+    {
+        "id": "apple",
+        "label": "Apple (On-Device)",
+        "fields": [],
+        "client_only": True,  # STT happens on the device, no server provider
+    },
+    {
+        "id": "openai",
+        "label": "OpenAI (Whisper)",
+        "fields": [],
+    },
+    {
+        "id": "elevenlabs",
+        "label": "ElevenLabs (Scribe)",
+        "fields": [],
+    },
+]
+
+
+def list_provider_schemas() -> list[dict]:
+    return PROVIDER_SCHEMAS
 
 
 def get_stt_provider(

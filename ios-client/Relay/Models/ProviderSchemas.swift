@@ -1,100 +1,125 @@
 import Foundation
 
-struct ProviderField {
+/// Per-field configuration descriptor. Decoded from the server's
+/// `/v1/agents/{llm,tts,stt}/providers` endpoints — no hardcoded lists in
+/// this client. To add or change a provider, edit the schema lists in
+/// `backend/app/services/{llm,tts,stt}/__init__.py`.
+struct ProviderField: Codable, Equatable {
     let key: String
     let label: String
     let fieldType: FieldType
     let placeholder: String
     let required: Bool
-    let options: [(value: String, label: String)]
 
-    enum FieldType {
+    enum FieldType: String, Codable {
         case text
         case password
         case select
     }
 
-    init(key: String, label: String, type: FieldType = .text, placeholder: String = "", required: Bool = false, options: [(value: String, label: String)] = []) {
+    private enum CodingKeys: String, CodingKey {
+        case key, label, placeholder, required
+        case fieldType = "type"
+    }
+
+    init(key: String, label: String, type: FieldType = .text, placeholder: String = "", required: Bool = false) {
         self.key = key
         self.label = label
         self.fieldType = type
         self.placeholder = placeholder
         self.required = required
-        self.options = options
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(String.self, forKey: .key)
+        label = try c.decode(String.self, forKey: .label)
+        fieldType = (try? c.decode(FieldType.self, forKey: .fieldType)) ?? .text
+        placeholder = (try? c.decode(String.self, forKey: .placeholder)) ?? ""
+        required = (try? c.decode(Bool.self, forKey: .required)) ?? false
     }
 }
 
-struct ProviderSchema {
+struct ProviderSchema: Codable, Identifiable, Equatable {
+    let id: String
     let label: String
     let fields: [ProviderField]
-}
 
-enum ProviderSchemas {
-    // MARK: - LLM Providers
+    /// True for client-only providers (e.g. Apple on-device STT) — surfaced
+    /// in the picker but skipped server-side.
+    let clientOnly: Bool
 
-    static let llmProviders: [(key: String, schema: ProviderSchema)] = [
-        ("openai", ProviderSchema(label: "OpenAI", fields: [
-            ProviderField(key: "llm_api_key", label: "API Key", type: .password, placeholder: "sk-..."),
-            ProviderField(key: "llm_model", label: "Model", type: .text, placeholder: "gpt-4o-mini", required: true),
-        ])),
-        ("anthropic", ProviderSchema(label: "Anthropic", fields: [
-            ProviderField(key: "llm_api_key", label: "API Key", type: .password, placeholder: "sk-ant-..."),
-            ProviderField(key: "llm_model", label: "Model", type: .text, placeholder: "claude-sonnet-4-5-20250929", required: true),
-        ])),
-        ("gemini", ProviderSchema(label: "Gemini", fields: [
-            ProviderField(key: "llm_api_key", label: "API Key", type: .password, placeholder: "AI..."),
-            ProviderField(key: "llm_model", label: "Model", type: .text, placeholder: "gemini-2.0-flash", required: true),
-        ])),
-        ("ollama", ProviderSchema(label: "Ollama", fields: [
-            ProviderField(key: "llm_base_url", label: "Base URL", type: .text, placeholder: "http://localhost:11434/v1"),
-            ProviderField(key: "llm_model", label: "Model", type: .text, placeholder: "llama3", required: true),
-        ])),
-        ("openclaw", ProviderSchema(label: "OpenClaw", fields: [
-            ProviderField(key: "llm_base_url", label: "Gateway URL", type: .text, placeholder: "http://localhost:18789", required: true),
-            ProviderField(key: "llm_model", label: "Agent ID", type: .text, placeholder: "main", required: true),
-            ProviderField(key: "llm_api_key", label: "Auth Token", type: .password, placeholder: "(optional)"),
-        ])),
-        ("openai-compatible", ProviderSchema(label: "OpenAI-Compatible", fields: [
-            ProviderField(key: "llm_base_url", label: "Base URL", type: .text, placeholder: "https://api.example.com/v1", required: true),
-            ProviderField(key: "llm_api_key", label: "API Key", type: .password, placeholder: "(optional)"),
-            ProviderField(key: "llm_model", label: "Model", type: .text, placeholder: "model-name", required: true),
-        ])),
-        ("ark", ProviderSchema(label: "Ark", fields: [
-            ProviderField(key: "llm_base_url", label: "Server URL", type: .text, placeholder: "http://localhost:7777", required: true),
-            ProviderField(key: "llm_model", label: "Agent Name", type: .text, placeholder: "assistant", required: true),
-            ProviderField(key: "llm_api_key", label: "Auth Token", type: .password, placeholder: "(shared bearer secret)"),
-        ])),
-    ]
-
-    // MARK: - TTS Providers
-
-    static let ttsProviders: [(key: String, schema: ProviderSchema)] = [
-        ("none", ProviderSchema(label: "None (No TTS)", fields: [])),
-        ("openai", ProviderSchema(label: "OpenAI-Compatible", fields: [
-            ProviderField(key: "tts_api_key", label: "API Key", type: .password, placeholder: "sk-... (blank for local TTS)"),
-            ProviderField(key: "base_url", label: "Base URL", type: .text, placeholder: "Blank for OpenAI, or http://kokoro:8880"),
-        ])),
-        ("elevenlabs", ProviderSchema(label: "ElevenLabs", fields: [
-            ProviderField(key: "tts_api_key", label: "API Key", type: .password, placeholder: "xi-... (uses platform key if blank)"),
-        ])),
-        ("neutts", ProviderSchema(label: "NeuTTS (self-hosted)", fields: [
-            ProviderField(key: "base_url", label: "Server URL", type: .text, placeholder: "Blank to use default neutts:8000"),
-        ])),
-    ]
-
-    // MARK: - STT Providers
-
-    static let sttProviders: [(key: String, schema: ProviderSchema)] = [
-        ("apple", ProviderSchema(label: "Apple (On-Device)", fields: [])),
-        ("openai", ProviderSchema(label: "OpenAI (Whisper)", fields: [])),
-        ("elevenlabs", ProviderSchema(label: "ElevenLabs (Scribe)", fields: [])),
-    ]
-
-    static func llmSchema(for key: String) -> ProviderSchema? {
-        llmProviders.first { $0.key == key }?.schema
+    private enum CodingKeys: String, CodingKey {
+        case id, label, fields
+        case clientOnly = "client_only"
     }
 
-    static func ttsSchema(for key: String) -> ProviderSchema? {
-        ttsProviders.first { $0.key == key }?.schema
+    init(id: String, label: String, fields: [ProviderField], clientOnly: Bool = false) {
+        self.id = id
+        self.label = label
+        self.fields = fields
+        self.clientOnly = clientOnly
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        fields = (try? c.decode([ProviderField].self, forKey: .fields)) ?? []
+        clientOnly = (try? c.decode(Bool.self, forKey: .clientOnly)) ?? false
+    }
+}
+
+/// Server-backed provider catalog. Singleton holds the in-memory cache;
+/// callers usually go through `RelayViewModel` or an `AgentManagementViewModel`
+/// which loads it on demand.
+@Observable
+@MainActor
+final class ProviderCatalog {
+    static let shared = ProviderCatalog()
+
+    var llm: [ProviderSchema] = []
+    var tts: [ProviderSchema] = []
+    var stt: [ProviderSchema] = []
+    var loaded: Bool = false
+
+    private var loadTask: Task<Void, Never>?
+
+    func ensureLoaded(via apiClient: APIClient) async {
+        if loaded { return }
+        if let task = loadTask {
+            await task.value
+            return
+        }
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            do {
+                async let llmFetch: [ProviderSchema] = apiClient.request("GET", path: "/v1/agents/llm/providers")
+                async let ttsFetch: [ProviderSchema] = apiClient.request("GET", path: "/v1/agents/tts/providers")
+                async let sttFetch: [ProviderSchema] = apiClient.request("GET", path: "/v1/agents/stt/providers")
+                let (llmVal, ttsVal, sttVal) = try await (llmFetch, ttsFetch, sttFetch)
+                self.llm = llmVal
+                self.tts = ttsVal
+                self.stt = sttVal
+                self.loaded = true
+            } catch {
+                print("[Relay] Failed to load provider schemas: \(error)")
+            }
+        }
+        loadTask = task
+        await task.value
+        loadTask = nil
+    }
+
+    func llmSchema(for id: String) -> ProviderSchema? {
+        llm.first { $0.id == id }
+    }
+
+    func ttsSchema(for id: String) -> ProviderSchema? {
+        tts.first { $0.id == id }
+    }
+
+    func sttSchema(for id: String) -> ProviderSchema? {
+        stt.first { $0.id == id }
     }
 }

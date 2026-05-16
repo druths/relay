@@ -1,8 +1,97 @@
-"""LLM provider factory."""
+"""LLM provider factory and UI schema registry.
+
+Schemas here are the single source of truth for the client picker — see
+`/v1/agents/llm/providers`. To add or change a provider, edit the
+PROVIDER_SCHEMAS list below and (if needed) the get_provider branch.
+"""
 
 from __future__ import annotations
 
 from app.services.llm.base import LLMProvider
+
+
+PROVIDER_SCHEMAS: list[dict] = [
+    {
+        "id": "openai",
+        "label": "OpenAI",
+        "fields": [
+            {"key": "llm_api_key", "label": "API Key", "type": "password",
+             "placeholder": "sk-…", "required": False},
+            {"key": "llm_model", "label": "Model", "type": "text",
+             "placeholder": "gpt-4o-mini", "required": True},
+        ],
+    },
+    {
+        "id": "anthropic",
+        "label": "Anthropic",
+        "fields": [
+            {"key": "llm_api_key", "label": "API Key", "type": "password",
+             "placeholder": "sk-ant-…"},
+            {"key": "llm_model", "label": "Model", "type": "text",
+             "placeholder": "claude-sonnet-4-5-20250929", "required": True},
+        ],
+    },
+    {
+        "id": "gemini",
+        "label": "Gemini",
+        "fields": [
+            {"key": "llm_api_key", "label": "API Key", "type": "password",
+             "placeholder": "AIza…"},
+            {"key": "llm_model", "label": "Model", "type": "text",
+             "placeholder": "gemini-2.5-flash", "required": True},
+        ],
+    },
+    {
+        "id": "ollama",
+        "label": "Ollama",
+        "fields": [
+            {"key": "llm_base_url", "label": "Base URL", "type": "text",
+             "placeholder": "http://localhost:11434/v1"},
+            {"key": "llm_model", "label": "Model", "type": "text",
+             "placeholder": "llama3", "required": True},
+        ],
+    },
+    {
+        "id": "openclaw",
+        "label": "OpenClaw",
+        "fields": [
+            {"key": "llm_base_url", "label": "Gateway URL", "type": "text",
+             "placeholder": "http://localhost:18789", "required": True},
+            {"key": "llm_model", "label": "Agent ID", "type": "text",
+             "placeholder": "main", "required": True},
+            {"key": "llm_api_key", "label": "Auth Token", "type": "password",
+             "placeholder": "(optional)"},
+        ],
+    },
+    {
+        "id": "openai-compatible",
+        "label": "OpenAI-Compatible",
+        "fields": [
+            {"key": "llm_base_url", "label": "Base URL", "type": "text",
+             "placeholder": "https://api.example.com/v1", "required": True},
+            {"key": "llm_api_key", "label": "API Key", "type": "password",
+             "placeholder": "(optional)"},
+            {"key": "llm_model", "label": "Model", "type": "text",
+             "placeholder": "model-name", "required": True},
+        ],
+    },
+    {
+        "id": "ark",
+        "label": "Ark",
+        "fields": [
+            {"key": "llm_base_url", "label": "Server URL", "type": "text",
+             "placeholder": "http://localhost:7777", "required": True},
+            {"key": "llm_model", "label": "Agent Name", "type": "text",
+             "placeholder": "assistant", "required": True},
+            {"key": "llm_api_key", "label": "Auth Token", "type": "password",
+             "placeholder": "(shared bearer secret)"},
+        ],
+    },
+]
+
+
+def list_provider_schemas() -> list[dict]:
+    return PROVIDER_SCHEMAS
 
 
 def get_provider(
