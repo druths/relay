@@ -10,6 +10,10 @@ struct ProviderField: Codable, Equatable {
     let fieldType: FieldType
     let placeholder: String
     let required: Bool
+    /// PlatformSetting key where a platform-wide default is stored, if any.
+    let platformKey: String?
+    /// Whether a platform-wide default is currently set for this field.
+    let platformDefaultSet: Bool
 
     enum FieldType: String, Codable {
         case text
@@ -20,14 +24,22 @@ struct ProviderField: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case key, label, placeholder, required
         case fieldType = "type"
+        case platformKey = "platform_key"
+        case platformDefaultSet = "platform_default_set"
     }
 
-    init(key: String, label: String, type: FieldType = .text, placeholder: String = "", required: Bool = false) {
+    init(
+        key: String, label: String, type: FieldType = .text,
+        placeholder: String = "", required: Bool = false,
+        platformKey: String? = nil, platformDefaultSet: Bool = false,
+    ) {
         self.key = key
         self.label = label
         self.fieldType = type
         self.placeholder = placeholder
         self.required = required
+        self.platformKey = platformKey
+        self.platformDefaultSet = platformDefaultSet
     }
 
     init(from decoder: Decoder) throws {
@@ -37,6 +49,8 @@ struct ProviderField: Codable, Equatable {
         fieldType = (try? c.decode(FieldType.self, forKey: .fieldType)) ?? .text
         placeholder = (try? c.decode(String.self, forKey: .placeholder)) ?? ""
         required = (try? c.decode(Bool.self, forKey: .required)) ?? false
+        platformKey = try? c.decode(String.self, forKey: .platformKey)
+        platformDefaultSet = (try? c.decode(Bool.self, forKey: .platformDefaultSet)) ?? false
     }
 }
 
@@ -122,4 +136,56 @@ final class ProviderCatalog {
     func sttSchema(for id: String) -> ProviderSchema? {
         stt.first { $0.id == id }
     }
+
+    /// Invalidate the cache so the next `ensureLoaded` re-fetches. Call after
+    /// saving Provider Defaults so per-agent fields pick up new
+    /// `platformDefaultSet` flags.
+    func invalidate() {
+        loaded = false
+    }
+}
+
+// MARK: - Provider Defaults DTOs
+
+struct ProviderDefaultsField: Codable, Identifiable, Equatable {
+    var id: String { platformKey }
+    let platformKey: String
+    let label: String
+    let fieldType: String
+    let placeholder: String
+    let value: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case platformKey = "platform_key"
+        case label
+        case fieldType = "type"
+        case placeholder
+        case value
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        platformKey = try c.decode(String.self, forKey: .platformKey)
+        label = try c.decode(String.self, forKey: .label)
+        fieldType = (try? c.decode(String.self, forKey: .fieldType)) ?? "text"
+        placeholder = (try? c.decode(String.self, forKey: .placeholder)) ?? ""
+        value = try? c.decode(String.self, forKey: .value)
+    }
+}
+
+struct ProviderDefaultsProvider: Codable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let fields: [ProviderDefaultsField]
+}
+
+struct ProviderDefaultsGroup: Codable, Identifiable, Equatable {
+    var id: String { category }
+    let category: String
+    let label: String
+    let providers: [ProviderDefaultsProvider]
+}
+
+struct ProviderDefaultsResponse: Codable {
+    let groups: [ProviderDefaultsGroup]
 }

@@ -255,26 +255,61 @@ async def get_tts_models(
         ]
 
 
+async def _enrich_schemas_with_defaults(
+    db: AsyncSession, schemas: list[dict],
+) -> list[dict]:
+    """For each field that declares a `platform_key`, attach
+    `platform_default_set: bool` so the client can show "uses default" hints.
+
+    Returns a copy — never mutates the cached schema lists.
+    """
+    # Collect platform_keys we need to look up in one pass.
+    keys: set[str] = set()
+    for p in schemas:
+        for f in p.get("fields", []):
+            pk = f.get("platform_key")
+            if pk:
+                keys.add(pk)
+    if not keys:
+        return schemas
+    res = await db.execute(
+        select(PlatformSetting).where(PlatformSetting.key.in_(keys))
+    )
+    set_keys = {r.key for r in res.scalars().all() if r.value}
+    out: list[dict] = []
+    for p in schemas:
+        fields_out: list[dict] = []
+        for f in p.get("fields", []):
+            f2 = dict(f)
+            pk = f2.get("platform_key")
+            if pk:
+                f2["platform_default_set"] = pk in set_keys
+            fields_out.append(f2)
+        p2 = dict(p)
+        p2["fields"] = fields_out
+        out.append(p2)
+    return out
+
+
 @router.get("/llm/providers")
-async def get_llm_providers():
-    """Return the catalog of LLM providers + their UI schemas. Clients drive
-    their picker entirely from this list — no hardcoded provider knowledge."""
+async def get_llm_providers(db: AsyncSession = Depends(get_db)):
+    """Return the catalog of LLM providers + their UI schemas, with each
+    defaultable field annotated `platform_default_set` so the client can
+    render the "uses platform default" hint without an extra round-trip."""
     from app.services.llm import list_provider_schemas
-    return list_provider_schemas()
+    return await _enrich_schemas_with_defaults(db, list_provider_schemas())
 
 
 @router.get("/tts/providers")
-async def get_tts_providers():
-    """Return the catalog of TTS providers + their UI schemas."""
+async def get_tts_providers(db: AsyncSession = Depends(get_db)):
     from app.services.tts import list_provider_schemas
-    return list_provider_schemas()
+    return await _enrich_schemas_with_defaults(db, list_provider_schemas())
 
 
 @router.get("/stt/providers")
-async def get_stt_providers():
-    """Return the catalog of STT providers + their UI schemas."""
+async def get_stt_providers(db: AsyncSession = Depends(get_db)):
     from app.services.stt import list_provider_schemas
-    return list_provider_schemas()
+    return await _enrich_schemas_with_defaults(db, list_provider_schemas())
 
 
 

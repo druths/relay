@@ -91,13 +91,51 @@ def _append_voice_note(messages: list[dict], voice_instructions: str) -> list[di
     return modified
 
 
+async def resolve_llm_config(agent: Agent) -> tuple[str | None, str | None]:
+    """Apply platform-default fallback for base_url + api_key when the agent's
+    own values are empty. Keeps the per-agent values authoritative."""
+    base_url = agent.llm_base_url
+    api_key = agent.llm_api_key
+    if not base_url:
+        base_url = await _get_platform_setting(f"llm_{agent.llm_provider}_base_url") or None
+    if not api_key:
+        api_key = await _get_platform_setting(f"llm_{agent.llm_provider}_api_key") or None
+    return base_url, api_key
+
+
+async def resolve_tts_config(agent: Agent) -> tuple[str | None, str | None]:
+    """Same idea for TTS: platform default for tts_api_key and base_url
+    when the agent's own values are empty."""
+    api_key = agent.tts_api_key
+    base_url = (agent.voice_settings or {}).get("base_url") if isinstance(agent.voice_settings, dict) else None
+    if not api_key and agent.tts_provider:
+        api_key = await _get_platform_setting(f"tts_{agent.tts_provider}_api_key") or None
+    if not base_url and agent.tts_provider:
+        base_url = await _get_platform_setting(f"tts_{agent.tts_provider}_base_url") or None
+    return base_url, api_key
+
+
+async def _get_platform_setting(key: str) -> str:
+    """Read a single platform setting outside any active session — used by
+    the LLM/TTS resolution paths."""
+    from app.db.database import async_session
+    from app.models.platform_setting import PlatformSetting
+    async with async_session() as db:
+        result = await db.execute(
+            select(PlatformSetting).where(PlatformSetting.key == key)
+        )
+        row = result.scalar_one_or_none()
+        return row.value if row else ""
+
+
 async def generate_response(
     agent: Agent, text: str, context: list[dict],
     voice_instructions: str | None = None,
     session_id: uuid.UUID | None = None,
 ) -> str:
     """Generate a text response from an agent using its configured LLM provider."""
-    provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
+    base_url, api_key = await resolve_llm_config(agent)
+    provider = get_provider(agent.llm_provider, base_url, api_key)
     if provider is None:
         agent_health.set_error(agent.agent_id, f"{agent.llm_provider} API key not configured")
         return (
@@ -178,7 +216,8 @@ async def generate_response_stream(
     session_id: uuid.UUID | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream a text response from an agent using its configured LLM provider."""
-    provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
+    base_url, api_key = await resolve_llm_config(agent)
+    provider = get_provider(agent.llm_provider, base_url, api_key)
     if provider is None:
         agent_health.set_error(agent.agent_id, f"{agent.llm_provider} API key not configured")
         yield (

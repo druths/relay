@@ -28,12 +28,22 @@ PROVIDER_SCHEMAS: list[dict] = [
     {
         "id": "openai",
         "label": "OpenAI (Whisper)",
-        "fields": [],
+        # STT has no per-agent fields, but the API key is platform-defaultable
+        # via this entry — it shows up in the Provider Defaults tab.
+        "fields": [
+            {"key": "stt_api_key", "label": "API Key", "type": "password",
+             "placeholder": "sk-…",
+             "platform_key": "stt_openai_api_key"},
+        ],
     },
     {
         "id": "elevenlabs",
         "label": "ElevenLabs (Scribe)",
-        "fields": [],
+        "fields": [
+            {"key": "stt_api_key", "label": "API Key", "type": "password",
+             "placeholder": "xi-…",
+             "platform_key": "stt_elevenlabs_api_key"},
+        ],
     },
 ]
 

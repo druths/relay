@@ -16,7 +16,8 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "OpenAI",
         "fields": [
             {"key": "llm_api_key", "label": "API Key", "type": "password",
-             "placeholder": "sk-…", "required": False},
+             "placeholder": "sk-…", "required": False,
+             "platform_key": "llm_openai_api_key"},
             {"key": "llm_model", "label": "Model", "type": "text",
              "placeholder": "gpt-4o-mini", "required": True},
         ],
@@ -26,7 +27,8 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "Anthropic",
         "fields": [
             {"key": "llm_api_key", "label": "API Key", "type": "password",
-             "placeholder": "sk-ant-…"},
+             "placeholder": "sk-ant-…",
+             "platform_key": "llm_anthropic_api_key"},
             {"key": "llm_model", "label": "Model", "type": "text",
              "placeholder": "claude-sonnet-4-5-20250929", "required": True},
         ],
@@ -36,7 +38,8 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "Gemini",
         "fields": [
             {"key": "llm_api_key", "label": "API Key", "type": "password",
-             "placeholder": "AIza…"},
+             "placeholder": "AIza…",
+             "platform_key": "llm_gemini_api_key"},
             {"key": "llm_model", "label": "Model", "type": "text",
              "placeholder": "gemini-2.5-flash", "required": True},
         ],
@@ -46,7 +49,8 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "Ollama",
         "fields": [
             {"key": "llm_base_url", "label": "Base URL", "type": "text",
-             "placeholder": "http://localhost:11434/v1"},
+             "placeholder": "http://localhost:11434/v1",
+             "platform_key": "llm_ollama_base_url"},
             {"key": "llm_model", "label": "Model", "type": "text",
              "placeholder": "llama3", "required": True},
         ],
@@ -56,11 +60,13 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "OpenClaw",
         "fields": [
             {"key": "llm_base_url", "label": "Gateway URL", "type": "text",
-             "placeholder": "http://localhost:18789", "required": True},
+             "placeholder": "http://localhost:18789", "required": True,
+             "platform_key": "llm_openclaw_base_url"},
             {"key": "llm_model", "label": "Agent ID", "type": "text",
              "placeholder": "main", "required": True},
             {"key": "llm_api_key", "label": "Auth Token", "type": "password",
-             "placeholder": "(optional)"},
+             "placeholder": "(optional)",
+             "platform_key": "llm_openclaw_api_key"},
         ],
     },
     {
@@ -80,11 +86,13 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "Ark",
         "fields": [
             {"key": "llm_base_url", "label": "Server URL", "type": "text",
-             "placeholder": "http://localhost:7777", "required": True},
+             "placeholder": "http://localhost:7777", "required": True,
+             "platform_key": "llm_ark_base_url"},
             {"key": "llm_model", "label": "Agent Name", "type": "text",
              "placeholder": "assistant", "required": True},
             {"key": "llm_api_key", "label": "Auth Token", "type": "password",
-             "placeholder": "(shared bearer secret)"},
+             "placeholder": "(shared bearer secret)",
+             "platform_key": "llm_ark_api_key"},
         ],
     },
 ]

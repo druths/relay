@@ -49,7 +49,9 @@ def set_error(agent_id: uuid.UUID, message: str) -> None:
 
 async def check_agent(agent: Agent) -> AgentHealth:
     """Test an agent's LLM provider with a minimal call."""
-    provider = get_provider(agent.llm_provider, agent.llm_base_url, agent.llm_api_key)
+    from app.services.agent_manager import resolve_llm_config
+    base_url, api_key = await resolve_llm_config(agent)
+    provider = get_provider(agent.llm_provider, base_url, api_key)
     if provider is None:
         health = AgentHealth(
             status="error",

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import type { Agent, PlatformSettings } from "../types";
-import { useProviderSchemas, findSchema } from "../providerSchemas";
+import {
+  useProviderSchemas,
+  findSchema,
+  invalidateProviderSchemas,
+  type ProviderDefaultsGroup,
+} from "../providerSchemas";
 import { apiFetch } from "../api";
 import { type ThemeName, getStoredTheme, applyTheme } from "../theme";
 
@@ -16,7 +21,7 @@ interface Props {
   onAgentsChanged: () => void;
 }
 
-type Tab = "agents" | "tts" | "stt" | "appearance";
+type Tab = "agents" | "defaults" | "tts" | "stt" | "appearance";
 
 export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
   const [tab, setTab] = useState<Tab>("agents");
@@ -377,6 +382,16 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                 Agents
               </button>
               <button
+                onClick={() => setTab("defaults")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  tab === "defaults"
+                    ? "bg-gray-800 text-white"
+                    : "text-gray-400 hover:text-gray-300"
+                }`}
+              >
+                Provider Defaults
+              </button>
+              <button
                 onClick={() => setTab("tts")}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                   tab === "tts"
@@ -524,16 +539,12 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                   ))}
                 </select>
                 {llmSchema?.fields.map((field) => (
-                  <div key={field.key}>
-                    <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
-                    <input
-                      type={field.type === "password" ? "password" : "text"}
-                      value={form[field.key] ?? ""}
-                      onChange={(e) => setField(field.key, e.target.value)}
-                      placeholder={field.placeholder}
-                      className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                    />
-                  </div>
+                  <AgentField
+                    key={field.key}
+                    field={field}
+                    value={form[field.key] ?? ""}
+                    onChange={(v) => setField(field.key, v)}
+                  />
                 ))}
               </fieldset>
 
@@ -552,28 +563,12 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                   ))}
                 </select>
                 {ttsSchema?.fields.map((field) => (
-                  <div key={field.key}>
-                    <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
-                    {field.type === "select" && field.options ? (
-                      <select
-                        value={form[field.key] ?? field.options[0]?.value ?? ""}
-                        onChange={(e) => setField(field.key, e.target.value)}
-                        className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                      >
-                        {field.options.map((opt) => (
-                          <option key={opt.value} value={opt.value}>{opt.label}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type={field.type === "password" ? "password" : "text"}
-                        value={form[field.key] ?? ""}
-                        onChange={(e) => setField(field.key, e.target.value)}
-                        placeholder={field.placeholder}
-                        className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                      />
-                    )}
-                  </div>
+                  <AgentField
+                    key={field.key}
+                    field={field}
+                    value={form[field.key] ?? ""}
+                    onChange={(v) => setField(field.key, v)}
+                  />
                 ))}
                 {ttsModels.length > 0 && (
                   <div>
@@ -725,6 +720,11 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ════════ Provider Defaults Tab ════════ */}
+        {tab === "defaults" && (
+          <ProviderDefaultsTab currentTheme={currentTheme} />
         )}
 
         {/* ════════ Text to Speech Tab ════════ */}
@@ -1003,6 +1003,153 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+// ── Per-agent field renderer with platform-default indicator ──────
+
+interface AgentFieldProps {
+  field: import("../providerSchemas").ProviderField;
+  value: string;
+  onChange: (v: string) => void;
+}
+
+function AgentField({ field, value, onChange }: AgentFieldProps) {
+  const hasValue = !!value && !value.includes("•");
+  const platformable = !!field.platform_key;
+  const defaultSet = field.platform_default_set === true;
+  let hint: { text: string; tone: "info" | "warn" } | null = null;
+  if (platformable && !hasValue) {
+    hint = defaultSet
+      ? { text: "Platform default set — leave blank to use it", tone: "info" }
+      : { text: "No platform default — set a value here", tone: "warn" };
+  }
+  return (
+    <div>
+      <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
+      <input
+        type={field.type === "password" ? "password" : "text"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={field.placeholder}
+        className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+      />
+      {hint && (
+        <p className={`text-xs mt-1 ${hint.tone === "info" ? "text-gray-500" : "text-amber-500"}`}>
+          {hint.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Provider Defaults tab ─────────────────────────────────────────
+
+interface ProviderDefaultsTabProps {
+  currentTheme: ThemeName;
+}
+
+function ProviderDefaultsTab({ currentTheme }: ProviderDefaultsTabProps) {
+  const [groups, setGroups] = useState<ProviderDefaultsGroup[] | null>(null);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const res = await apiFetch("/v1/platform/provider-defaults");
+      const data = await res.json();
+      setGroups(data.groups ?? []);
+      setEdits({});
+    } catch (err) {
+      console.error("Failed to load provider defaults", err);
+      setError("Failed to load defaults.");
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      // Filter out unchanged + masked values so we don't accidentally clear keys.
+      const payload: Record<string, string> = {};
+      for (const [k, v] of Object.entries(edits)) {
+        if (v.includes("•")) continue;
+        payload[k] = v;
+      }
+      const res = await apiFetch("/v1/platform/provider-defaults", {
+        method: "PUT",
+        body: JSON.stringify({ values: payload }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setGroups(data.groups ?? []);
+      setEdits({});
+      invalidateProviderSchemas();
+    } catch (err) {
+      console.error("Save failed", err);
+      setError("Save failed.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (groups === null) {
+    return <div className="flex-1 p-6 text-gray-500 text-sm">Loading…</div>;
+  }
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 overflow-y-auto p-6 space-y-8 max-w-2xl">
+        <p className="text-xs text-gray-500">
+          These values are used as fallbacks when an agent doesn't specify its own.
+          Leave any field blank to clear that default.
+        </p>
+        {groups.map((g) => (
+          <section key={g.category} className="space-y-4">
+            <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+              {g.label}
+            </h3>
+            {g.providers.map((p) => (
+              <fieldset key={p.id} className="space-y-2 border border-gray-800 rounded-lg p-4">
+                <legend className="text-xs font-medium text-gray-400 px-1">{p.label}</legend>
+                {p.fields.map((f) => {
+                  const editing = f.platform_key in edits;
+                  const value = editing ? edits[f.platform_key] : (f.value ?? "");
+                  return (
+                    <div key={f.platform_key}>
+                      <label className="block text-xs text-gray-500 mb-1">{f.label}</label>
+                      <input
+                        type={f.type === "password" && !editing ? "password" : "text"}
+                        value={value}
+                        onChange={(e) => setEdits((m) => ({ ...m, [f.platform_key]: e.target.value }))}
+                        placeholder={f.placeholder ?? ""}
+                        className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+                      />
+                    </div>
+                  );
+                })}
+              </fieldset>
+            ))}
+          </section>
+        ))}
+      </div>
+      <div className="p-6 pt-2 border-t border-gray-800 flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving || Object.keys(edits).length === 0}
+          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg px-4 py-2
+                     text-sm font-medium transition-colors"
+          style={currentTheme !== "default" ? { backgroundColor: "var(--primary)", color: "var(--bg)" } : undefined}
+        >
+          {saving ? "Saving…" : "Save Defaults"}
+        </button>
+        {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
     </div>
   );

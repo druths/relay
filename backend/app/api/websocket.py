@@ -446,12 +446,8 @@ async def _handle_text(
                             "Stream TTS resolve: agent=%s, tts_provider=%s, voice_id=%s, has_agent_key=%s",
                             tts_agent.name, tts_agent.tts_provider, tts_agent.voice_id, bool(tts_agent.tts_api_key),
                         )
-                        tts_key = tts_agent.tts_api_key
-                        if not tts_key:
-                            setting_key = f"tts_{tts_agent.tts_provider}_api_key"
-                            tts_key = await _get_setting(db, setting_key) or None
-                            logger.info("Stream TTS key fallback: setting=%s, found=%s", setting_key, bool(tts_key))
-                        tts_base_url = tts_agent.voice_settings.get("base_url")
+                        from app.services.agent_manager import resolve_tts_config
+                        tts_base_url, tts_key = await resolve_tts_config(tts_agent)
                         tts_provider = get_tts_provider(tts_agent.tts_provider, tts_key, base_url=tts_base_url)
                 if tts_provider:
                     tts_buffer = ""
@@ -637,15 +633,8 @@ async def _tts_for_text(
         "TTS resolve: speaker=%s, agent=%s, tts_provider=%s, voice_id=%s, has_agent_key=%s",
         speaker_name, agent.name, agent.tts_provider, agent.voice_id, bool(agent.tts_api_key),
     )
-    api_key = agent.tts_api_key
-    if not api_key:
-        setting_key = f"tts_{agent.tts_provider}_api_key"
-        api_key = await _get_setting(db, setting_key) or None
-        logger.info(
-            "TTS key fallback: setting=%s, found=%s",
-            setting_key, bool(api_key),
-        )
-    tts_base_url = agent.voice_settings.get("base_url") if agent.voice_settings else None
+    from app.services.agent_manager import resolve_tts_config
+    tts_base_url, api_key = await resolve_tts_config(agent)
     provider = get_tts_provider(agent.tts_provider, api_key, base_url=tts_base_url)
     if not provider:
         logger.warning(

@@ -154,3 +154,110 @@ async def get_stt_status(db: AsyncSession = Depends(get_db)):
     from app.services.stt import get_stt_provider_from_db
     provider = await get_stt_provider_from_db(db)
     return {"available": provider is not None}
+
+
+# ── Provider defaults (platform-wide fallback values) ────────────────
+
+
+def _is_masked(value: str | None) -> bool:
+    """Settings UI re-sends masked password values verbatim on save. Detect
+    those so we don't overwrite the real stored key with the mask string."""
+    return bool(value) and "•" in value
+
+
+@router.get("/provider-defaults")
+async def get_provider_defaults(db: AsyncSession = Depends(get_db)):
+    """Return all platform-defaultable fields grouped by category and provider,
+    with the current stored value (masked for password fields)."""
+    from app.services.llm import list_provider_schemas as llm_schemas
+    from app.services.tts import list_provider_schemas as tts_schemas
+    from app.services.stt import list_provider_schemas as stt_schemas
+
+    groups_input = [
+        ("llm", "LLM", llm_schemas()),
+        ("tts", "TTS", tts_schemas()),
+        ("stt", "STT", stt_schemas()),
+    ]
+
+    # Collect every platform_key referenced, then look them all up in one go.
+    all_keys: set[str] = set()
+    for _, _, schemas in groups_input:
+        for prov in schemas:
+            for f in prov.get("fields", []):
+                if f.get("platform_key"):
+                    all_keys.add(f["platform_key"])
+
+    res = await db.execute(
+        select(PlatformSetting).where(PlatformSetting.key.in_(all_keys))
+    )
+    stored: dict[str, str] = {r.key: r.value for r in res.scalars().all() if r.value}
+
+    out_groups = []
+    for cat_id, cat_label, schemas in groups_input:
+        providers_out = []
+        for prov in schemas:
+            fields_out = []
+            for f in prov.get("fields", []):
+                pk = f.get("platform_key")
+                if not pk:
+                    continue
+                raw = stored.get(pk, "")
+                value = mask_api_key(raw) if (raw and f.get("type") == "password") else raw
+                fields_out.append({
+                    "platform_key": pk,
+                    "label": f.get("label", pk),
+                    "type": f.get("type", "text"),
+                    "placeholder": f.get("placeholder", ""),
+                    "value": value or None,
+                })
+            if fields_out:
+                providers_out.append({
+                    "id": prov["id"],
+                    "label": prov.get("label", prov["id"]),
+                    "fields": fields_out,
+                })
+        if providers_out:
+            out_groups.append({
+                "category": cat_id,
+                "label": cat_label,
+                "providers": providers_out,
+            })
+
+    return {"groups": out_groups}
+
+
+class ProviderDefaultsUpdate(BaseModel):
+    """Flat dict of `{platform_key: value | null}`. Masked password values
+    are ignored (no-op). Pass an empty string to clear a stored value."""
+    values: dict[str, str | None]
+
+
+@router.put("/provider-defaults")
+async def update_provider_defaults(
+    body: ProviderDefaultsUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist updated platform defaults. Validates against the union of all
+    declared platform_keys across LLM/TTS/STT schemas — unknown keys 400."""
+    from app.services.llm import list_provider_schemas as llm_schemas
+    from app.services.tts import list_provider_schemas as tts_schemas
+    from app.services.stt import list_provider_schemas as stt_schemas
+
+    known: set[str] = set()
+    for schemas in (llm_schemas(), tts_schemas(), stt_schemas()):
+        for prov in schemas:
+            for f in prov.get("fields", []):
+                if f.get("platform_key"):
+                    known.add(f["platform_key"])
+
+    unknown = [k for k in body.values if k not in known]
+    if unknown:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Unknown platform keys: {unknown}")
+
+    for key, value in body.values.items():
+        if _is_masked(value):
+            continue  # UI re-sent the mask; don't overwrite real value
+        await _set_setting(db, key, value or "")
+    await db.commit()
+    return await get_provider_defaults(db)

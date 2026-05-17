@@ -69,6 +69,7 @@
 		D8870AE87B8F8567AACD3235 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE22E0410CA4D69AE33B8575 /* AppViewModel.swift */; };
 		DA54A91DE82D7F2B4733AB7B /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79719ECC3D01B1F82B573722 /* KeychainService.swift */; };
 		EBEF3DA54A41FE4B33D7210D /* SoundWaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */; };
+		F0BD930A949D257E41813476 /* ProviderDefaultsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */; };
 		F4067A28DBAE091CA99EC06B /* RelayLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F8CE7B75365F8F88F0DA57 /* RelayLiveActivity.swift */; };
 /* End PBXBuildFile section */
 
@@ -100,6 +101,7 @@
 		071718BDCBB8F15D92597F38 /* WebSocketEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketEvent.swift; sourceTree = "<group>"; };
 		0EB4DDCF19266F408F07CFD1 /* InputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBar.swift; sourceTree = "<group>"; };
 		0F5629B936746D106D8B9034 /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
+		0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderDefaultsTabView.swift; sourceTree = "<group>"; };
 		1A668E4C226B3C74D17F6F2D /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingToneService.swift; sourceTree = "<group>"; };
 		20F1A7CF1C37E5D68F02F84B /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
@@ -173,6 +175,7 @@
 				6E3E6922C9E8819987A2C44C /* MarkdownText.swift */,
 				EACEBD78D17A8220B9722E73 /* MessageBubble.swift */,
 				D26249E8004C02E5E5519D8B /* PixelFace.swift */,
+				0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */,
 				A54D9305405BD042B6817944 /* SessionList.swift */,
 				39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */,
 				361BF127CF429820121827A5 /* StatusOrb.swift */,
@@ -494,6 +497,7 @@
 				B3C6794809BCC03E5DD3D358 /* PixelFace.swift in Sources */,
 				AC91A1044DB20F944BE1B76C /* PixelIcon.swift in Sources */,
 				2E2D6803F353C124CFB03BAE /* PlatformSettings.swift in Sources */,
+				F0BD930A949D257E41813476 /* ProviderDefaultsTabView.swift in Sources */,
 				808B233B89F865DCF46FC3A9 /* ProviderSchemas.swift in Sources */,
 				3C261BCD405BCBF02C13013B /* RelayActivityAttributes.swift in Sources */,
 				5537BF2868592255AAF0F670 /* RelayApp.swift in Sources */,

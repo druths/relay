@@ -114,6 +114,8 @@ struct AgentManagementView: View {
         switch vm.selectedTab {
         case .agents:
             agentsTab
+        case .defaults:
+            ProviderDefaultsTabView(apiClient: APIClient(authService: authService), catalog: catalog)
         case .tts:
             ttsTab
         case .stt:
@@ -283,6 +285,7 @@ struct AgentManagementView: View {
             ForEach(schema.fields, id: \.key) { field in
                 sectionLabel(field.label)
                 formTextField(field.key, placeholder: field.placeholder, secure: field.fieldType == .password)
+                platformDefaultHint(for: field)
             }
         }
 
@@ -299,6 +302,7 @@ struct AgentManagementView: View {
                             Task { await vm.fetchTtsModels(); await vm.fetchVoices() }
                         }
                     }
+                platformDefaultHint(for: field)
             }
         }
 
@@ -549,6 +553,30 @@ struct AgentManagementView: View {
             .frame(height: theme.borderWidth)
             .padding(.top, 24)
             .padding(.bottom, 8)
+    }
+
+    /// Small subtitle under a per-agent field indicating whether a platform
+    /// default exists. Returns an empty view when the field isn't
+    /// platform-defaultable or the user has already typed a value.
+    @ViewBuilder
+    private func platformDefaultHint(for field: ProviderField) -> some View {
+        let value = vm.form[field.key] ?? ""
+        let hasValue = !value.isEmpty && !value.contains("\u{2022}")
+        if let _ = field.platformKey, !hasValue {
+            if field.platformDefaultSet {
+                Text("Platform default set — leave blank to use it")
+                    .font(theme.bodyFont(size: 12))
+                    .foregroundStyle(theme.textTertiary)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 4)
+            } else {
+                Text("No platform default — set a value here")
+                    .font(theme.bodyFont(size: 12))
+                    .foregroundStyle(theme.warning)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 4)
+            }
+        }
     }
 
     private func formTextField(_ key: String, placeholder: String = "", secure: Bool = false, disabled: Bool = false) -> some View {
@@ -846,7 +874,11 @@ struct AgentManagementView: View {
         switch vm.selectedTab {
         case .agents: return vm.isAgentFormDirty
         case .tts, .stt: return vm.isPlatformFormDirty
-        case .appearance, .account: return false
+        // The Defaults tab owns its own pending-edits state inside the view —
+        // it's not surfaced on the VM, so the cross-tab unsaved-changes guard
+        // skips it. Worst case: the user navigates away with unsaved defaults,
+        // but no per-agent edits get clobbered.
+        case .defaults, .appearance, .account: return false
         }
     }
 

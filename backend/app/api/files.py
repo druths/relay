@@ -119,11 +119,13 @@ async def upload_file(
     if ark_target is not None:
         agent, ark_sid = ark_target
         name = _ark_agent_name(agent)
-        base = (agent.llm_base_url or "").rstrip("/")
+        from app.services.agent_manager import resolve_llm_config
+        base_url, api_key = await resolve_llm_config(agent)
+        base = (base_url or "").rstrip("/")
         if not base:
             raise HTTPException(status_code=500, detail="Ark agent missing base_url")
         url = f"{base}/agents/{name}/sessions/{ark_sid}/uploads"
-        headers = {"Authorization": f"Bearer {agent.llm_api_key}"} if agent.llm_api_key else {}
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(
@@ -209,11 +211,13 @@ async def download_ark_file_passthrough(
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Ark agent {agent_name} not found")
 
-    base = (agent.llm_base_url or "").rstrip("/")
+    from app.services.agent_manager import resolve_llm_config
+    base_url, api_key = await resolve_llm_config(agent)
+    base = (base_url or "").rstrip("/")
     if not base:
         raise HTTPException(status_code=500, detail="Ark agent missing base_url")
     url = f"{base}/agents/{_ark_agent_name(agent)}/files/{ark_path}"
-    headers = {"Authorization": f"Bearer {agent.llm_api_key}"} if agent.llm_api_key else {}
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     client = httpx.AsyncClient(timeout=60)
     try:
@@ -286,11 +290,13 @@ async def download_file(
         if agent is None:
             raise HTTPException(status_code=404, detail=f"Ark agent {agent_name} not found")
 
-        base = (agent.llm_base_url or "").rstrip("/")
+        from app.services.agent_manager import resolve_llm_config
+        base_url, api_key = await resolve_llm_config(agent)
+        base = (base_url or "").rstrip("/")
         if not base:
             raise HTTPException(status_code=500, detail="Ark agent missing base_url")
         url = f"{base}/agents/{_ark_agent_name(agent)}/files/{ark_path}"
-        headers = {"Authorization": f"Bearer {agent.llm_api_key}"} if agent.llm_api_key else {}
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
         client = httpx.AsyncClient(timeout=60)
         try:

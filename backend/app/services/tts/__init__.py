@@ -27,9 +27,11 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "OpenAI-Compatible",
         "fields": [
             {"key": "tts_api_key", "label": "API Key", "type": "password",
-             "placeholder": "sk-… (blank for local TTS)"},
+             "placeholder": "sk-… (blank for local TTS)",
+             "platform_key": "tts_openai_api_key"},
             {"key": "base_url", "label": "Base URL", "type": "text",
-             "placeholder": "Blank for OpenAI, or http://kokoro:8880 for local"},
+             "placeholder": "Blank for OpenAI, or http://kokoro:8880 for local",
+             "platform_key": "tts_openai_base_url"},
         ],
     },
     {
@@ -37,7 +39,8 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "ElevenLabs",
         "fields": [
             {"key": "tts_api_key", "label": "API Key", "type": "password",
-             "placeholder": "xi-… (uses platform key if blank)"},
+             "placeholder": "xi-… (uses platform key if blank)",
+             "platform_key": "tts_elevenlabs_api_key"},
         ],
     },
     {
@@ -45,7 +48,8 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "Google (Chirp 3 HD)",
         "fields": [
             {"key": "tts_api_key", "label": "API Key", "type": "password",
-             "placeholder": "AIza… (uses platform key if blank)"},
+             "placeholder": "AIza… (uses platform key if blank)",
+             "platform_key": "tts_google_api_key"},
         ],
     },
     {
@@ -53,7 +57,8 @@ PROVIDER_SCHEMAS: list[dict] = [
         "label": "NeuTTS (self-hosted)",
         "fields": [
             {"key": "base_url", "label": "Server URL", "type": "text",
-             "placeholder": "Blank to use default neutts:8000"},
+             "placeholder": "Blank to use default neutts:8000",
+             "platform_key": "tts_neutts_base_url"},
         ],
     },
 ]

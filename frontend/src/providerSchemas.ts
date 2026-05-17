@@ -20,7 +20,12 @@ export interface ProviderField {
   type: "text" | "password" | "select";
   placeholder?: string;
   required?: boolean;
+  /** For `type === "select"` fields: the choices to render. */
   options?: ProviderFieldOption[];
+  /** Storage key in PlatformSetting when the user sets a platform-wide default. */
+  platform_key?: string;
+  /** Whether a platform-wide default is currently set for this field. */
+  platform_default_set?: boolean;
 }
 
 export interface ProviderSchemaEntry {
@@ -29,6 +34,26 @@ export interface ProviderSchemaEntry {
   fields: ProviderField[];
   /** STT only: `apple` is on-device, no server-side provider. */
   client_only?: boolean;
+}
+
+export interface ProviderDefaultsField {
+  platform_key: string;
+  label: string;
+  type: "text" | "password";
+  placeholder?: string;
+  value: string | null;
+}
+
+export interface ProviderDefaultsProvider {
+  id: string;
+  label: string;
+  fields: ProviderDefaultsField[];
+}
+
+export interface ProviderDefaultsGroup {
+  category: string;
+  label: string;
+  providers: ProviderDefaultsProvider[];
 }
 
 export interface ProviderSchemas {
@@ -40,6 +65,18 @@ export interface ProviderSchemas {
 /** Process-wide cache so repeated mounts don't re-fetch. */
 let _cache: ProviderSchemas | null = null;
 let _inflight: Promise<ProviderSchemas> | null = null;
+let _subscribers: Set<(s: ProviderSchemas) => void> = new Set();
+
+/** Invalidate the cache so the next `useProviderSchemas` (or `load()`) call
+ * re-fetches. Notify any mounted subscribers so they pick up the fresh data
+ * immediately. Call after the user saves provider defaults. */
+export function invalidateProviderSchemas(): void {
+  _cache = null;
+  _inflight = null;
+  load().then((s) => {
+    for (const cb of _subscribers) cb(s);
+  });
+}
 
 async function load(): Promise<ProviderSchemas> {
   if (_cache) return _cache;
@@ -57,14 +94,20 @@ async function load(): Promise<ProviderSchemas> {
   return _inflight;
 }
 
-/** Hook: returns `null` until the schemas have loaded. */
+/** Hook: returns `null` until the schemas have loaded. Subscribes for cache
+ * invalidations so the component re-renders when defaults change. */
 export function useProviderSchemas(): ProviderSchemas | null {
   const [schemas, setSchemas] = useState<ProviderSchemas | null>(_cache);
   useEffect(() => {
-    if (_cache) return;
-    load().then(setSchemas).catch((err) => {
-      console.error("Failed to load provider schemas", err);
-    });
+    if (!_cache) {
+      load().then(setSchemas).catch((err) => {
+        console.error("Failed to load provider schemas", err);
+      });
+    }
+    _subscribers.add(setSchemas);
+    return () => {
+      _subscribers.delete(setSchemas);
+    };
   }, []);
   return schemas;
 }
