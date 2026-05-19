@@ -1,4 +1,5 @@
 import SwiftUI
+import QuickLook
 
 struct MessageBubble: View {
     let message: Message
@@ -104,15 +105,19 @@ struct MessageBubble: View {
     }
 }
 
-/// Renders a single file attachment as a tappable pill. On tap, fetches the
-/// file with the user's bearer token, writes it to a temp file, and presents
-/// a system share sheet so the user can preview/save/share it.
+/// Renders a single file attachment as a pill with two distinct gestures:
+///
+/// • **Tap** — downloads the file and shows a QuickLook preview (whose own
+///   toolbar provides Share / Save to Files / etc.).
+/// • **Long press** — surfaces a SwiftUI context menu with Share + Copy Link
+///   for quick export without opening the preview.
 private struct AttachmentPill: View {
     let attachment: FileAttachment
 
     @Environment(\.relayTheme) private var theme
     @State private var downloading = false
-    @State private var shareTarget: ShareTarget?
+    @State private var previewURL: FileURLRef?
+    @State private var shareURL: FileURLRef?
 
     private var sizeLabel: String? {
         guard attachment.sizeBytes > 0 else { return nil }
@@ -128,48 +133,88 @@ private struct AttachmentPill: View {
     }
 
     var body: some View {
-        Button { Task { await openAttachment() } } label: {
-            HStack(spacing: 6) {
-                if downloading {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                        .frame(width: 11, height: 11)
-                } else {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.textTertiary)
-                }
-                Text(attachment.filename)
-                    .font(theme.monoFont(size: 13))
-                    .foregroundStyle(theme.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if let s = sizeLabel {
-                    Text("(\(s))")
-                        .font(theme.monoFont(size: 12))
-                        .foregroundStyle(theme.textQuaternary)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(theme.elevated)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: theme.cornerRadius)
-                    .stroke(theme.border, lineWidth: theme.borderWidth)
-            )
+        Button {
+            Task { await openPreview() }
+        } label: {
+            pillContent
         }
         .buttonStyle(.plain)
         .disabled(downloading)
-        .sheet(item: $shareTarget) { target in
-            ShareSheet(url: target.url)
+        .contextMenu {
+            Button {
+                Task { await openShare() }
+            } label: {
+                Label("Share…", systemImage: "square.and.arrow.up")
+            }
+            Button {
+                #if canImport(UIKit)
+                UIPasteboard.general.string = fullURL?.absoluteString ?? attachment.url
+                #endif
+            } label: {
+                Label("Copy Link", systemImage: "link")
+            }
+        }
+        .sheet(item: $previewURL) { wrapped in
+            QuickLookPreview(url: wrapped.url)
+                .ignoresSafeArea()
+        }
+        .sheet(item: $shareURL) { wrapped in
+            ShareSheet(url: wrapped.url)
         }
     }
 
-    private func openAttachment() async {
-        guard let url = fullURL else { return }
-        downloading = true
-        defer { downloading = false }
+    private var pillContent: some View {
+        HStack(spacing: 6) {
+            if downloading {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 11, height: 11)
+            } else {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            Text(attachment.filename)
+                .font(theme.monoFont(size: 13))
+                .foregroundStyle(theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let s = sizeLabel {
+                Text("(\(s))")
+                    .font(theme.monoFont(size: 12))
+                    .foregroundStyle(theme.textQuaternary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(theme.elevated)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: theme.cornerRadius)
+                .stroke(theme.border, lineWidth: theme.borderWidth)
+        )
+    }
+
+    private func openPreview() async {
+        if let url = await downloadToTemp() {
+            await MainActor.run { previewURL = FileURLRef(url: url) }
+        }
+    }
+
+    private func openShare() async {
+        if let url = await downloadToTemp() {
+            await MainActor.run { shareURL = FileURLRef(url: url) }
+        }
+    }
+
+    /// Download the attachment with auth, write it to a temp file with the
+    /// original filename, return the local URL. QuickLook and ShareSheet
+    /// both consume a file URL; using the real filename keeps the title and
+    /// extension-based handlers correct.
+    private func downloadToTemp() async -> URL? {
+        guard let url = fullURL else { return nil }
+        await MainActor.run { downloading = true }
+        defer { Task { @MainActor in downloading = false } }
 
         var request = URLRequest(url: url)
         if let token = KeychainService.load() {
@@ -180,23 +225,22 @@ private struct AttachmentPill: View {
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 print("[Relay] Attachment download failed: HTTP \(code)")
-                return
+                return nil
             }
-            // Write to a temp file with the original filename so the share
-            // sheet shows a sensible label and the right preview handler.
             let tmp = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
             let fileURL = tmp.appendingPathComponent(attachment.filename)
             try data.write(to: fileURL, options: .atomic)
-            await MainActor.run { shareTarget = ShareTarget(url: fileURL) }
+            return fileURL
         } catch {
             print("[Relay] Attachment download error: \(error)")
+            return nil
         }
     }
 }
 
-private struct ShareTarget: Identifiable {
+private struct FileURLRef: Identifiable {
     let url: URL
     var id: String { url.absoluteString }
 }
@@ -209,4 +253,28 @@ private struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+private struct QuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UINavigationController {
+        let preview = QLPreviewController()
+        preview.dataSource = context.coordinator
+        // Wrap so the sheet has a navigation bar with a Done button on iOS.
+        return UINavigationController(rootViewController: preview)
+    }
+
+    func updateUIViewController(_ controller: UINavigationController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as QLPreviewItem
+        }
+    }
 }
