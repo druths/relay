@@ -394,18 +394,31 @@ class ArkProvider(LLMProvider):
         try:
             await conn.send_user_message(user_text)
             try:
+                # Ark splits a single user turn into multiple assistant text
+                # segments around tool calls (delta…delta → assistant_message
+                # → tool_call → tool_result → delta…delta → assistant_message
+                # → done). Without a separator they concatenate as "first
+                # sentence.next sentence" with no space. Insert a paragraph
+                # break before the first delta of each new segment.
+                saw_segment_end = False
                 async for event in conn.iter_turn_events():
                     etype = event.get("type")
                     if etype == "assistant_delta":
                         delta = event.get("text") or event.get("delta") or ""
                         if delta:
+                            if saw_segment_end:
+                                yield "\n\n"
+                                saw_segment_end = False
                             yield delta
+                    elif etype == "assistant_message":
+                        # End-of-segment marker. If more deltas follow, they
+                        # belong to a new segment and get a separator.
+                        saw_segment_end = True
                     elif etype == "error":
                         logger.warning("Ark error event: %s", event.get("message"))
                     elif etype == "done":
                         break
-                    # tool_call / tool_result / thinking / assistant_message
-                    # are intentionally filtered.
+                    # tool_call / tool_result / thinking are filtered.
             except asyncio.CancelledError:
                 await conn.send_stop()
                 raise
