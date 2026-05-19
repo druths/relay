@@ -189,6 +189,7 @@ async def generate_response(
                 system_prompt, messages, agent.llm_model,
                 relay_session_id=str(session_id),
                 previous_session_id=prev_sid,
+                session_context=agent.persona_prompt if not prev_sid else None,
             )
             if result.session_id:
                 await set_provider_state(str(session_id), "ark", result.session_id)
@@ -276,6 +277,7 @@ async def generate_response_stream(
                 system_prompt, messages, agent.llm_model,
                 relay_session_id=str(session_id),
                 previous_session_id=prev_sid,
+                session_context=agent.persona_prompt if not prev_sid else None,
             ):
                 if isinstance(chunk, ArkResult):
                     if chunk.session_id:

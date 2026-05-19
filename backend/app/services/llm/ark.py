@@ -327,6 +327,7 @@ class ArkProvider(LLMProvider):
         model,
         relay_session_id: str | None = None,
         previous_session_id: str | None = None,
+        session_context: str | None = None,
     ) -> ArkResult:
         chunks: list[str] = []
         final_session_id: str | None = None
@@ -334,6 +335,7 @@ class ArkProvider(LLMProvider):
             system_prompt, messages, model,
             relay_session_id=relay_session_id,
             previous_session_id=previous_session_id,
+            session_context=session_context,
         ):
             if isinstance(item, str):
                 chunks.append(item)
@@ -343,11 +345,12 @@ class ArkProvider(LLMProvider):
 
     async def generate_stream_with_chain(
         self,
-        system_prompt,  # currently unused — ark agents own their own system prompts
+        system_prompt,  # ark composes its own system prompt; use session_context to layer
         messages,
         model,
         relay_session_id: str | None = None,
         previous_session_id: str | None = None,
+        session_context: str | None = None,
     ):
         agent = _agent_name(model)
         user_text = _last_user_text(messages)
@@ -356,7 +359,13 @@ class ArkProvider(LLMProvider):
             agent, previous_session_id is not None, len(user_text),
         )
 
-        ark_session_id = previous_session_id or await self._ensure_session(agent)
+        # On session creation we pass `context` so ark layers Relay's persona
+        # on top of the server-side session_context.md. We only seed on
+        # creation — ark's mid-session context endpoint always appends, so
+        # re-sending on every turn would accumulate duplicates.
+        ark_session_id = previous_session_id or await self._ensure_session(
+            agent, context=session_context,
+        )
 
         # Resolve the long-lived connection. If we don't have a Relay session
         # context (e.g. called from outside a session), open a one-shot
@@ -408,12 +417,18 @@ class ArkProvider(LLMProvider):
 
     # ── Helpers ─────────────────────────────────────────────────────
 
-    async def _ensure_session(self, agent: str) -> str:
-        """Create a new ark session and return its id."""
+    async def _ensure_session(self, agent: str, context: str | None = None) -> str:
+        """Create a new ark session and return its id. If `context` is given
+        and non-empty, ark stores it as the session's first SessionContext
+        message and uses it to layer the system prompt above the agent's
+        own `session_context.md` (per ark/docs/sessions.md)."""
         url = f"{self._base_http}/agents/{agent}/sessions"
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        body: dict[str, str] = {}
+        if context and context.strip():
+            body["context"] = context.strip()
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(url, headers=headers, json={})
+            resp = await client.post(url, headers=headers, json=body)
             resp.raise_for_status()
             data = resp.json()
             session_id = data.get("id") or data.get("session_id")
