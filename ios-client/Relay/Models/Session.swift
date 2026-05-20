@@ -11,6 +11,9 @@ struct Session: Codable, Identifiable, Equatable {
     var summary: String?
     var labels: [String]
     var hasUnread: Bool
+    /// External-system session ids keyed by provider name. For ark this is
+    /// the server-side session id used by `post_to_session` and cron entries.
+    var providerState: [String: String]
 
     var id: String { sessionId }
 
@@ -25,6 +28,7 @@ struct Session: Codable, Identifiable, Equatable {
         case summary
         case labels
         case hasUnread = "has_unread"
+        case providerState = "provider_state"
     }
 
     init(from decoder: Decoder) throws {
@@ -39,5 +43,6 @@ struct Session: Codable, Identifiable, Equatable {
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
         hasUnread = try container.decodeIfPresent(Bool.self, forKey: .hasUnread) ?? false
+        providerState = try container.decodeIfPresent([String: String].self, forKey: .providerState) ?? [:]
     }
 }

@@ -46,6 +46,10 @@ class SessionOut(BaseModel):
     summary: str | None = None
     labels: list[str] = []
     has_unread: bool = False
+    # External-system session identifiers, keyed by provider. For ark this
+    # is the server-side session id that tools like `post_to_session` and
+    # cron entries reference.
+    provider_state: dict[str, str] = {}
 
 
 class MessageOut(BaseModel):

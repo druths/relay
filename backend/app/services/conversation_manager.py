@@ -68,9 +68,8 @@ async def delete_session(db: AsyncSession, session_id: uuid.UUID) -> bool:
     session.deleted_at = datetime.now(timezone.utc)
     await db.commit()
     await invalidate_session_cache(session_id)
-    # Close any live ark connection for this session.
-    from app.services.llm.ark import close_connection
-    await close_connection(str(session_id))
+    # No per-session ark connection to close — connections are now one per
+    # (base_url, api_key) pair and outlive individual Relay sessions.
     return True
 
 
@@ -215,6 +214,12 @@ async def list_sessions(
     sessions = []
     for s, agent_name in result.all():
         labels = await get_session_labels(db, s.session_id)
+        # Stringify provider_state values so the response is well-typed —
+        # the client uses these (e.g. `ark` → ark session_id) for things
+        # like configuring cron jobs.
+        provider_state = {
+            k: str(v) for k, v in (s.provider_state or {}).items() if v
+        }
         sessions.append({
             "session_id": str(s.session_id),
             "agent_id": str(s.agent_id),
@@ -226,6 +231,7 @@ async def list_sessions(
             "summary": s.summary,
             "labels": labels,
             "has_unread": s.has_unread,
+            "provider_state": provider_state,
         })
     return sessions
 
@@ -348,9 +354,8 @@ async def pause_session(db: AsyncSession, session_id: uuid.UUID) -> str:
     session.status = "paused"
     await db.commit()
 
-    # Close any live ark connection for this session.
-    from app.services.llm.ark import close_connection
-    await close_connection(str(session_id))
+    # Ark connections are now per-server, not per-session — nothing to
+    # close on session pause.
 
     # Generate summary async only if the session has no name yet
     if not session.name:

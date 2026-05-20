@@ -330,7 +330,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
                       {menuOpenId === s.session_id && (
                         <div className="absolute right-0 top-6 z-50 bg-gray-800 border border-gray-700
-                                        rounded-lg shadow-lg py-1 w-32 dropdown-menu">
+                                        rounded-lg shadow-lg py-1 w-44 dropdown-menu">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -342,6 +342,23 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                                        hover:bg-gray-700 transition-colors"
                           >
                             Rename
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // For ark sessions, copy the ark server-side
+                              // session id (useful for cron entries and
+                              // `post_to_session`). Otherwise fall back to
+                              // Relay's internal id.
+                              const id =
+                                s.provider_state?.ark ?? s.session_id;
+                              navigator.clipboard.writeText(id).catch(() => {});
+                              setMenuOpenId(null);
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-sm text-gray-300
+                                       hover:bg-gray-700 transition-colors"
+                          >
+                            Copy Session ID
                           </button>
                           {confirmingDeleteId === s.session_id ? (
                             <div className="px-3 py-1.5 flex items-center gap-2">

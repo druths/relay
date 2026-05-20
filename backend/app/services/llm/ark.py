@@ -1,31 +1,22 @@
-"""Ark LLM provider — talks to a self-hosted ark agent harness over a
-long-lived WebSocket per Relay session.
+"""Ark LLM provider — talks to a self-hosted ark agent harness over a single
+per-server, per-(base_url, api_key) WebSocket connection.
 
-Ark hosts multiple named agents on a single HTTP+WebSocket server. Each
-conversation is a server-owned `session` with persisted history. Relay maps
-one Relay session 1:1 to one ark session; the ark session_id is persisted in
-`sessions.provider_state['ark']` via the agent_manager.
+Ark's unified event stream (`WS /events`, see ark/CHANGELOG.md) carries
+events for *every* session the connection's token is authorized to see. One
+connection per ark server is therefore enough — turns, async injections,
+file shares, heartbeat/cron output for every Relay session pointed at that
+server all flow through it tagged with `session_id` and `agent_name`.
 
-Connection model
-────────────────
-We hold one hot WebSocket per Relay session for as long as the session is
-active. A single consumer task reads frames off the socket and dispatches
-them to one of two sinks:
-
-  • turn-scoped events (assistant_delta, tool_call, tool_result, thinking,
-    assistant_message, done, error) → the current turn's queue, drained by
-    `generate_stream_with_chain`.
-  • async events (file_available, injected_message) → an out-of-band
-    callback registered by the agent_manager wiring, used to push
-    notifications into the Relay client's WS even when no turn is in flight.
-
-Connections survive Relay client disconnects (e.g. the user backgrounds the
-app), and are torn down on session_left / session_deleted / backend shutdown.
+On (re)connect the provider also calls `GET /events?since_id=<cursor>` to
+backfill anything that happened while we were offline, advancing a durable
+cursor stored in `PlatformSetting` so subsequent reconnects pick up where
+we left off.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -39,13 +30,15 @@ from app.services.llm.base import LLMProvider
 logger = logging.getLogger(__name__)
 
 
-# Events that belong to an active turn — drained by the streaming generator.
+# Events that belong to an active turn — drained by the streaming generator
+# for that session.
 TURN_EVENT_TYPES = {
-    "assistant_delta", "tool_call", "tool_result", "thinking",
-    "assistant_message", "done", "error",
+    "assistant_delta", "assistant_message", "thinking",
+    "tool_call", "tool_result", "turn_usage", "done", "error",
 }
 
-# Events that arrive out-of-band — surfaced via the async callback.
+# Async events: things that can fire even when no turn for that session is
+# in flight (cross-session injections, file shares, errors).
 ASYNC_EVENT_TYPES = {"file_available", "injected_message"}
 
 
@@ -73,59 +66,62 @@ class ArkResult:
     session_id: str | None = None
 
 
-# Type alias for the async-event callback. Takes the raw event dict.
+# Callback signature: receives the raw event dict (which always has
+# `session_id` and usually `agent_name`).
 AsyncEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
+CatchUpCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
-class ArkSessionConnection:
-    """One long-lived WS to ark for a single Relay session.
+def _server_id_for(base_url: str, api_key: str | None) -> str:
+    """Stable short identifier for an (ark server, token) pair. Used as the
+    PlatformSetting key suffix for the catch-up cursor."""
+    raw = f"{base_url.rstrip('/')}|{api_key or ''}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
 
-    Created lazily on the first turn; lives until the Relay session is
-    explicitly closed. Recovers from transient WS drops by reconnecting on
-    the same ark session_id (ark continues the session server-side).
+
+class ArkClientConnection:
+    """One long-lived WebSocket to ark's `/events` for a single
+    (base_url, api_key) pair. Multiplexes events for every session this
+    token can see.
+
+    Per-Relay-session turn state is held in `_turn_queues[ark_session_id]`,
+    set/cleared around each `send_user_message` -> `iter_turn_events` call.
+    All other events are dispatched to the registered `async_callback`.
     """
 
-    def __init__(
-        self,
-        base_http: str,
-        base_ws: str,
-        agent: str,
-        session_id: str,
-        api_key: str | None,
-    ):
+    def __init__(self, base_http: str, base_ws: str, api_key: str | None):
         self.base_http = base_http
         self.base_ws = base_ws
-        self.agent = agent
-        self.session_id = session_id
         self.api_key = api_key
+        self.server_id = _server_id_for(base_http, api_key)
 
         self._ws: websockets.ClientConnection | None = None
         self._consumer: asyncio.Task | None = None
-        # The queue is set by start_turn() and cleared by end_turn(). Only
-        # one turn is in flight at a time per Relay session.
-        self._turn_queue: asyncio.Queue[dict] | None = None
-        self._closed = False
+        self._turn_queues: dict[str, asyncio.Queue[dict]] = {}
         self._async_callback: AsyncEventCallback | None = None
-        # Lock around start_turn / end_turn so concurrent calls can't
-        # interleave queues.
+        # Called once per catch-up event so the backend can persist/broadcast.
+        self._catch_up_callback: CatchUpCallback | None = None
+        self._closed = False
+        self._connect_lock = asyncio.Lock()
+        # Per-session turn queue write lock (allow multiple concurrent turns
+        # across different ark sessions on the same connection).
         self._turn_lock = asyncio.Lock()
 
     # ── Public lifecycle ────────────────────────────────────────────
 
     def set_async_callback(self, cb: AsyncEventCallback | None) -> None:
-        """Register the callback that receives file_available, injected_message,
-        etc. Pass None to detach. Safe to call from any task."""
         self._async_callback = cb
 
+    def set_catch_up_callback(self, cb: CatchUpCallback | None) -> None:
+        self._catch_up_callback = cb
+
     async def ensure_connected(self) -> None:
-        """Open the WS if not already; idempotent."""
-        if self._ws is not None and not self._closed:
-            return
-        await self._connect()
+        async with self._connect_lock:
+            if self._ws is not None and not self._closed:
+                return
+            await self._connect()
 
     async def close(self) -> None:
-        """Shut down the connection permanently. Cancels the consumer and
-        breaks any in-flight turn queue."""
         self._closed = True
         if self._consumer:
             self._consumer.cancel()
@@ -141,57 +137,119 @@ class ArkSessionConnection:
                 pass
             self._ws = None
         # Unblock any waiting turn consumer with a sentinel.
-        if self._turn_queue:
-            await self._turn_queue.put({"type": "done", "_closed": True})
+        for q in self._turn_queues.values():
+            await q.put({"type": "done", "_closed": True})
 
     # ── Turn API ────────────────────────────────────────────────────
 
-    async def send_user_message(self, text: str) -> None:
-        """Send a user_message frame and prepare the turn queue. Caller is
-        responsible for then calling `iter_turn_events()` to drain it."""
+    async def send_user_message(self, ark_session_id: str, text: str) -> None:
+        """Open a turn for `ark_session_id` and send the user message."""
         await self.ensure_connected()
         async with self._turn_lock:
-            self._turn_queue = asyncio.Queue()
+            self._turn_queues[ark_session_id] = asyncio.Queue()
         assert self._ws is not None
-        await self._ws.send(json.dumps({"type": "user_message", "text": text}))
+        await self._ws.send(json.dumps({
+            "type": "user_message",
+            "session_id": ark_session_id,
+            "text": text,
+        }))
 
-    async def iter_turn_events(self):
-        """Yield turn events until a `done` is observed."""
-        if self._turn_queue is None:
+    async def iter_turn_events(self, ark_session_id: str):
+        """Yield events for the named ark session until a `done` is observed.
+        Removes the queue when finished."""
+        queue = self._turn_queues.get(ark_session_id)
+        if queue is None:
             return
         try:
             while True:
-                event = await self._turn_queue.get()
+                event = await queue.get()
                 yield event
                 if event.get("type") == "done":
                     break
         finally:
-            self._turn_queue = None
+            async with self._turn_lock:
+                self._turn_queues.pop(ark_session_id, None)
 
-    async def send_stop(self) -> None:
-        """Best-effort cancel of the in-flight turn."""
+    async def send_stop(self, ark_session_id: str) -> None:
         if self._ws is None:
             return
         try:
-            await asyncio.wait_for(
-                self._ws.send(json.dumps({"type": "stop"})),
-                timeout=0.5,
-            )
+            await asyncio.wait_for(self._ws.send(json.dumps({
+                "type": "stop",
+                "session_id": ark_session_id,
+            })), timeout=0.5)
         except Exception:
             pass
 
     # ── Internals ───────────────────────────────────────────────────
 
     async def _connect(self) -> None:
-        url = f"{self.base_ws}/agents/{self.agent}/sessions/{self.session_id}"
+        # Run catch-up BEFORE starting the consumer so the gap between
+        # last-stored cursor and "now" is filled before we start handling
+        # new events. Live events arriving during catch-up are queued by
+        # the WS library and processed by the consumer once it starts.
+        url = f"{self.base_ws}/events"
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else None
         self._ws = await websockets.connect(url, additional_headers=headers, max_size=None)
-        self._consumer = asyncio.create_task(self._consume(), name=f"ark-consumer-{self.session_id}")
-        logger.info("Ark WS connected: agent=%s session=%s", self.agent, self.session_id)
+        logger.info("Ark client WS connected: server=%s", self.server_id)
+
+        if self._catch_up_callback:
+            try:
+                await self._run_catch_up()
+            except Exception:
+                logger.exception("Ark catch-up failed (continuing with live stream)")
+
+        self._consumer = asyncio.create_task(
+            self._consume(), name=f"ark-consumer-{self.server_id}",
+        )
+
+    async def _run_catch_up(self) -> None:
+        """Pull persisted events since the stored cursor and hand each to the
+        catch-up callback. Advances the cursor as we go."""
+        from app.services.llm.ark_cursor import get_cursor, set_cursor
+
+        cursor = await get_cursor(self.server_id)
+        client = httpx.AsyncClient(timeout=30, headers=self._http_headers())
+        try:
+            # Pages, in case there's a lot. Cap at a few iterations to bound
+            # startup time for first-ever connect (where cursor is None).
+            for _ in range(20):
+                params: dict[str, Any] = {"limit": 500}
+                if cursor is not None:
+                    params["since_id"] = cursor
+                resp = await client.get(self.base_http + "/events", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                events = data.get("events", [])
+                if not events:
+                    new_cursor = data.get("next_since_id")
+                    if isinstance(new_cursor, int) and new_cursor != cursor:
+                        cursor = new_cursor
+                    break
+                for ev in events:
+                    try:
+                        if self._catch_up_callback:
+                            await self._catch_up_callback(ev)
+                    except Exception:
+                        logger.exception("Ark catch-up event handler failed")
+                new_cursor = data.get("next_since_id") or events[-1].get("id")
+                if isinstance(new_cursor, int):
+                    cursor = new_cursor
+                if not data.get("has_more"):
+                    break
+        finally:
+            await client.aclose()
+
+        if isinstance(cursor, int):
+            await set_cursor(self.server_id, cursor)
+        logger.info("Ark catch-up complete: server=%s cursor=%s", self.server_id, cursor)
+
+    def _http_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
 
     async def _consume(self) -> None:
-        """Read frames forever, dispatch to turn queue or async callback.
-        Reconnects on drop with exponential backoff until `close()` is called."""
+        """Read frames forever, dispatch by `session_id` to per-session turn
+        queue or to the async callback. Reconnects on drop with backoff."""
         backoff = 1.0
         while not self._closed:
             assert self._ws is not None
@@ -201,17 +259,7 @@ class ArkSessionConnection:
                         event = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
-                    etype = event.get("type")
-                    if etype in TURN_EVENT_TYPES and self._turn_queue is not None:
-                        await self._turn_queue.put(event)
-                    elif etype in ASYNC_EVENT_TYPES:
-                        if self._async_callback:
-                            try:
-                                await self._async_callback(event)
-                            except Exception:
-                                logger.exception("Ark async callback failed for event %s", etype)
-                    # else: ignore unknown / orphaned events
-                # Stream ended cleanly.
+                    await self._dispatch_event(event)
                 if self._closed:
                     return
                 logger.warning("Ark WS closed by server, reconnecting…")
@@ -221,13 +269,10 @@ class ArkSessionConnection:
                 logger.warning("Ark WS connection closed, reconnecting…")
             except Exception:
                 logger.exception("Ark WS consumer error, reconnecting…")
-            # Drop any in-flight turn — caller will surface the failure.
-            if self._turn_queue is not None:
-                await self._turn_queue.put({
-                    "type": "error", "message": "Ark WS dropped mid-turn",
-                })
+            # Drop any in-flight turns — callers will surface the failure.
+            for q in list(self._turn_queues.values()):
+                await q.put({"type": "error", "message": "Ark WS dropped mid-turn"})
             self._ws = None
-            # Backoff before reconnect.
             await asyncio.sleep(min(backoff, 30.0))
             try:
                 await self._connect()
@@ -236,48 +281,57 @@ class ArkSessionConnection:
                 logger.exception("Ark WS reconnect failed; backing off")
                 backoff = min(backoff * 2.0, 30.0)
 
+    async def _dispatch_event(self, event: dict) -> None:
+        etype = event.get("type")
+        sid = event.get("session_id")
+        if etype in TURN_EVENT_TYPES and sid and sid in self._turn_queues:
+            await self._turn_queues[sid].put(event)
+            return
+        if etype in ASYNC_EVENT_TYPES or etype in TURN_EVENT_TYPES:
+            # Includes turn events that weren't claimed by an in-flight
+            # iter_turn_events (e.g. heartbeat/cron sessions running on the
+            # ark side that this Relay process didn't initiate). The async
+            # callback persists what it can.
+            if self._async_callback:
+                try:
+                    await self._async_callback(event)
+                except Exception:
+                    logger.exception("Ark async callback failed (type=%s sid=%s)", etype, sid)
 
-# Global registry of live connections, keyed by Relay session_id.
-_connections: dict[str, ArkSessionConnection] = {}
+
+# ── Global registry: one connection per (base_url, api_key) ─────────
+
+
+_connections: dict[str, ArkClientConnection] = {}
 _registry_lock = asyncio.Lock()
 
 
+def _conn_key(base_url: str, api_key: str | None) -> str:
+    return _server_id_for(base_url, api_key)
+
+
 async def get_or_create_connection(
-    *,
-    base_http: str,
-    base_ws: str,
-    agent: str,
-    relay_session_id: str,
-    ark_session_id: str,
-    api_key: str | None,
-) -> ArkSessionConnection:
-    """Look up the live ark connection for a Relay session, or open one.
-
-    Connections are keyed by Relay session id (not ark session id) so we can
-    find them again when async events need to fan out to a Relay client.
-    """
+    *, base_http: str, base_ws: str, api_key: str | None,
+    async_cb: AsyncEventCallback | None = None,
+    catch_up_cb: CatchUpCallback | None = None,
+) -> ArkClientConnection:
+    """Look up the live ark connection for an (base_url, api_key) pair, or
+    open one. Callbacks are (re)installed every call — last-writer wins,
+    which is fine because they all run the same dispatcher behind the scenes."""
+    key = _conn_key(base_http, api_key)
     async with _registry_lock:
-        conn = _connections.get(relay_session_id)
-        if conn is not None and not conn._closed:
-            return conn
-        conn = ArkSessionConnection(
-            base_http=base_http,
-            base_ws=base_ws,
-            agent=agent,
-            session_id=ark_session_id,
-            api_key=api_key,
-        )
-        _connections[relay_session_id] = conn
-        await conn.ensure_connected()
-        return conn
-
-
-async def close_connection(relay_session_id: str) -> None:
-    """Tear down the ark connection for a Relay session, if any."""
-    async with _registry_lock:
-        conn = _connections.pop(relay_session_id, None)
-    if conn is not None:
-        await conn.close()
+        conn = _connections.get(key)
+        if conn is None or conn._closed:
+            conn = ArkClientConnection(
+                base_http=base_http, base_ws=base_ws, api_key=api_key,
+            )
+            _connections[key] = conn
+    if async_cb is not None:
+        conn.set_async_callback(async_cb)
+    if catch_up_cb is not None:
+        conn.set_catch_up_callback(catch_up_cb)
+    await conn.ensure_connected()
+    return conn
 
 
 async def close_all_connections() -> None:
@@ -292,9 +346,8 @@ async def close_all_connections() -> None:
             pass
 
 
-def get_connection(relay_session_id: str) -> ArkSessionConnection | None:
-    """Synchronous lookup for callers that need to register an async callback."""
-    return _connections.get(relay_session_id)
+def get_connection_by_key(key: str) -> ArkClientConnection | None:
+    return _connections.get(key)
 
 
 # ── LLMProvider ────────────────────────────────────────────────────
@@ -345,7 +398,7 @@ class ArkProvider(LLMProvider):
 
     async def generate_stream_with_chain(
         self,
-        system_prompt,  # ark composes its own system prompt; use session_context to layer
+        system_prompt,  # ark composes its own system prompt; persona flows via session_context
         messages,
         model,
         relay_session_id: str | None = None,
@@ -359,82 +412,56 @@ class ArkProvider(LLMProvider):
             agent, previous_session_id is not None, len(user_text),
         )
 
-        # On session creation we pass `context` so ark layers Relay's persona
-        # on top of the server-side session_context.md. We only seed on
-        # creation — ark's mid-session context endpoint always appends, so
-        # re-sending on every turn would accumulate duplicates.
         ark_session_id = previous_session_id or await self._ensure_session(
             agent, context=session_context,
         )
 
-        # Resolve the long-lived connection. If we don't have a Relay session
-        # context (e.g. called from outside a session), open a one-shot
-        # connection scoped to this call.
-        if relay_session_id:
+        # The agent_manager has the user_id context to install the proper
+        # async/catch-up callbacks. We just look up the connection here.
+        conn = get_connection_by_key(_conn_key(self._base_http, self._api_key))
+        if conn is None:
+            # The connection should have been opened by the agent_manager
+            # before invoking us — but if not, create a bare one. Async
+            # events will be dropped until a callback is installed.
             conn = await get_or_create_connection(
                 base_http=self._base_http,
                 base_ws=self._base_ws,
-                agent=agent,
-                relay_session_id=relay_session_id,
-                ark_session_id=ark_session_id,
                 api_key=self._api_key,
             )
-            owned = False
-        else:
-            conn = ArkSessionConnection(
-                base_http=self._base_http,
-                base_ws=self._base_ws,
-                agent=agent,
-                session_id=ark_session_id,
-                api_key=self._api_key,
-            )
-            await conn.ensure_connected()
-            owned = True
 
+        # Multi-segment assistant text: ark emits multiple delta streams
+        # separated by `assistant_message` boundary events around tool calls.
+        # Insert a paragraph break before the first delta of each new segment.
+        await conn.send_user_message(ark_session_id, user_text)
+        saw_segment_end = False
         try:
-            await conn.send_user_message(user_text)
-            try:
-                # Ark splits a single user turn into multiple assistant text
-                # segments around tool calls (delta…delta → assistant_message
-                # → tool_call → tool_result → delta…delta → assistant_message
-                # → done). Without a separator they concatenate as "first
-                # sentence.next sentence" with no space. Insert a paragraph
-                # break before the first delta of each new segment.
-                saw_segment_end = False
-                async for event in conn.iter_turn_events():
-                    etype = event.get("type")
-                    if etype == "assistant_delta":
-                        delta = event.get("text") or event.get("delta") or ""
-                        if delta:
-                            if saw_segment_end:
-                                yield "\n\n"
-                                saw_segment_end = False
-                            yield delta
-                    elif etype == "assistant_message":
-                        # End-of-segment marker. If more deltas follow, they
-                        # belong to a new segment and get a separator.
-                        saw_segment_end = True
-                    elif etype == "error":
-                        logger.warning("Ark error event: %s", event.get("message"))
-                    elif etype == "done":
-                        break
-                    # tool_call / tool_result / thinking are filtered.
-            except asyncio.CancelledError:
-                await conn.send_stop()
-                raise
-        finally:
-            if owned:
-                await conn.close()
+            async for event in conn.iter_turn_events(ark_session_id):
+                etype = event.get("type")
+                if etype == "assistant_delta":
+                    delta = event.get("text") or event.get("delta") or ""
+                    if delta:
+                        if saw_segment_end:
+                            yield "\n\n"
+                            saw_segment_end = False
+                        yield delta
+                elif etype == "assistant_message":
+                    saw_segment_end = True
+                elif etype == "error":
+                    logger.warning("Ark error event: %s", event.get("message"))
+                elif etype == "done":
+                    break
+                # tool_call / tool_result / thinking / turn_usage filtered.
+        except asyncio.CancelledError:
+            await conn.send_stop(ark_session_id)
+            raise
 
         yield ArkResult(text="", session_id=ark_session_id)
 
     # ── Helpers ─────────────────────────────────────────────────────
 
     async def _ensure_session(self, agent: str, context: str | None = None) -> str:
-        """Create a new ark session and return its id. If `context` is given
-        and non-empty, ark stores it as the session's first SessionContext
-        message and uses it to layer the system prompt above the agent's
-        own `session_context.md` (per ark/docs/sessions.md)."""
+        """Create a new ark session and return its id. If `context` is given,
+        ark seeds it as a SessionContext on creation."""
         url = f"{self._base_http}/agents/{agent}/sessions"
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
         body: dict[str, str] = {}

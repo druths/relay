@@ -509,6 +509,17 @@ struct RelayView: View {
                             Label("Rename", systemImage: "pencil")
                         }
 
+                        Button {
+                            // Prefer the ark server-side session id when
+                            // present — that's what `post_to_session` and
+                            // cron entries reference. Fall back to Relay's
+                            // own id for non-ark sessions.
+                            let id = session.providerState["ark"] ?? session.sessionId
+                            UIPasteboard.general.string = id
+                        } label: {
+                            Label("Copy Session ID", systemImage: "doc.on.doc")
+                        }
+
                         Button(role: .destructive) {
                             Task { await relay.deleteSession(session.sessionId) }
                         } label: {
@@ -816,6 +827,14 @@ struct RelayView: View {
                                     Label("Rename", systemImage: "pencil")
                                 }
                                 .tint(.blue)
+                            }
+                            .contextMenu {
+                                Button {
+                                    let id = session.providerState["ark"] ?? session.sessionId
+                                    UIPasteboard.general.string = id
+                                } label: {
+                                    Label("Copy Session ID", systemImage: "doc.on.doc")
+                                }
                             }
                         }
                     }

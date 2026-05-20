@@ -183,6 +183,7 @@ async def generate_response(
     if isinstance(provider, ArkProvider) and session_id:
         from app.db.redis import get_provider_state, set_provider_state
 
+        await ensure_ark_connection(agent)
         prev_sid = await get_provider_state(str(session_id), "ark")
         try:
             result = await provider.generate_with_chain(
@@ -193,7 +194,6 @@ async def generate_response(
             )
             if result.session_id:
                 await set_provider_state(str(session_id), "ark", result.session_id)
-            await _ensure_ark_async_listener(agent, session_id, result.session_id)
             agent_health.set_healthy(agent.agent_id)
             return result.text
         except Exception as exc:
@@ -270,8 +270,8 @@ async def generate_response_stream(
         from app.db.redis import get_provider_state, set_provider_state
         from app.services.llm.ark import ArkResult
 
+        await ensure_ark_connection(agent)
         prev_sid = await get_provider_state(str(session_id), "ark")
-        final_ark_sid: str | None = None
         try:
             async for chunk in provider.generate_stream_with_chain(
                 system_prompt, messages, agent.llm_model,
@@ -282,12 +282,9 @@ async def generate_response_stream(
                 if isinstance(chunk, ArkResult):
                     if chunk.session_id:
                         await set_provider_state(str(session_id), "ark", chunk.session_id)
-                        final_ark_sid = chunk.session_id
                 else:
                     yield chunk
             agent_health.set_healthy(agent.agent_id)
-            if final_ark_sid:
-                await _ensure_ark_async_listener(agent, session_id, final_ark_sid)
         except Exception as exc:
             logger.exception("LLM stream failed for agent %s: %s", agent.name, exc)
             agent_health.set_error(agent.agent_id, str(exc)[:120])
@@ -306,83 +303,298 @@ async def generate_response_stream(
 
 # ── Ark async-event fan-out ─────────────────────────────────────────
 
-async def _ensure_ark_async_listener(
-    agent: Agent, relay_session_id: uuid.UUID, ark_session_id: str,
-) -> None:
-    """Make sure the ArkSessionConnection for this Relay session has a
-    callback wired that fans out file_available / injected_message events to
-    the user's Relay WS clients."""
-    from app.services.llm.ark import get_connection
 
-    conn = get_connection(str(relay_session_id))
-    if conn is None:
+async def ensure_ark_connection(agent: Agent) -> None:
+    """Idempotently open (or reuse) the per-server ark connection for an
+    agent, install the dispatch callbacks, and let it run its catch-up.
+
+    Called at the start of every ark turn and from session resume so the
+    backend keeps one warm connection per (base_url, api_key) pair, with
+    callbacks routing events to whichever Relay session/user they belong to.
+    """
+    from app.services.llm.ark import get_or_create_connection
+
+    base_url, api_key = await resolve_llm_config(agent)
+    if not base_url:
         return
-    # Idempotent — the connection holds a single slot; we just overwrite.
-    user_id = await _resolve_session_user_id(relay_session_id)
-    if not user_id:
-        return
-
-    sid_str = str(relay_session_id)
-    agent_name = agent.name
-
-    async def _fanout(event: dict) -> None:
-        await _broadcast_ark_async_event(user_id, sid_str, agent_name, event)
-
-    conn.set_async_callback(_fanout)
+    http = base_url.rstrip("/")
+    ws = http.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
+    await get_or_create_connection(
+        base_http=http, base_ws=ws, api_key=api_key,
+        async_cb=_ark_dispatch,
+        catch_up_cb=_ark_catch_up_dispatch,
+    )
 
 
-async def _resolve_session_user_id(relay_session_id: uuid.UUID) -> str | None:
-    """Look up the user_id that owns a Relay session."""
+async def _resolve_relay_session_for_ark(
+    ark_session_id: str,
+) -> tuple[str | None, str | None]:
+    """Given an ark session_id, find (relay_session_id, user_id) for the
+    matching Relay session. Returns (None, None) if no Relay session is
+    pinned to this ark session — common for heartbeat/cron sessions that
+    were created server-side without Relay's involvement."""
     from app.db.database import async_session
     from app.models.session import Session
     async with async_session() as db:
         result = await db.execute(
-            select(Session.user_id).where(Session.session_id == relay_session_id)
+            select(Session.session_id, Session.user_id)
+                .where(Session.deleted_at.is_(None))
+                .where(Session.provider_state["ark"].astext == ark_session_id)
         )
-        return result.scalar_one_or_none()
+        row = result.first()
+        if row is None:
+            return None, None
+        return str(row[0]), row[1]
 
 
-async def _broadcast_ark_async_event(
-    user_id: str, session_id_str: str, agent_name: str, event: dict,
+async def _ark_dispatch(event: dict) -> None:
+    """Dispatcher for live WS events from any ark session this connection
+    sees. Resolves the matching Relay session by `session_id`, persists what
+    needs persisting, broadcasts to the right user."""
+    sid = event.get("session_id")
+    if not sid:
+        return
+    relay_sid, user_id = await _resolve_relay_session_for_ark(sid)
+    if not relay_sid or not user_id:
+        return  # this ark session isn't mirrored on Relay
+    agent_name = event.get("agent_name") or "agent"
+    await _handle_ark_event(
+        event=event,
+        relay_session_id=relay_sid,
+        user_id=user_id,
+        agent_name=agent_name,
+        is_catch_up=False,
+    )
+
+
+async def _ark_catch_up_dispatch(event: dict) -> None:
+    """Dispatcher for catch-up events from `GET /events?since_id=...`.
+
+    Shape is different from the live WS frames — catch-up gives
+    `{id, session_id, agent_name, created_at, kind, data}` rather than the
+    flat WS payload. We translate to the same shape `_handle_ark_event`
+    expects."""
+    sid = event.get("session_id")
+    if not sid:
+        return
+    relay_sid, user_id = await _resolve_relay_session_for_ark(sid)
+    if not relay_sid or not user_id:
+        return
+    agent_name = event.get("agent_name") or "agent"
+    kind = event.get("kind")
+    data = event.get("data") or {}
+    # Map kind → live-shape event for unified handling. Only kinds with a
+    # user-visible side effect on Relay are handled; the rest (ToolCall,
+    # ToolResult, SessionContext, UserText) are ignored on catch-up.
+    if kind == "AssistantText":
+        text = data.get("text") or ""
+        if text:
+            await _handle_ark_event(
+                event={"type": "assistant_message", "text": text},
+                relay_session_id=relay_sid, user_id=user_id, agent_name=agent_name,
+                is_catch_up=True,
+            )
+    elif kind == "InjectedMessage":
+        text = data.get("text") or ""
+        if text:
+            await _handle_ark_event(
+                event={"type": "injected_message", "text": text},
+                relay_session_id=relay_sid, user_id=user_id, agent_name=agent_name,
+                is_catch_up=True,
+            )
+    elif kind == "SharedFile":
+        path = data.get("path")
+        if path:
+            await _handle_ark_event(
+                event={
+                    "type": "file_available",
+                    "path": path,
+                    "description": data.get("description"),
+                    "size": data.get("size") or 0,
+                },
+                relay_session_id=relay_sid, user_id=user_id, agent_name=agent_name,
+                is_catch_up=True,
+            )
+
+
+async def _handle_ark_event(
+    *,
+    event: dict,
+    relay_session_id: str,
+    user_id: str,
+    agent_name: str,
+    is_catch_up: bool,
 ) -> None:
-    """Translate an ark async event into a Relay WS event and broadcast to all
-    of the user's connected clients. Also persists agent-pushed files so they
-    survive session reload."""
+    """Persist + broadcast a single ark event, marking the Relay session
+    `has_unread` if the user isn't currently viewing it."""
     from app.api.websocket import _broadcast_to_user
 
     etype = event.get("type")
+
     if etype == "file_available":
         path = event.get("path")
         size = event.get("size") or 0
         if not path:
             return
-        # Persist as a File row so resume-after-disconnect shows the pill.
-        file_id = await _persist_agent_shared_file(
-            user_id=user_id,
-            session_id_str=session_id_str,
-            agent_name=agent_name,
-            path=path,
-            size=size,
-        )
-        await _broadcast_to_user(user_id, {
-            "type": "agent_file",
-            "payload": {
-                "session_id": session_id_str,
-                "agent_name": agent_name,
-                "path": path,
-                "description": event.get("description"),
-                "size": size,
-                "file_id": file_id,
-            },
-        })
-    elif etype == "injected_message":
+        existing = await _file_already_persisted(relay_session_id, path)
+        if existing is None:
+            file_id = await _persist_agent_shared_file(
+                user_id=user_id, session_id_str=relay_session_id,
+                agent_name=agent_name, path=path, size=size,
+            )
+        else:
+            file_id = existing
+        if not is_catch_up:
+            await _broadcast_to_user(user_id, {
+                "type": "agent_file",
+                "payload": {
+                    "session_id": relay_session_id,
+                    "agent_name": agent_name,
+                    "path": path,
+                    "description": event.get("description"),
+                    "size": size,
+                    "file_id": file_id,
+                },
+            })
+        await _maybe_mark_unread(user_id, relay_session_id)
+        return
+
+    if etype == "injected_message":
         text = event.get("text") or event.get("message") or ""
         if not text:
             return
-        await _broadcast_to_user(user_id, {
-            "type": "text",
-            "payload": {"speaker": agent_name, "text": text},
-        })
+        if not await _message_already_persisted(relay_session_id, text, role="agent"):
+            await _persist_injected_message(session_id_str=relay_session_id, text=text)
+        if not is_catch_up:
+            await _broadcast_to_user(user_id, {
+                "type": "text",
+                "payload": {"speaker": agent_name, "text": text},
+            })
+        await _maybe_mark_unread(user_id, relay_session_id)
+        return
+
+    if etype == "assistant_message" and is_catch_up:
+        # Catch-up replay of an agent text turn we didn't see live (most
+        # likely a heartbeat or cron turn). Persist as an agent message so
+        # the user sees it next time they open the session.
+        text = event.get("text") or ""
+        if not text:
+            return
+        if not await _message_already_persisted(relay_session_id, text, role="agent"):
+            await _persist_injected_message(session_id_str=relay_session_id, text=text)
+            await _maybe_mark_unread(user_id, relay_session_id)
+        return
+
+
+async def _file_already_persisted(session_id_str: str, path: str) -> str | None:
+    """Return the file_id of an existing File row for this session+path, or
+    None. Used to dedupe between WS-driven and catch-up-driven inserts."""
+    from app.db.database import async_session
+    from app.models.file import File as FileModel
+    import uuid as _uuid
+    storage_path_substr = f":{path}"  # ark storage paths are ark:<agent>:<path>
+    async with async_session() as db:
+        result = await db.execute(
+            select(FileModel.file_id).where(
+                FileModel.session_id == _uuid.UUID(session_id_str),
+                FileModel.storage_path.like(f"ark:%{storage_path_substr}"),
+            ).limit(1)
+        )
+        row = result.scalar_one_or_none()
+        return str(row) if row else None
+
+
+async def _message_already_persisted(
+    session_id_str: str, text: str, *, role: str,
+) -> bool:
+    """Cheap dedupe: do we already have an exact-text agent message for this
+    session? Used so catch-up and live both push without duplicating."""
+    from app.db.database import async_session
+    from app.models.message import Message as MessageModel
+    import uuid as _uuid
+    async with async_session() as db:
+        result = await db.execute(
+            select(MessageModel.message_id).where(
+                MessageModel.session_id == _uuid.UUID(session_id_str),
+                MessageModel.role == role,
+                MessageModel.text_content == text,
+            ).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+
+async def _maybe_mark_unread(user_id: str, relay_session_id: str) -> None:
+    """If the Relay session isn't currently active for this user, set
+    `has_unread=true` and broadcast so the sidebar shows the indicator."""
+    from app.db.database import async_session
+    from app.db.redis import invalidate_session_cache
+    from app.models.session import Session
+    from app.api.websocket import _broadcast_to_user
+    import uuid as _uuid
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Session).where(Session.session_id == _uuid.UUID(relay_session_id))
+        )
+        sess = result.scalar_one_or_none()
+        if sess is None:
+            return
+        # If user is mid-session, don't badge it.
+        if sess.status == "active":
+            return
+        if sess.has_unread:
+            return
+        sess.has_unread = True
+        await db.commit()
+        await invalidate_session_cache(relay_session_id)
+    await _broadcast_to_user(user_id, {
+        "type": "session_unread",
+        "payload": {"session_id": relay_session_id, "has_unread": True},
+    })
+
+
+async def _persist_injected_message(*, session_id_str: str, text: str) -> None:
+    """Write a cross-session-injected ark message as an `agent`-role row in
+    Relay's messages table. Invalidates the session history cache."""
+    from app.db.database import async_session
+    from app.db.redis import invalidate_session_cache
+    from app.models.message import Message as MessageModel
+    import uuid as _uuid
+
+    try:
+        async with async_session() as db:
+            db_msg = MessageModel(
+                session_id=_uuid.UUID(session_id_str),
+                role="agent",
+                text_content=text,
+            )
+            db.add(db_msg)
+            await db.commit()
+            await invalidate_session_cache(session_id_str)
+    except Exception:
+        logger.exception("Failed to persist injected_message")
+
+
+async def _persist_injected_message(*, session_id_str: str, text: str) -> None:
+    """Write a cross-session-injected ark message as an `agent`-role row in
+    Relay's messages table. Invalidates the session history cache."""
+    from app.db.database import async_session
+    from app.db.redis import invalidate_session_cache
+    from app.models.message import Message as MessageModel
+    import uuid as _uuid
+
+    try:
+        async with async_session() as db:
+            db_msg = MessageModel(
+                session_id=_uuid.UUID(session_id_str),
+                role="agent",
+                text_content=text,
+            )
+            db.add(db_msg)
+            await db.commit()
+            await invalidate_session_cache(session_id_str)
+    except Exception:
+        logger.exception("Failed to persist injected_message")
 
 
 async def _persist_agent_shared_file(

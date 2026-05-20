@@ -39,6 +39,9 @@ export interface Session {
   summary: string | null;
   labels: string[];
   has_unread: boolean;
+  /** External-system session ids, keyed by provider. e.g. `ark` → the ark
+   * server-side session id used by `post_to_session` and cron entries. */
+  provider_state?: Record<string, string>;
 }
 
 export interface FileAttachment {

@@ -130,11 +130,47 @@ async def lifespan(app: FastAPI):
     await _seed_platform_settings()
     # Expose session factory on app state for the WebSocket handler
     app.state.db_session = async_session
+    # Warm ark connections for any agents users have configured. This runs
+    # catch-up so anything that happened on ark while we were down (cron
+    # firings, injected messages, file shares) is picked up before users
+    # reconnect — populating has_unread and message history as needed.
+    import asyncio as _asyncio
+    _asyncio.create_task(_warm_ark_connections())
     yield
     # Tear down any live ark WebSocket connections before closing the engine.
     from app.services.llm.ark import close_all_connections
     await close_all_connections()
     await engine.dispose()
+
+
+async def _warm_ark_connections() -> None:
+    """At boot, open the per-server ark connection for every distinct ark
+    agent on the system (deduped by base_url+api_key). Lets catch-up run so
+    Relay reconciles any messages that arrived while the backend was down."""
+    import logging
+    warm_logger = logging.getLogger("ark.warmup")
+    try:
+        from app.services.agent_manager import ensure_ark_connection
+        async with async_session() as db:
+            res = await db.execute(
+                select(Agent).where(
+                    Agent.deleted_at.is_(None),
+                    Agent.llm_provider == "ark",
+                )
+            )
+            agents = list(res.scalars().all())
+        seen: set[str] = set()
+        for agent in agents:
+            key = f"{agent.llm_base_url or ''}|{agent.llm_api_key or ''}"
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                await ensure_ark_connection(agent)
+            except Exception:
+                warm_logger.exception("warm-up failed for agent %s", agent.name)
+    except Exception:
+        warm_logger.exception("ark warm-up sweep failed")
 
 
 # ── App setup ───────────────────────────────────────────────────────────
