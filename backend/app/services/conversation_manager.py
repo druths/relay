@@ -258,6 +258,9 @@ async def get_session_messages(
             "role": m.role,
             "text_content": m.text_content,
             "created_at": m.created_at.isoformat(),
+            # `metadata_` maps to the JSONB column on Message — emit it as
+            # `metadata` for clients (e.g. Diagnostics view tokens).
+            "metadata": m.metadata_ or {},
             "_ts": m.created_at,
         }
         for m in result.scalars().all()
@@ -306,9 +309,13 @@ async def get_session_messages(
 
 
 async def _persist_message(
-    db: AsyncSession, session_id: uuid.UUID, role: str, text: str
+    db: AsyncSession, session_id: uuid.UUID, role: str, text: str,
+    metadata: dict | None = None,
 ) -> Message:
-    msg = Message(session_id=session_id, role=role, text_content=text)
+    msg = Message(
+        session_id=session_id, role=role, text_content=text,
+        metadata_=metadata or {},
+    )
     db.add(msg)
     session = await get_session(db, session_id)
     if session:
@@ -693,15 +700,22 @@ async def handle_session_message_stream(
     yield {"type": "text_start", "payload": {"speaker": agent.name}}
 
     full_response = ""
+    response_meta: dict = {}
     async for chunk in agent_manager.generate_response_stream(agent, text, context, voice_instructions, session_id=session_id):
+        if isinstance(chunk, agent_manager.ResponseMeta):
+            response_meta = chunk.metadata
+            continue
         full_response += chunk
         yield {"type": "text_delta", "payload": {"speaker": agent.name, "delta": chunk}}
 
-    yield {"type": "text_done", "payload": {"speaker": agent.name, "text": full_response}}
+    text_done_payload: dict = {"speaker": agent.name, "text": full_response}
+    if response_meta:
+        text_done_payload["metadata"] = response_meta
+    yield {"type": "text_done", "payload": text_done_payload}
     yield _session_state_event(session, agent.name, "ready")
 
     # Persist complete response
-    await _persist_message(db, session_id, "agent", full_response)
+    await _persist_message(db, session_id, "agent", full_response, metadata=response_meta or None)
     await invalidate_session_cache(str(session_id))
 
     # Auto-name the session after 4 turns (2 user + 2 agent)

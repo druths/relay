@@ -11,6 +11,24 @@ struct FileAttachment: Identifiable, Equatable, Codable {
     var url: String
 }
 
+struct TokenUsage: Equatable, Codable {
+    var inputTokens: Int?
+    var outputTokens: Int?
+    var contextWindow: Int?
+    var model: String?
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case contextWindow = "context_window"
+        case model
+    }
+}
+
+struct MessageMetadata: Equatable, Codable {
+    var usage: TokenUsage?
+}
+
 struct Message: Identifiable, Equatable {
     let id: UUID
     var role: MessageRole
@@ -19,6 +37,7 @@ struct Message: Identifiable, Equatable {
     var isStreaming: Bool
     var isInterrupted: Bool
     var attachments: [FileAttachment]
+    var metadata: MessageMetadata?
 
     enum MessageRole: String {
         case user
@@ -33,7 +52,8 @@ struct Message: Identifiable, Equatable {
         createdAt: Date? = nil,
         isStreaming: Bool = false,
         isInterrupted: Bool = false,
-        attachments: [FileAttachment] = []
+        attachments: [FileAttachment] = [],
+        metadata: MessageMetadata? = nil
     ) {
         self.id = UUID()
         self.role = role
@@ -42,6 +62,7 @@ struct Message: Identifiable, Equatable {
         self.isStreaming = isStreaming
         self.isInterrupted = isInterrupted
         self.attachments = attachments
+        self.metadata = metadata
     }
 }
 
@@ -70,6 +91,7 @@ struct ServerMessage: Codable {
     let textContent: String
     let createdAt: String?
     let attachments: [ServerAttachment]?
+    let metadata: MessageMetadata?
 
     enum CodingKeys: String, CodingKey {
         case messageId = "message_id"
@@ -77,7 +99,22 @@ struct ServerMessage: Codable {
         case textContent = "text_content"
         case createdAt = "created_at"
         case attachments
+        case metadata
     }
+
+    // Date formatters are thread-safe for reading on iOS 7+; the
+    // `nonisolated(unsafe)` opt-out is the standard escape from Swift 6's
+    // strict-concurrency static-property check.
+    nonisolated(unsafe) private static let _iso: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) private static let _isoNoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
 
     func toMessage() -> Message {
         let messageRole: Message.MessageRole
@@ -95,6 +132,16 @@ struct ServerMessage: Codable {
                 url: $0.url,
             )
         }
-        return Message(role: messageRole, textContent: textContent, attachments: mapped)
+        let parsedDate: Date? = {
+            guard let s = createdAt else { return nil }
+            return Self._iso.date(from: s) ?? Self._isoNoFrac.date(from: s)
+        }()
+        return Message(
+            role: messageRole,
+            textContent: textContent,
+            createdAt: parsedDate,
+            attachments: mapped,
+            metadata: metadata,
+        )
     }
 }

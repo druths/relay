@@ -38,6 +38,7 @@ interface ConversationLogProps {
   sessionMessages: Message[];
   activeSessionId: string | null;
   activeAgentName: string | null;
+  diagnostics?: boolean;
 }
 
 const ROLE_STYLES: Record<string, string> = {
@@ -46,12 +47,31 @@ const ROLE_STYLES: Record<string, string> = {
   agent: "bg-emerald-900/40 mr-12 msg-agent",
 };
 
+function _formatTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  // 24h time with seconds, locale-aware date when the message isn't today.
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return sameDay ? time : `${d.toLocaleDateString()} ${time}`;
+}
+
+function _formatPercent(used: number, total: number): string {
+  const pct = total > 0 ? (used / total) * 100 : 0;
+  return pct >= 10 ? `${pct.toFixed(0)}%` : `${pct.toFixed(1)}%`;
+}
+
 
 export function ConversationLog({
   lobbyMessages,
   sessionMessages,
   activeSessionId,
   activeAgentName,
+  diagnostics = false,
 }: ConversationLogProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const messages = activeSessionId ? sessionMessages : lobbyMessages;
@@ -72,9 +92,17 @@ export function ConversationLog({
 
   return (
     <div className="flex-1 overflow-y-auto space-y-3 p-4">
-      {messages.map((msg, i) => (
+      {messages.map((msg, i) => {
+        const usage = msg.metadata?.usage;
+        const totalTokens =
+          (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
+        const showUsage =
+          diagnostics && msg.role === "agent" && usage && totalTokens > 0;
+        const showTime = diagnostics && !!msg.created_at;
+        const isRight = msg.role === "user";
+        return (
+        <div key={i}>
         <div
-          key={i}
           className={`rounded-lg px-4 py-3 text-sm ${
             ROLE_STYLES[msg.role] || ROLE_STYLES.agent
           }`}
@@ -124,7 +152,31 @@ export function ConversationLog({
             )}
           </div>
         </div>
-      ))}
+        {(showTime || showUsage) && (
+          <div
+            className={`mt-1 text-[10px] font-mono text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5 ${
+              isRight ? "justify-end ml-12" : "mr-12"
+            }`}
+          >
+            {showTime && <span>{_formatTime(msg.created_at!)}</span>}
+            {showUsage && (
+              <span>
+                {usage!.input_tokens ?? 0} in / {usage!.output_tokens ?? 0} out
+                {usage!.context_window ? (
+                  <>
+                    {" · "}
+                    {totalTokens.toLocaleString()} / {usage!.context_window.toLocaleString()} (
+                    {_formatPercent(totalTokens, usage!.context_window)})
+                  </>
+                ) : null}
+                {usage!.model ? <> · {usage!.model}</> : null}
+              </span>
+            )}
+          </div>
+        )}
+        </div>
+        );
+      })}
       <div ref={endRef} />
     </div>
   );

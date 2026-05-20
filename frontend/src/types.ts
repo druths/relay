@@ -52,6 +52,15 @@ export interface FileAttachment {
   url: string;
 }
 
+export interface MessageMetadata {
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    context_window?: number;
+    model?: string;
+  };
+}
+
 export interface Message {
   message_id?: string;
   role: string;
@@ -60,6 +69,10 @@ export interface Message {
   streaming?: boolean;
   interrupted?: boolean;
   attachments?: FileAttachment[];
+  /** Per-message diagnostics (e.g. ark token usage). Empty/absent on
+   * messages that pre-date the diagnostics work or come from providers
+   * that don't report usage. */
+  metadata?: MessageMetadata;
 }
 
 // WebSocket event types
@@ -78,6 +91,10 @@ export interface WsTextEvent {
   payload: {
     speaker: string;
     text: string;
+    /** Set when the event targets a specific session (e.g. ark
+     * injected_message). If absent, the event applies to the user's current
+     * conversation context. */
+    session_id?: string;
   };
 }
 
@@ -141,6 +158,7 @@ export interface WsTextDone {
   payload: {
     speaker: string;
     text: string;
+    metadata?: MessageMetadata;
   };
 }
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +16,15 @@ from app.services import agent_health
 from app.services.llm import get_provider
 from app.services.llm.ark import ArkProvider
 from app.services.llm.openclaw import OpenClawProvider
+
+
+@dataclass
+class ResponseMeta:
+    """Sentinel yielded as the final item from `generate_response_stream` to
+    hand back per-turn metadata (token usage, model, etc.) so the caller can
+    persist it on the assistant message and surface it to clients with
+    Diagnostics enabled."""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +226,7 @@ async def generate_response_stream(
     agent: Agent, text: str, context: list[dict],
     voice_instructions: str | None = None,
     session_id: uuid.UUID | None = None,
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[str | ResponseMeta, None]:
     """Stream a text response from an agent using its configured LLM provider."""
     base_url, api_key = await resolve_llm_config(agent)
     provider = get_provider(agent.llm_provider, base_url, api_key)
@@ -272,6 +283,7 @@ async def generate_response_stream(
 
         await ensure_ark_connection(agent)
         prev_sid = await get_provider_state(str(session_id), "ark")
+        final_meta: dict[str, Any] = {}
         try:
             async for chunk in provider.generate_stream_with_chain(
                 system_prompt, messages, agent.llm_model,
@@ -282,6 +294,20 @@ async def generate_response_stream(
                 if isinstance(chunk, ArkResult):
                     if chunk.session_id:
                         await set_provider_state(str(session_id), "ark", chunk.session_id)
+                    # Build the usage payload only if ark reported any token
+                    # numbers. Keeps the metadata dict empty for turns where
+                    # ark didn't surface usage (older harness, fallback paths).
+                    if chunk.input_tokens is not None or chunk.output_tokens is not None:
+                        usage: dict[str, Any] = {}
+                        if chunk.input_tokens is not None:
+                            usage["input_tokens"] = chunk.input_tokens
+                        if chunk.output_tokens is not None:
+                            usage["output_tokens"] = chunk.output_tokens
+                        if chunk.context_window is not None:
+                            usage["context_window"] = chunk.context_window
+                        if chunk.model:
+                            usage["model"] = chunk.model
+                        final_meta["usage"] = usage
                 else:
                     yield chunk
             agent_health.set_healthy(agent.agent_id)
@@ -289,6 +315,8 @@ async def generate_response_stream(
             logger.exception("LLM stream failed for agent %s: %s", agent.name, exc)
             agent_health.set_error(agent.agent_id, str(exc)[:120])
             yield f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
+        if final_meta:
+            yield ResponseMeta(metadata=final_meta)
         return
 
     try:
@@ -466,9 +494,17 @@ async def _handle_ark_event(
         if not await _message_already_persisted(relay_session_id, text, role="agent"):
             await _persist_injected_message(session_id_str=relay_session_id, text=text)
         if not is_catch_up:
+            # Tag the broadcast with the target session_id so clients only
+            # render it in the right pane. Without this, every connected
+            # client appends the text to whichever session it's currently
+            # viewing — looking like the message went "to the wrong place."
             await _broadcast_to_user(user_id, {
                 "type": "text",
-                "payload": {"speaker": agent_name, "text": text},
+                "payload": {
+                    "speaker": agent_name,
+                    "text": text,
+                    "session_id": relay_session_id,
+                },
             })
         await _maybe_mark_unread(user_id, relay_session_id)
         return
@@ -505,19 +541,26 @@ async def _file_already_persisted(session_id_str: str, path: str) -> str | None:
 
 
 async def _message_already_persisted(
-    session_id_str: str, text: str, *, role: str,
+    session_id_str: str, text: str, *, role: str, within_seconds: int = 60,
 ) -> bool:
-    """Cheap dedupe: do we already have an exact-text agent message for this
-    session? Used so catch-up and live both push without duplicating."""
+    """Recent-duplicate check: do we already have an exact-text message in
+    this session from the last `within_seconds`? Bounded by time so that
+    legitimate repeats (e.g. a cron firing the same line every minute)
+    flow through while a WS↔catch-up race on reconnect (which happens
+    within seconds) is still deduped."""
     from app.db.database import async_session
     from app.models.message import Message as MessageModel
+    from datetime import datetime, timedelta, timezone
     import uuid as _uuid
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=within_seconds)
     async with async_session() as db:
         result = await db.execute(
             select(MessageModel.message_id).where(
                 MessageModel.session_id == _uuid.UUID(session_id_str),
                 MessageModel.role == role,
                 MessageModel.text_content == text,
+                MessageModel.created_at >= cutoff,
             ).limit(1)
         )
         return result.scalar_one_or_none() is not None

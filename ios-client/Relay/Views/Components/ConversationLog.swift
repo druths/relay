@@ -5,6 +5,7 @@ struct ConversationLog: View {
     let activeSessionId: String?
     let activeAgentName: String?
     let connected: Bool
+    var diagnostics: Bool = false
 
     @Environment(\.relayTheme) private var theme
 
@@ -16,7 +17,7 @@ struct ConversationLog: View {
                         emptyState
                     } else {
                         ForEach(messages) { message in
-                            MessageBubble(message: message)
+                            MessageBubble(message: message, diagnostics: diagnostics)
                                 .id(message.id)
                         }
                     }

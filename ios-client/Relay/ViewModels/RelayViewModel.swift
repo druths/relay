@@ -180,7 +180,7 @@ final class RelayViewModel {
     func sendMessage(_ text: String) async {
         if isLiveMode { ChimeGenerator.play() }
 
-        let message = Message(role: .user, textContent: text)
+        let message = Message(role: .user, textContent: text, createdAt: Date())
         if activeSessionId != nil {
             sessionMessages.append(message)
         } else {
@@ -225,7 +225,7 @@ final class RelayViewModel {
                 sizeBytes: resp.size_bytes,
                 url: resp.url,
             )
-            let msg = Message(role: .user, textContent: "", attachments: [att])
+            let msg = Message(role: .user, textContent: "", createdAt: Date(), attachments: [att])
             if activeSessionId != nil {
                 sessionMessages.append(msg)
             } else {
@@ -548,7 +548,7 @@ final class RelayViewModel {
             // was lost when session_history overwrote sessionMessages.
             if isInSession, payload.status == "processing",
                sessionMessages.last?.isStreaming != true {
-                sessionMessages.append(Message(role: .agent, textContent: "", isStreaming: true))
+                sessionMessages.append(Message(role: .agent, textContent: "", createdAt: Date(), isStreaming: true))
             }
 
         case .text(let payload):
@@ -556,8 +556,16 @@ final class RelayViewModel {
                 if !isLiveMode { suppressNextGreeting = false }
                 break
             }
+            // If the event is targeted at a specific session and that
+            // session isn't the one we're viewing, skip the live append —
+            // the server has already persisted, the unread badge will
+            // signal, and history-on-resume will replay it when the user
+            // navigates over.
+            if let targetSid = payload.sessionId, targetSid != activeSessionId {
+                break
+            }
             let role: Message.MessageRole = payload.speaker == "operator" ? .operator : .agent
-            let msg = Message(role: role, textContent: payload.text)
+            let msg = Message(role: role, textContent: payload.text, createdAt: Date())
             if isInSession {
                 sessionMessages.append(msg)
             } else {
@@ -721,7 +729,7 @@ final class RelayViewModel {
             if let last = sessionMessages.last, last.isStreaming, last.textContent.isEmpty, last.role == role {
                 break
             }
-            sessionMessages.append(Message(role: role, textContent: "", isStreaming: true))
+            sessionMessages.append(Message(role: role, textContent: "", createdAt: Date(), isStreaming: true))
 
         case .textDelta(let payload):
             guard isInSession, !sessionMessages.isEmpty else { break }
@@ -736,6 +744,12 @@ final class RelayViewModel {
             if sessionMessages[lastIdx].isStreaming {
                 sessionMessages[lastIdx].textContent = payload.text
                 sessionMessages[lastIdx].isStreaming = false
+                if let meta = payload.metadata {
+                    sessionMessages[lastIdx].metadata = meta
+                }
+                if sessionMessages[lastIdx].createdAt == nil {
+                    sessionMessages[lastIdx].createdAt = Date()
+                }
             }
 
         case .audioStart(let payload):
@@ -804,7 +818,7 @@ final class RelayViewModel {
                 ChimeGenerator.play()
                 HapticService.impact(.light)
             }
-            let msg = Message(role: .user, textContent: payload.text)
+            let msg = Message(role: .user, textContent: payload.text, createdAt: Date())
             if isInSession {
                 sessionMessages.append(msg)
             } else {

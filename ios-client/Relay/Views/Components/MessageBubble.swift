@@ -3,12 +3,57 @@ import QuickLook
 
 struct MessageBubble: View {
     let message: Message
+    var diagnostics: Bool = false
 
     @Environment(\.relayTheme) private var theme
     @State private var animating = false
 
     private var isUser: Bool { message.role == .user }
     private var isSystem: Bool { message.role == .system }
+
+    private static let _diagTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+    private static let _diagDateTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d HH:mm:ss"
+        return f
+    }()
+
+    private var formattedTimestamp: String? {
+        guard let ts = message.createdAt else { return nil }
+        let cal = Calendar.current
+        if cal.isDateInToday(ts) {
+            return Self._diagTimeFormatter.string(from: ts)
+        }
+        return Self._diagDateTimeFormatter.string(from: ts)
+    }
+
+    private var diagnosticsLine: String? {
+        guard diagnostics else { return nil }
+        var parts: [String] = []
+        if let ts = formattedTimestamp { parts.append(ts) }
+        if message.role == .agent, let u = message.metadata?.usage {
+            let inTok = u.inputTokens ?? 0
+            let outTok = u.outputTokens ?? 0
+            if inTok > 0 || outTok > 0 {
+                var usagePart = "\(inTok) in / \(outTok) out"
+                if let ctx = u.contextWindow, ctx > 0 {
+                    let used = inTok + outTok
+                    let pct = (Double(used) / Double(ctx)) * 100.0
+                    let pctStr = pct >= 10 ? String(format: "%.0f%%", pct) : String(format: "%.1f%%", pct)
+                    usagePart += " · \(used.formatted()) / \(ctx.formatted()) (\(pctStr))"
+                }
+                if let model = u.model, !model.isEmpty {
+                    usagePart += " · \(model)"
+                }
+                parts.append(usagePart)
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     private var roleLabel: String {
         switch message.role {
@@ -92,6 +137,14 @@ struct MessageBubble: View {
                             lineWidth: theme.bubbleBorderColor != nil ? theme.borderWidth : (theme.borderWidth > 1 ? theme.borderWidth : 0)
                         )
                 )
+
+                if let line = diagnosticsLine {
+                    Text(line)
+                        .font(theme.monoFont(size: 10))
+                        .foregroundStyle(theme.textQuaternary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(isUser ? .trailing : .leading)
+                }
             }
 
             if !isUser { Spacer(minLength: 48) }

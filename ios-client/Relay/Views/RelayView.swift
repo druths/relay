@@ -25,6 +25,10 @@ struct RelayView: View {
     @State private var menuSearchQuery = ""
     @FocusState private var sidebarSearchFocused: Bool
     @FocusState private var messageInputFocused: Bool
+    /// Global Diagnostics preference: when on, every bubble shows its
+    /// timestamp and agent bubbles show context-window / token usage when the
+    /// underlying message has metadata attached.
+    @AppStorage("relay_diagnostics") private var diagnostics: Bool = false
 
     init(authService: AuthService, themeManager: ThemeManager) {
         self.authService = authService
@@ -181,7 +185,8 @@ struct RelayView: View {
                 messages: currentMessages,
                 activeSessionId: relay.activeSessionId,
                 activeAgentName: relay.activeAgentName,
-                connected: relay.connected
+                connected: relay.connected,
+                diagnostics: diagnostics
             )
             .frame(maxHeight: .infinity)
 
@@ -541,7 +546,8 @@ struct RelayView: View {
                 messages: currentMessages,
                 activeSessionId: relay.activeSessionId,
                 activeAgentName: relay.activeAgentName,
-                connected: relay.connected
+                connected: relay.connected,
+                diagnostics: diagnostics
             )
             .frame(maxHeight: .infinity)
 
@@ -603,6 +609,17 @@ struct RelayView: View {
                 showLabelEditor = true
             } label: {
                 Label("Manage Labels", systemImage: "tag")
+            }
+
+            Button {
+                diagnostics.toggle()
+            } label: {
+                // Checkmark image on the Label conveys the toggle state inside
+                // a Menu without needing a separate Toggle widget.
+                Label(
+                    "Diagnostics",
+                    systemImage: diagnostics ? "checkmark.circle.fill" : "info.circle"
+                )
             }
         } label: {
             ThemedIcon(systemName: "ellipsis")

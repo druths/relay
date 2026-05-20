@@ -61,9 +61,15 @@ def _last_user_text(messages: list[dict[str, Any]]) -> str:
 @dataclass
 class ArkResult:
     """Final yield from a streaming generation — carries the ark session_id
-    so the caller can persist it for the next turn's chain."""
+    so the caller can persist it for the next turn's chain, plus any
+    `turn_usage` data ark reported for the completed turn (used by the
+    client-side Diagnostics view)."""
     text: str
     session_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    model: str | None = None
+    context_window: int | None = None
 
 
 # Callback signature: receives the raw event dict (which always has
@@ -383,7 +389,7 @@ class ArkProvider(LLMProvider):
         session_context: str | None = None,
     ) -> ArkResult:
         chunks: list[str] = []
-        final_session_id: str | None = None
+        final: ArkResult | None = None
         async for item in self.generate_stream_with_chain(
             system_prompt, messages, model,
             relay_session_id=relay_session_id,
@@ -393,8 +399,15 @@ class ArkProvider(LLMProvider):
             if isinstance(item, str):
                 chunks.append(item)
             elif isinstance(item, ArkResult):
-                final_session_id = item.session_id
-        return ArkResult(text="".join(chunks), session_id=final_session_id)
+                final = item
+        return ArkResult(
+            text="".join(chunks),
+            session_id=final.session_id if final else None,
+            input_tokens=final.input_tokens if final else None,
+            output_tokens=final.output_tokens if final else None,
+            model=final.model if final else None,
+            context_window=final.context_window if final else None,
+        )
 
     async def generate_stream_with_chain(
         self,
@@ -434,6 +447,10 @@ class ArkProvider(LLMProvider):
         # Insert a paragraph break before the first delta of each new segment.
         await conn.send_user_message(ark_session_id, user_text)
         saw_segment_end = False
+        usage_in: int | None = None
+        usage_out: int | None = None
+        usage_model: str | None = None
+        usage_ctx: int | None = None
         try:
             async for event in conn.iter_turn_events(ark_session_id):
                 etype = event.get("type")
@@ -446,16 +463,37 @@ class ArkProvider(LLMProvider):
                         yield delta
                 elif etype == "assistant_message":
                     saw_segment_end = True
+                elif etype == "turn_usage":
+                    # Multi-segment turns can emit `turn_usage` more than once
+                    # (once per LLM call). Keep the cumulative input/output and
+                    # the last-seen context_window/model.
+                    in_t = event.get("input_tokens")
+                    out_t = event.get("output_tokens")
+                    if isinstance(in_t, int):
+                        usage_in = (usage_in or 0) + in_t
+                    if isinstance(out_t, int):
+                        usage_out = (usage_out or 0) + out_t
+                    if isinstance(event.get("context_window"), int):
+                        usage_ctx = event["context_window"]
+                    if isinstance(event.get("model"), str) and event["model"]:
+                        usage_model = event["model"]
                 elif etype == "error":
                     logger.warning("Ark error event: %s", event.get("message"))
                 elif etype == "done":
                     break
-                # tool_call / tool_result / thinking / turn_usage filtered.
+                # tool_call / tool_result / thinking filtered.
         except asyncio.CancelledError:
             await conn.send_stop(ark_session_id)
             raise
 
-        yield ArkResult(text="", session_id=ark_session_id)
+        yield ArkResult(
+            text="",
+            session_id=ark_session_id,
+            input_tokens=usage_in,
+            output_tokens=usage_out,
+            model=usage_model,
+            context_window=usage_ctx,
+        )
 
     # ── Helpers ─────────────────────────────────────────────────────
 

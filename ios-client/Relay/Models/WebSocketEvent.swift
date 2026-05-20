@@ -41,6 +41,15 @@ struct StateUpdatePayload: Codable {
 struct TextPayload: Codable {
     let speaker: String
     let text: String
+    /// Set when the event targets a specific session (e.g. ark
+    /// injected_message). If absent, the event applies to the user's
+    /// current conversation context.
+    let sessionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case speaker, text
+        case sessionId = "session_id"
+    }
 }
 
 struct HandoffPayload: Codable {
@@ -147,6 +156,7 @@ struct TextDeltaPayload: Codable {
 struct TextDonePayload: Codable {
     let speaker: String
     let text: String
+    let metadata: MessageMetadata?
 }
 
 struct AudioStartPayload: Codable {

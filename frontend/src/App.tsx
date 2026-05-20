@@ -36,6 +36,18 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const [editingLabels, setEditingLabels] = useState(false);
   const [labelInputValue, setLabelInputValue] = useState("");
 
+  // Diagnostics is a global UI preference: when on, every conversation bubble
+  // shows its timestamp; agent bubbles also show token usage if the message
+  // carries ark-style metadata.
+  const [diagnostics, setDiagnostics] = useState<boolean>(() => {
+    try { return localStorage.getItem("relay_diagnostics") === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("relay_diagnostics", diagnostics ? "1" : "0"); }
+    catch { /* ignore */ }
+  }, [diagnostics]);
+
   const handleAgentSelect = (agentName: string) => {
     relay.sendMessage(`connect me to ${agentName}`);
   };
@@ -453,7 +465,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
               {showSessionMenu && (
                 <div className="absolute right-0 top-8 z-50 bg-gray-800 border border-gray-700
-                                rounded-lg shadow-lg py-1 w-44 dropdown-menu">
+                                rounded-lg shadow-lg py-1 w-52 dropdown-menu">
                   <button
                     onClick={() => {
                       setRenamingSession(true);
@@ -476,6 +488,16 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                                hover:bg-gray-700 transition-colors"
                   >
                     Manage labels
+                  </button>
+                  <button
+                    onClick={() => setDiagnostics((d) => !d)}
+                    className="w-full text-left px-3 py-1.5 text-sm text-gray-300
+                               hover:bg-gray-700 transition-colors flex items-center justify-between gap-2"
+                  >
+                    <span>Diagnostics</span>
+                    <span className={`text-xs ${diagnostics ? "text-emerald-400" : "text-gray-500"}`}>
+                      {diagnostics ? "✓" : ""}
+                    </span>
                   </button>
                 </div>
               )}
@@ -573,6 +595,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           sessionMessages={relay.sessionMessages}
           activeSessionId={relay.activeSessionId}
           activeAgentName={relay.activeAgentName}
+          diagnostics={diagnostics}
         />
         <TextInput
           onSend={relay.sendMessage}

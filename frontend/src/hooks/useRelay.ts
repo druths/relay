@@ -178,6 +178,17 @@ export function useRelay() {
             break;
           }
           setState((s) => {
+            // If the event is targeted at a specific session and that
+            // session isn't the one we're currently in, ignore the live
+            // broadcast — the message has already been persisted on the
+            // server, the unread badge will signal the user, and
+            // history-on-resume will replay it when they navigate over.
+            if (
+              event.payload.session_id &&
+              event.payload.session_id !== s.activeSessionId
+            ) {
+              return s;
+            }
             if (s.activeSessionId) {
               return {
                 ...s,
@@ -244,6 +255,7 @@ export function useRelay() {
                     role: "agent",
                     text_content: "",
                     streaming: true,
+                    created_at: new Date().toISOString(),
                   },
                 ],
               };
@@ -277,6 +289,11 @@ export function useRelay() {
                 ...last,
                 text_content: event.payload.text,
                 streaming: false,
+                // Attach the diagnostics metadata (token usage etc.) the
+                // server reports at end of turn so the Diagnostics view can
+                // render it on this bubble.
+                ...(event.payload.metadata ? { metadata: event.payload.metadata } : {}),
+                created_at: last.created_at ?? new Date().toISOString(),
               };
             }
             return { ...s, sessionMessages: msgs };
@@ -499,16 +516,17 @@ export function useRelay() {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
 
     // Add user message to the appropriate list
+    const now = new Date().toISOString();
     setState((s) => {
       if (s.activeSessionId) {
         return {
           ...s,
-          sessionMessages: [...s.sessionMessages, { role: "user", text_content: text }],
+          sessionMessages: [...s.sessionMessages, { role: "user", text_content: text, created_at: now }],
         };
       }
       return {
         ...s,
-        lobbyMessages: [...s.lobbyMessages, { role: "user", text_content: text }],
+        lobbyMessages: [...s.lobbyMessages, { role: "user", text_content: text, created_at: now }],
       };
     });
 
