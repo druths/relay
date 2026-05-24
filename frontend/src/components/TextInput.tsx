@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, type KeyboardEvent } from "react";
-import { apiFetch } from "../api";
+import { uploadFiles } from "../api";
 import type { FileAttachment } from "../types";
 
 // 11x9 pixel grid for ⏎ return arrow — matches iOS PixelIcons.returnArrow
@@ -79,22 +79,7 @@ export function TextInput({ onSend, disabled, sessionId, onAttachment }: TextInp
     if (!files || files.length === 0 || !onAttachment) return;
     setUploading(true);
     try {
-      for (const file of Array.from(files)) {
-        const form = new FormData();
-        form.append("file", file);
-        const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
-        try {
-          const resp = await apiFetch(`/v1/files${qs}`, { method: "POST", body: form });
-          if (!resp.ok) {
-            console.error("Upload failed", resp.status, await resp.text());
-            continue;
-          }
-          const att: FileAttachment = await resp.json();
-          onAttachment(att);
-        } catch (err) {
-          console.error("Upload error", err);
-        }
-      }
+      await uploadFiles(files, sessionId, onAttachment);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { isAuthenticated, clearToken } from "./hooks/useAuth";
 import { LoginPage } from "./components/LoginPage";
 import { useRelay } from "./hooks/useRelay";
@@ -7,6 +7,7 @@ import { ConversationLog } from "./components/ConversationLog";
 import { TextInput } from "./components/TextInput";
 import { AgentSelector } from "./components/AgentSelector";
 import { AgentManagement } from "./components/AgentManagement";
+import { uploadFiles } from "./api";
 
 function App() {
   const [authed, setAuthed] = useState(isAuthenticated());
@@ -47,6 +48,51 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
     try { localStorage.setItem("relay_diagnostics", diagnostics ? "1" : "0"); }
     catch { /* ignore */ }
   }, [diagnostics]);
+
+  // Drag-and-drop file uploads. HTML drag events fire on every nested child,
+  // so we use a counter (not a boolean) to know when the cursor has actually
+  // left the window vs. just crossed into a child element.
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragDepth = useRef(0);
+  const [dropUploading, setDropUploading] = useState(false);
+
+  const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
+    // Only react to OS drags that actually carry files. Ignore text/element
+    // drags happening inside the page.
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDraggingFile(true);
+  }, []);
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    // preventDefault on dragover is what tells the browser this element is a
+    // valid drop target — otherwise drop never fires.
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDraggingFile(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e: DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDraggingFile(false);
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    setDropUploading(true);
+    try {
+      await uploadFiles(files, relay.activeSessionId, relay.appendUserAttachment);
+    } finally {
+      setDropUploading(false);
+    }
+  }, [relay.activeSessionId, relay.appendUserAttachment]);
 
   const handleAgentSelect = (agentName: string) => {
     relay.sendMessage(`connect me to ${agentName}`);
@@ -155,7 +201,31 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   }, [relay]);
 
   return (
-    <div className="h-screen flex">
+    <div
+      className="h-screen flex relative"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDraggingFile && (
+        <div
+          className="absolute inset-0 z-[100] pointer-events-none
+                     flex items-center justify-center
+                     bg-blue-500/10 border-4 border-dashed border-blue-400 rounded-lg"
+        >
+          <div className="px-6 py-4 rounded-lg bg-gray-900/90 border border-blue-400
+                          text-blue-300 text-sm font-medium shadow-xl">
+            Drop file to attach
+          </div>
+        </div>
+      )}
+      {dropUploading && !isDraggingFile && (
+        <div className="absolute top-2 right-2 z-[100] px-3 py-1 rounded
+                        bg-gray-900/90 border border-gray-700 text-xs text-gray-300">
+          Uploading…
+        </div>
+      )}
       {/* Sidebar */}
       <aside className="w-64 border-r border-gray-800 flex flex-col gap-6 p-4 bg-gray-900/50 overflow-y-auto">
         <div className="flex items-center justify-between">
