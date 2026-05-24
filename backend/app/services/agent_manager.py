@@ -158,8 +158,15 @@ async def generate_response(
     messages = []
     for msg in context:
         role = "assistant" if msg["role"] == "agent" else msg["role"]
-        if role in ("user", "assistant"):
-            messages.append({"role": role, "content": msg["text_content"]})
+        if role not in ("user", "assistant"):
+            continue
+        text_content = msg.get("text_content") or ""
+        # File-attachment synthetic entries arrive with empty text_content;
+        # skipping them keeps `_last_user_text` (ark) from latching onto an
+        # empty entry as the "most recent user turn".
+        if not text_content.strip():
+            continue
+        messages.append({"role": role, "content": text_content})
 
     if voice_instructions and isinstance(provider, (OpenClawProvider, ArkProvider)):
         # OpenClaw and ark manage their own system prompts server-side and
@@ -241,8 +248,16 @@ async def generate_response_stream(
     messages = []
     for msg in context:
         role = "assistant" if msg["role"] == "agent" else msg["role"]
-        if role in ("user", "assistant"):
-            messages.append({"role": role, "content": msg["text_content"]})
+        if role not in ("user", "assistant"):
+            continue
+        text_content = msg.get("text_content") or ""
+        # File attachments come through `context` as synthetic role=user/agent
+        # entries with empty text. Skipping them here prevents `_last_user_text`
+        # (ark) from picking up an empty content entry as the "most recent
+        # user turn" — which manifests as ark receiving empty user messages.
+        if not text_content.strip():
+            continue
+        messages.append({"role": role, "content": text_content})
 
     if voice_instructions and isinstance(provider, (OpenClawProvider, ArkProvider)):
         # OpenClaw and ark manage their own system prompts server-side and

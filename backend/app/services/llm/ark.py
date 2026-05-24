@@ -51,10 +51,15 @@ def _agent_name(model: str) -> str:
 
 def _last_user_text(messages: list[dict[str, Any]]) -> str:
     """Ark owns history server-side, so we only need to send the most recent
-    user message on each turn."""
+    user message on each turn. Skips empty/whitespace-only entries — if any
+    sneak through (e.g. synthetic file-attachment rows), they would otherwise
+    shadow the real prompt and ark would receive an empty `user_message`."""
     for m in reversed(messages):
-        if m.get("role") == "user":
-            return m.get("content", "") or ""
+        if m.get("role") != "user":
+            continue
+        content = m.get("content") or ""
+        if content.strip():
+            return content
     return ""
 
 

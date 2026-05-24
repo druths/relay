@@ -246,12 +246,18 @@ async def get_session_messages(
     if cached is not None:
         return cached
 
+    # Take the MOST RECENT `limit` messages, not the oldest — ordering ASC
+    # with a limit lets the user's just-persisted turn fall off the slice
+    # once the session crosses `limit` rows, so `_last_user_text` (and
+    # downstream LLM context) loses the prompt entirely.
     result = await db.execute(
         select(Message)
         .where(Message.session_id == session_id)
-        .order_by(Message.created_at)
+        .order_by(Message.created_at.desc())
         .limit(limit)
     )
+    rows = list(result.scalars().all())
+    rows.reverse()  # back to chronological order for replay
     text_entries = [
         {
             "message_id": str(m.message_id),
@@ -263,7 +269,7 @@ async def get_session_messages(
             "metadata": m.metadata_ or {},
             "_ts": m.created_at,
         }
-        for m in result.scalars().all()
+        for m in rows
     ]
 
     # Fold in file attachments as their own synthetic messages, ordered by
