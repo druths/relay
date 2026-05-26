@@ -33,6 +33,17 @@ class Session(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     has_unread: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    # Optional binding to an ark project. Mirrors ark's per-session
+    # `project_id` so Relay can render the project chip, group in the sidebar,
+    # and pass the binding through on lazy ark session creation. Immutable
+    # for the life of the session (matches ark's semantics). Plain TEXT
+    # column (not FK) because the canonical projects table lives in ark.
+    project_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    # `server_id` of the ark server hosting `project_id` — the normalized
+    # base URL (e.g. `http://ark-ds.t.internal:7777`). Lets passthrough
+    # endpoints route to the right ark without re-querying every server
+    # when looking up a project by id.
+    project_server_id: Mapped[str | None] = mapped_column(String(256), nullable=True, default=None)
     # Legacy single-provider state column — kept for backfill compatibility.
     # New code should use `provider_state[<provider_name>]`.
     openclaw_response_id: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)

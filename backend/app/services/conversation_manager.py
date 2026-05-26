@@ -232,6 +232,8 @@ async def list_sessions(
             "labels": labels,
             "has_unread": s.has_unread,
             "provider_state": provider_state,
+            "project_id": s.project_id,
+            "project_server_id": s.project_server_id,
         })
     return sessions
 
@@ -334,10 +336,16 @@ async def _persist_message(
 # ── Session lifecycle ───────────────────────────────────────────────────
 
 async def _create_agent_session(
-    db: AsyncSession, user_id: str, agent: Agent, labels: list[str] | None = None
+    db: AsyncSession, user_id: str, agent: Agent, labels: list[str] | None = None,
+    project_id: str | None = None, project_server_id: str | None = None,
 ) -> Session:
-    """Always create a fresh session for this user+agent pair."""
-    session = Session(user_id=user_id, agent_id=agent.agent_id)
+    """Always create a fresh session for this user+agent pair. If
+    `project_id` is provided, the session is bound to that ark project at
+    creation time (immutable for life — matches ark's semantics)."""
+    session = Session(
+        user_id=user_id, agent_id=agent.agent_id,
+        project_id=project_id, project_server_id=project_server_id,
+    )
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -412,24 +420,44 @@ async def handle_lobby_message(
     if lobby_history is None:
         lobby_history = []
 
-    # Build context for the LLM
+    # Build context for the LLM. Each ark agent is tagged with its ark
+    # `server_id` so the operator can match agents to projects on the same
+    # backend when binding a session.
+    from app.services.projects import _ark_servers, list_all_projects
+    from app.services.llm.ark import _server_id_for as _ark_server_id_for
+
     agents_raw = await agent_manager.list_agents(db)
     agents_ctx = []
     for a in agents_raw:
         health = agent_health.get_status(a.agent_id)
+        ark_sid: str | None = None
+        if a.llm_provider == "ark":
+            base_url, api_key = await agent_manager.resolve_llm_config(a)
+            if base_url:
+                ark_sid = _ark_server_id_for(base_url.rstrip("/"), api_key)
         agents_ctx.append({
             "name": a.name,
             "persona_prompt": a.persona_prompt,
             "status": health.status,
             "status_message": health.message,
+            "ark_server_id": ark_sid,
         })
     sessions_ctx = await list_sessions(db, user_id)
+    projects_ctx: list[dict] = []
+    ark_server_ids: list[str] = []
+    try:
+        projects_ctx = await list_all_projects(db)
+        ark_server_ids = [sid for sid, _, _ in await _ark_servers(db)]
+    except Exception:
+        # Operator can still function without project context — log and move on.
+        logger.exception("Failed to load project context for operator")
 
     op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
 
     try:
         result = await call_operator(
             text, agents_ctx, sessions_ctx, lobby_history,
+            projects=projects_ctx, ark_servers=ark_server_ids,
             provider=op_provider, model=op_model, base_url=op_base_url, api_key=op_api_key,
         )
     except Exception as exc:
@@ -474,10 +502,13 @@ async def _handle_llm_result(
     if result.tool_call == "connect_to_agent":
         agent_name = result.tool_args.get("agent_name")
         labels = result.tool_args.get("labels")
+        project_name = result.tool_args.get("project_name")
         _append_tool_result(lobby_history, result, f"Connected to {agent_name}")
         if result.text:
             events.append(_text_event("operator", result.text))
-        events.extend(await _execute_handoff(db, user_id, agent_name, labels=labels))
+        events.extend(await _execute_handoff(
+            db, user_id, agent_name, labels=labels, project_name=project_name,
+        ))
         return events
 
     if result.tool_call == "resume_session":
@@ -490,6 +521,34 @@ async def _handle_llm_result(
             "payload": {"session_id": session_id},
         })
         return events
+
+    if result.tool_call == "create_project":
+        from app.services.projects import create_project_via_ark
+
+        name = (result.tool_args.get("name") or "").strip()
+        if not name:
+            _append_tool_result(lobby_history, result, "Refused: missing project name")
+            return [_lobby_state_event(), _text_event("operator", "Need a project name.")]
+        try:
+            created = await create_project_via_ark(
+                db,
+                server_id=result.tool_args.get("ark_server_id"),
+                name=name,
+                description=result.tool_args.get("description"),
+                project_context=result.tool_args.get("project_context"),
+            )
+        except RuntimeError as exc:
+            _append_tool_result(lobby_history, result, f"Refused: {exc}")
+            return [
+                _lobby_state_event(),
+                _text_event("operator", f"Couldn't create the project: {exc}"),
+            ]
+        _append_tool_result(
+            lobby_history, result,
+            f"Created project {created.get('name')} on ark:{created.get('server_id')}",
+        )
+        reply = result.text or f"Created project '{created.get('name')}'."
+        return [_lobby_state_event(), _text_event("operator", reply)]
 
     # No tool call — just a conversational reply
     if result.text:
@@ -538,7 +597,8 @@ async def _handle_lobby_keyword(
 
 
 async def _execute_handoff(
-    db: AsyncSession, user_id: str, agent_name: str | None, labels: list[str] | None = None
+    db: AsyncSession, user_id: str, agent_name: str | None,
+    labels: list[str] | None = None, project_name: str | None = None,
 ) -> list[dict]:
     if not agent_name:
         reply = "Which agent?"
@@ -556,8 +616,39 @@ async def _execute_handoff(
         reply = operator_not_found(agent_name)
         return [_lobby_state_event(), _text_event("operator", reply)]
 
+    # Resolve the optional project binding — only valid when:
+    # (a) the agent is ark-backed, and
+    # (b) the project lives on the *same* ark server as the agent.
+    # Otherwise we drop the binding silently and prepend a one-phrase notice
+    # to the operator's reply so the user understands what happened.
+    project_id: str | None = None
+    project_server_id: str | None = None
+    project_warning: str | None = None
+    if project_name:
+        from app.services.projects import resolve_project_by_name
+        project = await resolve_project_by_name(db, project_name)
+        if project is None:
+            project_warning = f"Couldn't find a project named '{project_name}' — connecting without binding."
+        elif agent.llm_provider != "ark":
+            project_warning = f"{agent.name} isn't an ark agent, so I can't bind it to the project."
+        else:
+            base_url, api_key = await agent_manager.resolve_llm_config(agent)
+            from app.services.llm.ark import _server_id_for as _ark_sid
+            agent_sid = _ark_sid((base_url or "").rstrip("/"), api_key) if base_url else None
+            if agent_sid != project.get("server_id"):
+                project_warning = (
+                    f"{agent.name} is on a different ark backend than '{project_name}' — "
+                    "connecting without the project binding."
+                )
+            else:
+                project_id = project.get("id")
+                project_server_id = project.get("server_id")
+
     health = agent_health.get_status(agent.agent_id)
-    session = await _create_agent_session(db, user_id, agent, labels=labels)
+    session = await _create_agent_session(
+        db, user_id, agent, labels=labels,
+        project_id=project_id, project_server_id=project_server_id,
+    )
 
     confirm = operator_connect_message(agent.name)
     greeting = "Hello. Where should we start?"
@@ -566,6 +657,8 @@ async def _execute_handoff(
     session_labels = await get_session_labels(db, session.session_id)
 
     events: list[dict] = [_text_event("operator", confirm)]
+    if project_warning:
+        events.append(_text_event("operator", project_warning))
     if health.status == "error":
         events.append(_text_event(
             "operator",

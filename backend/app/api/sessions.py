@@ -50,6 +50,11 @@ class SessionOut(BaseModel):
     # is the server-side session id that tools like `post_to_session` and
     # cron entries reference.
     provider_state: dict[str, str] = {}
+    # ark project binding. `project_id` is the ark UUID; `project_server_id`
+    # disambiguates across multiple ark servers. Both null for sessions not
+    # bound to a project. Clients resolve `project_name` via `GET /v1/projects`.
+    project_id: str | None = None
+    project_server_id: str | None = None
 
 
 class MessageOut(BaseModel):
@@ -83,6 +88,64 @@ async def get_sessions(
     return [SessionOut(**s) for s in sessions]
 
 
+class SessionCreateIn(BaseModel):
+    agent_id: str
+    project_id: str | None = None
+    # Required when `project_id` is set and multiple ark servers are in play —
+    # mirrors the projects-passthrough scoping. Stored on the row so future
+    # operations on the session can locate the right ark.
+    project_server_id: str | None = None
+    labels: list[str] | None = None
+
+
+@router.post("", response_model=SessionOut, status_code=201)
+async def create_session_endpoint(
+    body: SessionCreateIn,
+    user_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a Relay session with an explicit agent and optional project
+    binding. The ark-side session is NOT created here — it's lazily opened
+    on the first user message, where the binding flows through to ark."""
+    from app.services import agent_manager
+    from app.services.conversation_manager import _create_agent_session
+    import uuid as _uuid
+
+    try:
+        aid = _uuid.UUID(body.agent_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid agent_id")
+    agent = await agent_manager.get_agent_by_id(db, aid)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if body.project_id and agent.llm_provider != "ark":
+        raise HTTPException(
+            status_code=400,
+            detail="Only ark agents can be bound to projects",
+        )
+
+    session = await _create_agent_session(
+        db, user_id, agent,
+        labels=body.labels,
+        project_id=body.project_id,
+        project_server_id=body.project_server_id,
+    )
+    labels = await get_session_labels(db, session.session_id)
+    return SessionOut(
+        session_id=str(session.session_id),
+        agent_id=str(session.agent_id),
+        agent_name=agent.name,
+        status=session.status,
+        created_at=session.created_at.isoformat(),
+        last_active=session.last_active.isoformat(),
+        name=session.name,
+        summary=session.summary,
+        labels=labels,
+        project_id=session.project_id,
+        project_server_id=session.project_server_id,
+    )
+
+
 @router.patch("/{session_id}", response_model=SessionOut)
 async def rename_session_endpoint(
     session_id: uuid.UUID,
@@ -106,6 +169,8 @@ async def rename_session_endpoint(
         name=session.name,
         summary=session.summary,
         labels=labels,
+        project_id=session.project_id,
+        project_server_id=session.project_server_id,
     )
 
 

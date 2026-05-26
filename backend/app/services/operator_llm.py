@@ -40,6 +40,14 @@ TOOLS = [
                         "items": {"type": "string"},
                         "description": "Optional labels/categories to apply to the new session (e.g. ['builds', 'frontend']).",
                     },
+                    "project_name": {
+                        "type": "string",
+                        "description": (
+                            "Optional name of an ark project to bind the new session to "
+                            "(e.g. 'marketing-brochure'). Only valid for ark agents. The "
+                            "agent must be configured on the same ark backend as the project."
+                        ),
+                    },
                 },
                 "required": ["agent_name"],
             },
@@ -59,6 +67,41 @@ TOOLS = [
                     }
                 },
                 "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_project",
+            "description": (
+                "Create a new ark project — a shared, user-visible working directory "
+                "that one or more sessions can be bound to. Use when the user says "
+                "something like 'start a project for X' or 'create a new project called Y'. "
+                "Does NOT also start a session — after creation, the user can ask to "
+                "connect to an agent within it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Short kebab-case project name (e.g. 'marketing-brochure'). Must be unique among active projects.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional one-line description.",
+                    },
+                    "project_context": {
+                        "type": "string",
+                        "description": "Optional notes / guidelines injected into the agent's system prompt for every session in this project.",
+                    },
+                    "ark_server_id": {
+                        "type": "string",
+                        "description": "Required when multiple ark backends are configured — pick the one to host this project. Omit if there's only one ark.",
+                    },
+                },
+                "required": ["name"],
             },
         },
     },
@@ -90,7 +133,10 @@ def _format_session_line(s: dict) -> str:
     )
 
 
-def _build_system_prompt(agents: list[dict], sessions: list[dict]) -> str:
+def _build_system_prompt(
+    agents: list[dict], sessions: list[dict], projects: list[dict] | None = None,
+    ark_servers: list[str] | None = None,
+) -> str:
     lines = []
     for a in agents:
         status = a.get("status", "unknown")
@@ -100,16 +146,39 @@ def _build_system_prompt(agents: list[dict], sessions: list[dict]) -> str:
             tag = f"(UNAVAILABLE — {a.get('status_message', 'unknown error')})"
         else:
             tag = "(status unknown)"
-        lines.append(f"  - {a['name']}: {a.get('persona_prompt', '')[:80]} {tag}")
+        # Annotate ark agents with their ark server_id so the operator knows
+        # which projects are addressable per-agent. Non-ark agents have no
+        # server_id and can't be bound to a project.
+        server = f" [ark:{a['ark_server_id']}]" if a.get("ark_server_id") else ""
+        lines.append(f"  - {a['name']}{server}: {a.get('persona_prompt', '')[:80]} {tag}")
     agent_lines = "\n".join(lines)
     if sessions:
         session_lines = "\n".join(_format_session_line(s) for s in sessions)
     else:
         session_lines = "  (none)"
 
+    # Project rendering: one line per project, tagged with the ark server it
+    # lives on so the operator can match project → eligible agents.
+    if projects:
+        proj_lines = "\n".join(
+            f"  - {p['name']} [ark:{p['server_id']}]"
+            + (f" — {p['description']}" if p.get("description") else "")
+            for p in projects
+        )
+    else:
+        proj_lines = "  (none)"
+
     # Collect existing labels from sessions for context
     all_labels = sorted({l for s in sessions for l in s.get("labels", [])})
     labels_lines = ", ".join(all_labels) if all_labels else "(none)"
+
+    multi_ark = bool(ark_servers and len(ark_servers) > 1)
+    server_rule = (
+        "- create_project: multiple ark backends are configured "
+        f"({', '.join(ark_servers or [])}); pass ark_server_id explicitly."
+        if multi_ark
+        else "- create_project: a single ark backend is configured; ark_server_id can be omitted."
+    )
 
     return f"""You are the Relay Operator — warm, brief, and competent. You route users to agents and help them pick up past sessions.
 
@@ -121,17 +190,23 @@ AGENTS:
 SESSIONS:
 {session_lines}
 
+PROJECTS:
+{proj_lines}
+
 EXISTING LABELS:
   {labels_lines}
 
 RULES:
 - User wants an agent → call connect_to_agent (always creates a new session).
 - If the user mentions a category or label for the session (e.g. "under builds", "in the frontend category"), pass it in the labels parameter of connect_to_agent.
+- If the user asks to connect to an agent "in" or "for" a project (e.g. "connect to Scribe in the brochure project"), pass project_name. Only ark agents can be bound; if the requested agent isn't ark or isn't on the project's ark server, connect without the binding and mention the mismatch in one phrase.
 - User wants to resume a past session → call resume_session with the session ID.
+- User wants to start a new project ("create a project for X", "spin up a project called Y") → call create_project. Do NOT also connect to an agent in the same turn; let the user choose the agent next.
+{server_rule}
 - Agent names may be misspelled by voice — match to the closest available name.
 - Vague request → one short clarifying question.
 - UNAVAILABLE agent → one-phrase heads-up, connect anyway if they insist.
-- Listing agents or sessions → name and status only, no descriptions.
+- Listing agents, sessions, or projects → name and status only, no descriptions.
 - Anything else → one warm, short sentence."""
 
 
@@ -141,6 +216,8 @@ async def call_operator(
     sessions: list[dict],
     lobby_history: list[dict],
     *,
+    projects: list[dict] | None = None,
+    ark_servers: list[str] | None = None,
     provider: str = "openai",
     model: str = "gpt-4o-mini",
     base_url: str | None = None,
@@ -152,7 +229,7 @@ async def call_operator(
 
     Dispatches to the Anthropic or OpenAI client based on provider.
     """
-    system_prompt = _build_system_prompt(agents, sessions)
+    system_prompt = _build_system_prompt(agents, sessions, projects, ark_servers)
 
     if provider == "anthropic":
         return await _call_anthropic(model, api_key, system_prompt, lobby_history)

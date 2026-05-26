@@ -39,7 +39,15 @@ TURN_EVENT_TYPES = {
 
 # Async events: things that can fire even when no turn for that session is
 # in flight (cross-session injections, file shares, errors).
-ASYNC_EVENT_TYPES = {"file_available", "injected_message"}
+#
+# `project_file_changed` and `workspace_file_changed` are global to the ark
+# server (no `session_id` field) — Relay forwards them to clients for live
+# file-tree refresh in the side-panel. Per ark/docs the events are
+# coalesced ~200ms server-side and ignore VCS/cache dirs.
+ASYNC_EVENT_TYPES = {
+    "file_available", "injected_message",
+    "project_file_changed", "workspace_file_changed",
+}
 
 
 def _agent_name(model: str) -> str:
@@ -83,9 +91,26 @@ AsyncEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 CatchUpCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
-def _server_id_for(base_url: str, api_key: str | None) -> str:
-    """Stable short identifier for an (ark server, token) pair. Used as the
-    PlatformSetting key suffix for the catch-up cursor."""
+def _server_id_for(base_url: str, api_key: str | None = None) -> str:
+    """Stable identifier for an ark backend — the normalized base URL.
+
+    Used as the `server_id` tag on aggregated project listings, the
+    PlatformSetting key suffix for the catch-up cursor, and the
+    `sessions.project_server_id` column. Two different `api_key`s pointed
+    at the same URL collapse to one identifier (intentional — the URL is
+    the unit of deployment; the key is just credentials).
+
+    Earlier revisions used `sha256(base_url|api_key)[:16]` — opaque in the
+    operator prompt and in UI pickers. See `_legacy_server_id_for` for the
+    migration helper that maps the old hash back to a URL.
+    """
+    return base_url.rstrip("/")
+
+
+def _legacy_server_id_for(base_url: str, api_key: str | None) -> str:
+    """The old SHA256-based identifier. Kept exclusively for one-time
+    migration of `platform_settings.ark_cursor:*` keys and
+    `sessions.project_server_id` values from hash to URL."""
     raw = f"{base_url.rstrip('/')}|{api_key or ''}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
 
@@ -392,6 +417,7 @@ class ArkProvider(LLMProvider):
         relay_session_id: str | None = None,
         previous_session_id: str | None = None,
         session_context: str | None = None,
+        project_id: str | None = None,
     ) -> ArkResult:
         chunks: list[str] = []
         final: ArkResult | None = None
@@ -400,6 +426,7 @@ class ArkProvider(LLMProvider):
             relay_session_id=relay_session_id,
             previous_session_id=previous_session_id,
             session_context=session_context,
+            project_id=project_id,
         ):
             if isinstance(item, str):
                 chunks.append(item)
@@ -422,6 +449,7 @@ class ArkProvider(LLMProvider):
         relay_session_id: str | None = None,
         previous_session_id: str | None = None,
         session_context: str | None = None,
+        project_id: str | None = None,
     ):
         agent = _agent_name(model)
         user_text = _last_user_text(messages)
@@ -431,7 +459,7 @@ class ArkProvider(LLMProvider):
         )
 
         ark_session_id = previous_session_id or await self._ensure_session(
-            agent, context=session_context,
+            agent, context=session_context, project_id=project_id,
         )
 
         # The agent_manager has the user_id context to install the proper
@@ -502,14 +530,21 @@ class ArkProvider(LLMProvider):
 
     # ── Helpers ─────────────────────────────────────────────────────
 
-    async def _ensure_session(self, agent: str, context: str | None = None) -> str:
+    async def _ensure_session(
+        self, agent: str, context: str | None = None,
+        project_id: str | None = None,
+    ) -> str:
         """Create a new ark session and return its id. If `context` is given,
-        ark seeds it as a SessionContext on creation."""
+        ark seeds it as a SessionContext on creation. If `project_id` is
+        given, the session is bound to that ark project (immutable for life
+        of session — see docs/projects.md)."""
         url = f"{self._base_http}/agents/{agent}/sessions"
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
         body: dict[str, str] = {}
         if context and context.strip():
             body["context"] = context.strip()
+        if project_id:
+            body["project_id"] = project_id
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(url, headers=headers, json=body)
             resp.raise_for_status()

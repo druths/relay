@@ -76,6 +76,19 @@ async def _broadcast_to_user(user_id: str, event: dict) -> None:
             pass
 
 
+async def _broadcast_to_all(event: dict) -> None:
+    """Send an event to every connected client across every user. Used for
+    ark-server-global events (project_file_changed, workspace_file_changed)
+    that have no per-session targeting. Clients filter by project_id /
+    agent_name themselves."""
+    for sockets in list(_user_connections.values()):
+        for ws in list(sockets):
+            try:
+                await ws.send_json(event)
+            except Exception:
+                pass
+
+
 @router.websocket("/v1/lobby")
 async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
     # Verify JWT before accepting the connection

@@ -295,9 +295,23 @@ async def generate_response_stream(
     if isinstance(provider, ArkProvider) and session_id:
         from app.db.redis import get_provider_state, set_provider_state
         from app.services.llm.ark import ArkResult
+        from app.models.session import Session as SessionModel
+        from app.db.database import async_session
 
         await ensure_ark_connection(agent)
         prev_sid = await get_provider_state(str(session_id), "ark")
+        # Read the Relay session's project binding so ark applies project
+        # context on its first turn. Skipped when we already have an ark
+        # session_id (chain continuation — binding was set at creation).
+        bound_project_id: str | None = None
+        if not prev_sid:
+            async with async_session() as _db:
+                _r = await _db.execute(
+                    select(SessionModel.project_id).where(
+                        SessionModel.session_id == session_id
+                    )
+                )
+                bound_project_id = _r.scalar_one_or_none()
         final_meta: dict[str, Any] = {}
         try:
             async for chunk in provider.generate_stream_with_chain(
@@ -305,6 +319,7 @@ async def generate_response_stream(
                 relay_session_id=str(session_id),
                 previous_session_id=prev_sid,
                 session_context=agent.persona_prompt if not prev_sid else None,
+                project_id=bound_project_id,
             ):
                 if isinstance(chunk, ArkResult):
                     if chunk.session_id:
@@ -394,6 +409,15 @@ async def _ark_dispatch(event: dict) -> None:
     """Dispatcher for live WS events from any ark session this connection
     sees. Resolves the matching Relay session by `session_id`, persists what
     needs persisting, broadcasts to the right user."""
+    etype = event.get("type")
+
+    # ark-server-global events have no `session_id`; clients filter on the
+    # client side by `project_id` / `agent_name`. Broadcast verbatim.
+    if etype in ("project_file_changed", "workspace_file_changed"):
+        from app.api.websocket import _broadcast_to_all
+        await _broadcast_to_all({"type": etype, "payload": event})
+        return
+
     sid = event.get("session_id")
     if not sid:
         return
