@@ -34,6 +34,130 @@ export function getWsUrl(path: string): string {
   return `${WS_BASE}${path}?token=${token}`;
 }
 
+// ── ark projects + filesystem passthrough helpers ─────────────────────
+
+import type { Project, DirListing } from "./types";
+
+export async function listProjects(): Promise<Project[]> {
+  const resp = await apiFetch("/v1/projects");
+  if (!resp.ok) throw new Error(`listProjects failed: ${resp.status}`);
+  return resp.json();
+}
+
+export async function listArkServers(): Promise<{ server_id: string; base_url: string }[]> {
+  const resp = await apiFetch("/v1/projects/servers");
+  if (!resp.ok) return [];
+  return resp.json();
+}
+
+export async function createProject(
+  server: string,
+  body: { name: string; description?: string; project_context?: string; root?: string },
+): Promise<Project> {
+  const resp = await apiFetch(`/v1/projects?server=${encodeURIComponent(server)}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function updateProject(
+  projectId: string,
+  server: string,
+  body: { name?: string; description?: string; project_context?: string },
+): Promise<Project> {
+  const resp = await apiFetch(`/v1/projects/${projectId}?server=${encodeURIComponent(server)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+export async function deleteProject(projectId: string, server: string): Promise<void> {
+  const resp = await apiFetch(`/v1/projects/${projectId}?server=${encodeURIComponent(server)}`, {
+    method: "DELETE",
+  });
+  if (!resp.ok && resp.status !== 204) throw new Error(await resp.text());
+}
+
+interface FsTarget { base: string; q: string }
+function fsTarget(kind: "project" | "workspace", id: string, server?: string): FsTarget {
+  if (kind === "project") {
+    return { base: `/v1/projects/${id}/files`, q: server ? `?server=${encodeURIComponent(server)}` : "" };
+  }
+  return { base: `/v1/agents/${id}/workspace/files`, q: "" };
+}
+
+export async function listDir(
+  kind: "project" | "workspace", id: string, path: string, server?: string,
+): Promise<DirListing> {
+  const t = fsTarget(kind, id, server);
+  const suffix = path ? `/${path.replace(/^\/+/, "")}` : "";
+  const resp = await apiFetch(`${t.base}${suffix}${t.q}`);
+  if (!resp.ok) throw new Error(`listDir failed: ${resp.status}`);
+  return resp.json();
+}
+
+export async function readFile(
+  kind: "project" | "workspace", id: string, path: string, server?: string,
+): Promise<Response> {
+  const t = fsTarget(kind, id, server);
+  const resp = await apiFetch(`${t.base}/${path.replace(/^\/+/, "")}${t.q}`);
+  if (!resp.ok) throw new Error(`readFile failed: ${resp.status}`);
+  return resp;
+}
+
+export async function writeFile(
+  kind: "project" | "workspace", id: string, path: string, body: Blob | string,
+  server?: string,
+): Promise<void> {
+  const t = fsTarget(kind, id, server);
+  const resp = await apiFetch(`${t.base}/${path.replace(/^\/+/, "")}${t.q}`, {
+    method: "PUT",
+    body,
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+}
+
+export async function deletePath(
+  kind: "project" | "workspace", id: string, path: string, server?: string,
+): Promise<void> {
+  const t = fsTarget(kind, id, server);
+  const resp = await apiFetch(`${t.base}/${path.replace(/^\/+/, "")}${t.q}`, {
+    method: "DELETE",
+  });
+  if (!resp.ok && resp.status !== 204) throw new Error(await resp.text());
+}
+
+export async function mkdir(
+  kind: "project" | "workspace", id: string, path: string, server?: string,
+): Promise<void> {
+  const t = fsTarget(kind, id, server);
+  const sep = t.q ? "&" : "?";
+  const resp = await apiFetch(`${t.base}/${path.replace(/^\/+/, "")}${t.q}${sep}op=mkdir`, {
+    method: "POST",
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+}
+
+export async function createSession(
+  agentId: string,
+  projectId?: string,
+  projectServerId?: string,
+): Promise<import("./types").Session> {
+  const body: Record<string, string> = { agent_id: agentId };
+  if (projectId) body.project_id = projectId;
+  if (projectServerId) body.project_server_id = projectServerId;
+  const resp = await apiFetch("/v1/sessions", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
 /**
  * Upload one or more files to `/v1/files` for the given session and invoke
  * `onAttachment` for each successful response. Used by both the paperclip

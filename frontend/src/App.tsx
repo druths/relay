@@ -7,6 +7,8 @@ import { ConversationLog } from "./components/ConversationLog";
 import { TextInput } from "./components/TextInput";
 import { AgentSelector } from "./components/AgentSelector";
 import { AgentManagement } from "./components/AgentManagement";
+import { ProjectManager } from "./components/ProjectManager";
+import { FileBrowserPanel } from "./components/FileBrowserPanel";
 import { uploadFiles } from "./api";
 
 function App() {
@@ -22,6 +24,8 @@ function App() {
 function RelayApp({ onLogout }: { onLogout: () => void }) {
   const relay = useRelay();
   const [showSettings, setShowSettings] = useState(false);
+  const [showProjects, setShowProjects] = useState(false);
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -100,17 +104,39 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
   const inSession = relay.activeSessionId !== null;
 
+  // The file-browser panel is offered when the active session is ark-backed
+  // (workspace always available there) or bound to an ark project. Other
+  // providers have no filesystem to show.
+  const activeSession = relay.sessions.find((s) => s.session_id === relay.activeSessionId) ?? null;
+  const activeAgent = relay.agents.find((a) => a.agent_id === activeSession?.agent_id) ?? null;
+  const isArkAgent = activeAgent?.llm_provider === "ark";
+  const showFileBrowserAvailable = !!activeSession && (isArkAgent || !!activeSession.project_id);
+
   // All labels across the user's full session history (server-side, not
   // limited to the 20 most-recent sessions currently in state).
   const allLabels = relay.allLabels;
 
-  // Filter sessions by label and search
+  // Resolve `project_id` → name for chip rendering and search.
+  const projectsById = new Map(relay.projects.map((p) => [p.id, p]));
+  const projectNameOf = (sessionProjectId?: string | null) =>
+    sessionProjectId ? projectsById.get(sessionProjectId)?.name ?? null : null;
+
+  // Filter sessions by label and search. Search matches the session name,
+  // agent name, label names, AND project name — chips and labels live in
+  // the same conceptual space, so the search bar finds either.
   const filteredSessions = relay.sessions.filter((s) => {
     if (labelFilter && !s.labels?.includes(labelFilter)) return false;
     if (sessionSearch) {
       const q = sessionSearch.toLowerCase();
-      const name = (s.name || s.agent_name).toLowerCase();
-      if (!name.includes(q)) return false;
+      const haystack = [
+        s.name ?? "",
+        s.agent_name,
+        ...(s.labels ?? []),
+        projectNameOf(s.project_id) ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(q)) return false;
     }
     return true;
   });
@@ -235,16 +261,27 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
               {inSession ? `Session with ${relay.activeAgentName}` : "Lobby"}
             </p>
           </div>
-          <button
-            onClick={() => setShowSettings(true)}
-            className="text-gray-500 hover:text-gray-300 transition-colors p-1 settings-icon"
-            title="Agent Management"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 gear-icon" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-            </svg>
-            <span className="pixel-gear">*</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setShowProjects(true)}
+              className="text-gray-500 hover:text-gray-300 transition-colors p-1"
+              title="Projects"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2 5a2 2 0 012-2h3.586a1 1 0 01.707.293l1.121 1.121A2 2 0 0010.828 5H16a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V5z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="text-gray-500 hover:text-gray-300 transition-colors p-1 settings-icon"
+              title="Agent Management"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 gear-icon" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+              </svg>
+              <span className="pixel-gear">*</span>
+            </button>
+          </div>
         </div>
 
         <StatusOrb
@@ -370,9 +407,18 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                       <div className="text-xs text-gray-500">
                         {s.agent_name} &middot; {s.status}
                       </div>
-                      {s.labels && s.labels.length > 0 && (
+                      {((s.labels && s.labels.length > 0) || projectNameOf(s.project_id)) && (
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {s.labels.map((label) => (
+                          {projectNameOf(s.project_id) && (
+                            <span
+                              className="text-[10px] px-1.5 py-0 rounded-full
+                                         bg-blue-900/40 border border-blue-800/60 text-blue-300"
+                              title="Project"
+                            >
+                              {projectNameOf(s.project_id)}
+                            </span>
+                          )}
+                          {s.labels?.map((label) => (
                             <span
                               key={label}
                               className="text-[10px] px-1.5 py-0 rounded-full bg-gray-800 text-gray-500"
@@ -520,7 +566,20 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
               </div>
             )}
 
-            <div className="ml-auto relative">
+            <div className="ml-auto relative flex items-center gap-1">
+              {showFileBrowserAvailable && (
+                <button
+                  onClick={() => setShowFileBrowser((v) => !v)}
+                  className={`p-1 transition-colors ${
+                    showFileBrowser ? "text-blue-400" : "text-gray-500 hover:text-gray-300"
+                  }`}
+                  title="Files"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 5a2 2 0 012-2h3.586a1 1 0 01.707.293l1.121 1.121A2 2 0 0010.828 5H16a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V5z" />
+                  </svg>
+                </button>
+              )}
               <button
                 onClick={() => setShowSessionMenu(!showSessionMenu)}
                 className="text-gray-500 hover:text-gray-300 transition-colors p-1"
@@ -675,12 +734,34 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         />
       </main>
 
+      {/* File browser side panel */}
+      {showFileBrowser && showFileBrowserAvailable && activeSession && (
+        <FileBrowserPanel
+          agentId={activeSession.agent_id}
+          agentName={activeSession.agent_name}
+          projectId={activeSession.project_id ?? null}
+          projectName={projectNameOf(activeSession.project_id)}
+          projectServerId={activeSession.project_server_id ?? null}
+          workspaceAvailable={isArkAgent}
+          fileChanges={relay.fileChanges}
+          onClose={() => setShowFileBrowser(false)}
+        />
+      )}
+
       {/* Agent Management modal */}
       {showSettings && (
         <AgentManagement
           agents={relay.agents}
           onClose={() => setShowSettings(false)}
           onAgentsChanged={relay.refreshAgents}
+        />
+      )}
+
+      {/* Project Manager modal */}
+      {showProjects && (
+        <ProjectManager
+          onClose={() => setShowProjects(false)}
+          onChange={relay.refreshProjects}
         />
       )}
     </div>

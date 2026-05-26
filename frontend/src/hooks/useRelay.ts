@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Agent, Message, Session, WsEvent } from "../types";
+import type { Agent, Message, Project, Session, WsEvent } from "../types";
 import { useAudioPlayer } from "./useAudioPlayer";
-import { apiFetch, getWsUrl } from "../api";
+import { apiFetch, getWsUrl, listProjects } from "../api";
+
+/** A single file-change event observed on the WS, kept in a small ring
+ * buffer so the workspace/project panel can render a "recent changes" feed
+ * without re-fetching the directory listing. */
+export interface FileChangeEvent {
+  ts: number;
+  kind: "project" | "workspace";
+  scope: string; // project_id or agent_name
+  path: string;
+  change: "created" | "modified" | "deleted";
+}
+
+const FILE_CHANGE_BUFFER_SIZE = 200;
 
 export interface RelayState {
   connected: boolean;
@@ -16,6 +29,8 @@ export interface RelayState {
   sessions: Session[];
   allLabels: string[];
   sttAvailable: boolean;
+  projects: Project[];
+  fileChanges: FileChangeEvent[];
 }
 
 export function useRelay() {
@@ -37,6 +52,8 @@ export function useRelay() {
     sessions: [],
     allLabels: [],
     sttAvailable: false,
+    projects: [],
+    fileChanges: [],
   });
 
   // Fetch agent list
@@ -50,9 +67,22 @@ export function useRelay() {
     }
   }, []);
 
+  // Fetch ark projects (aggregated across every configured ark backend).
+  // Quietly tolerates the no-ark-configured case — the response is just an
+  // empty list, so the rest of the UI stays calm.
+  const refreshProjects = useCallback(async () => {
+    try {
+      const projects = await listProjects();
+      setState((s) => ({ ...s, projects }));
+    } catch {
+      // ignore — non-ark setups won't have projects
+    }
+  }, []);
+
   useEffect(() => {
     refreshAgents();
-  }, [refreshAgents]);
+    refreshProjects();
+  }, [refreshAgents, refreshProjects]);
 
   // Fetch all labels across the user's sessions (not just the 20 most-recent).
   const fetchLabels = useCallback(async () => {
@@ -458,6 +488,45 @@ export function useRelay() {
           });
           break;
 
+        case "project_file_changed": {
+          // Backend forwards the raw ark event verbatim under `payload`. ark
+          // emits flat events, so it may also nest as `payload.payload` —
+          // tolerate both for safety.
+          const p = (event.payload as { payload?: typeof event.payload }).payload ?? event.payload;
+          setState((s) => ({
+            ...s,
+            fileChanges: [
+              ...s.fileChanges.slice(-(FILE_CHANGE_BUFFER_SIZE - 1)),
+              {
+                ts: Date.now(),
+                kind: "project",
+                scope: p.project_id,
+                path: p.path,
+                change: p.change,
+              },
+            ],
+          }));
+          break;
+        }
+
+        case "workspace_file_changed": {
+          const p = (event.payload as { payload?: typeof event.payload }).payload ?? event.payload;
+          setState((s) => ({
+            ...s,
+            fileChanges: [
+              ...s.fileChanges.slice(-(FILE_CHANGE_BUFFER_SIZE - 1)),
+              {
+                ts: Date.now(),
+                kind: "workspace",
+                scope: p.agent_name,
+                path: p.path,
+                change: p.change,
+              },
+            ],
+          }));
+          break;
+        }
+
         case "error":
           console.error("Relay error:", event.payload.message);
           break;
@@ -646,6 +715,7 @@ export function useRelay() {
     updateSessionLabels,
     updateAgentConfig,
     refreshAgents,
+    refreshProjects,
     fetchSessions,
     fetchLabels,
     appendUserAttachment,

@@ -42,6 +42,38 @@ export interface Session {
   /** External-system session ids, keyed by provider. e.g. `ark` → the ark
    * server-side session id used by `post_to_session` and cron entries. */
   provider_state?: Record<string, string>;
+  /** Optional ark project binding. `project_server_id` disambiguates the
+   * project_id across multiple ark backends. */
+  project_id?: string | null;
+  project_server_id?: string | null;
+}
+
+/** ark project — fetched via the Relay passthrough `GET /v1/projects`. */
+export interface Project {
+  id: string;
+  name: string;
+  description?: string | null;
+  project_context?: string | null;
+  root?: string;
+  created_at?: string;
+  deleted_at?: string | null;
+  /** Set by Relay's aggregator so subsequent ops can be routed to the right
+   * ark backend. */
+  server_id: string;
+}
+
+/** One entry in a directory listing returned by `GET /projects/{id}/files/...`
+ * or `GET /agents/{id}/workspace/files/...`. */
+export interface DirEntry {
+  name: string;
+  is_dir: boolean;
+  size: number;
+  mtime: number;
+}
+
+export interface DirListing {
+  path: string;
+  entries: DirEntry[];
 }
 
 export interface FileAttachment {
@@ -250,6 +282,29 @@ export interface WsAgentFile {
   };
 }
 
+/** Live event from ark when a project's filesystem changes. Forwarded
+ * verbatim by the Relay backend; clients filter by `project_id`. */
+export interface WsProjectFileChanged {
+  type: "project_file_changed";
+  payload: {
+    type?: "project_file_changed";
+    project_id: string;
+    path: string;
+    change: "created" | "modified" | "deleted";
+  };
+}
+
+/** Live event from ark when an agent workspace's filesystem changes. */
+export interface WsWorkspaceFileChanged {
+  type: "workspace_file_changed";
+  payload: {
+    type?: "workspace_file_changed";
+    agent_name: string;
+    path: string;
+    change: "created" | "modified" | "deleted";
+  };
+}
+
 export type WsEvent =
   | WsStateUpdate
   | WsTextEvent
@@ -271,4 +326,6 @@ export type WsEvent =
   | WsSessionStatus
   | WsSessionUnread
   | WsAgentFile
+  | WsProjectFileChanged
+  | WsWorkspaceFileChanged
   | WsError;

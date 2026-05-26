@@ -1,0 +1,771 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DirListing } from "../types";
+import type { FileChangeEvent } from "../hooks/useRelay";
+import {
+  deletePath,
+  listDir,
+  mkdir,
+  readFile,
+  writeFile,
+} from "../api";
+
+type Kind = "project" | "workspace";
+
+interface Props {
+  /** Always shown as the panel title. */
+  agentId: string | null;
+  agentName: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  projectServerId: string | null;
+  /** When true the Workspace tab is available — ark sessions only. */
+  workspaceAvailable: boolean;
+  /** File-change WS events relayed from `useRelay`. The panel filters by
+   * the active tab's scope (project_id / agent_name) to refresh listings
+   * and feed the "Recent changes" list. */
+  fileChanges: FileChangeEvent[];
+  onClose: () => void;
+}
+
+export function FileBrowserPanel({
+  agentId,
+  agentName,
+  projectId,
+  projectName,
+  projectServerId,
+  workspaceAvailable,
+  fileChanges,
+  onClose,
+}: Props) {
+  const projectTabAvailable = !!projectId;
+  // Default to Project when bound; else Workspace.
+  const [tab, setTab] = useState<Kind>(projectTabAvailable ? "project" : "workspace");
+
+  // The tab automatically follows availability — useful when binding
+  // changes (rare but happens on resume).
+  useEffect(() => {
+    if (tab === "project" && !projectTabAvailable) setTab("workspace");
+    if (tab === "workspace" && !workspaceAvailable && projectTabAvailable) {
+      setTab("project");
+    }
+  }, [projectTabAvailable, workspaceAvailable, tab]);
+
+  return (
+    <div className="h-full flex flex-col bg-gray-950 border-l border-gray-800 w-96">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
+        <div className="text-sm font-medium text-gray-300">Files</div>
+        <button
+          onClick={onClose}
+          className="text-gray-500 hover:text-gray-300"
+          title="Close panel"
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-gray-800 text-xs">
+        {projectTabAvailable && (
+          <TabButton
+            active={tab === "project"}
+            onClick={() => setTab("project")}
+            label={`Project${projectName ? ` · ${projectName}` : ""}`}
+          />
+        )}
+        {workspaceAvailable && (
+          <TabButton
+            active={tab === "workspace"}
+            onClick={() => setTab("workspace")}
+            label={`Workspace${agentName ? ` · ${agentName}` : ""}`}
+          />
+        )}
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {tab === "project" && projectId && (
+          <FileTreeView
+            kind="project"
+            id={projectId}
+            scope={projectId}
+            server={projectServerId ?? undefined}
+            fileChanges={fileChanges}
+          />
+        )}
+        {tab === "workspace" && agentId && agentName && (
+          <FileTreeView
+            kind="workspace"
+            id={agentId}
+            scope={agentName}
+            fileChanges={fileChanges}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TabButton({
+  active, onClick, label,
+}: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-2 truncate ${
+        active
+          ? "text-gray-100 border-b-2 border-blue-500"
+          : "text-gray-500 hover:text-gray-300"
+      }`}
+      title={label}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ── File tree view ────────────────────────────────────────────────────
+
+function FileTreeView({
+  kind, id, scope, server, fileChanges,
+}: {
+  kind: Kind;
+  id: string;
+  scope: string;       // project_id or agent_name — used to filter file-change events
+  server?: string;
+  fileChanges: FileChangeEvent[];
+}) {
+  const [root, setRoot] = useState<DirListing | null>(null);
+  const [expanded, setExpanded] = useState<Map<string, DirListing>>(new Map());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadRoot = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const listing = await listDir(kind, id, "", server);
+      setRoot(listing);
+    } catch (e) {
+      setError(String(e));
+      setRoot(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [kind, id, server]);
+
+  const loadSubdir = useCallback(async (path: string) => {
+    try {
+      const listing = await listDir(kind, id, path, server);
+      setExpanded((m) => {
+        const next = new Map(m);
+        next.set(path, listing);
+        return next;
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [kind, id, server]);
+
+  const collapseSubdir = useCallback((path: string) => {
+    setExpanded((m) => {
+      const next = new Map(m);
+      next.delete(path);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    loadRoot();
+    setExpanded(new Map());
+    setSelectedPath(null);
+  }, [loadRoot]);
+
+  // Re-load the affected directory listing when a relevant file-change
+  // event arrives. We re-fetch the deepest open ancestor of the changed
+  // path; anything closed will refresh on next expansion.
+  const lastFileChangeTs = useRef(0);
+  useEffect(() => {
+    const recent = fileChanges.filter((e) => e.kind === kind && e.scope === scope && e.ts > lastFileChangeTs.current);
+    if (recent.length === 0) return;
+    lastFileChangeTs.current = Math.max(...recent.map((e) => e.ts));
+    const touchedDirs = new Set<string>();
+    for (const ev of recent) {
+      const parent = ev.path.includes("/") ? ev.path.split("/").slice(0, -1).join("/") : "";
+      touchedDirs.add(parent);
+    }
+    for (const dir of touchedDirs) {
+      if (dir === "") {
+        loadRoot();
+      } else if (expanded.has(dir)) {
+        loadSubdir(dir);
+      }
+    }
+  }, [fileChanges, kind, scope, loadRoot, loadSubdir, expanded]);
+
+  // ── actions ─────────────────────────────────────────────
+
+  const handleUpload = async (files: FileList | null, targetDir: string) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setError(null);
+    try {
+      for (const f of Array.from(files)) {
+        const path = targetDir ? `${targetDir}/${f.name}` : f.name;
+        await writeFile(kind, id, path, f, server);
+      }
+      // Listings refresh via the WS event, but if ark misses the event for
+      // some reason, force a reload.
+      if (targetDir === "" || targetDir == null) {
+        await loadRoot();
+      } else if (expanded.has(targetDir)) {
+        await loadSubdir(targetDir);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDelete = async (path: string) => {
+    if (!confirm(`Delete ${path}?`)) return;
+    try {
+      await deletePath(kind, id, path, server);
+      const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+      if (parent === "") loadRoot();
+      else if (expanded.has(parent)) loadSubdir(parent);
+      if (selectedPath === path) setSelectedPath(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleMkdir = async () => {
+    const name = prompt("New folder name:");
+    if (!name) return;
+    try {
+      await mkdir(kind, id, name, server);
+      loadRoot();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  // ── render ──────────────────────────────────────────────
+
+  const recent = useMemo(
+    () => fileChanges
+      .filter((e) => e.kind === kind && e.scope === scope)
+      .slice(-10)
+      .reverse(),
+    [fileChanges, kind, scope],
+  );
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Toolbar */}
+      <div className="flex items-center gap-1 px-3 py-2 border-b border-gray-800">
+        <ToolbarIcon
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          title={uploading ? "Uploading…" : "Upload files"}
+        >
+          {uploading ? <SpinnerIcon /> : <UploadIcon />}
+        </ToolbarIcon>
+        <ToolbarIcon onClick={handleMkdir} title="New folder">
+          <FolderPlusIcon />
+        </ToolbarIcon>
+        <ToolbarIcon onClick={loadRoot} title="Refresh">
+          <RefreshIcon />
+        </ToolbarIcon>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => handleUpload(e.target.files, "")}
+        />
+      </div>
+
+      {error && (
+        <div className="px-3 py-1 text-xs text-red-400 border-b border-gray-800">{error}</div>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-y-auto py-1">
+        {loading && !root && <div className="text-xs text-gray-600 px-3 py-2">Loading…</div>}
+        {root && (
+          <DirView
+            listing={root}
+            path=""
+            depth={0}
+            expanded={expanded}
+            loadSubdir={loadSubdir}
+            collapseSubdir={collapseSubdir}
+            selectedPath={selectedPath}
+            onSelect={setSelectedPath}
+            onDelete={handleDelete}
+          />
+        )}
+      </div>
+
+      {selectedPath && (
+        <FilePreview
+          key={selectedPath}
+          kind={kind}
+          id={id}
+          path={selectedPath}
+          server={server}
+          onClose={() => setSelectedPath(null)}
+        />
+      )}
+
+      {/* Recent changes feed */}
+      {recent.length > 0 && (
+        <div className="border-t border-gray-800 text-xs">
+          <div className="px-3 py-1 text-gray-500">Recent changes</div>
+          <div className="max-h-32 overflow-y-auto">
+            {recent.map((ev) => (
+              <div
+                key={`${ev.ts}-${ev.path}`}
+                className="px-3 py-0.5 flex justify-between font-mono text-[11px] text-gray-400 hover:bg-gray-900"
+              >
+                <span className="truncate">
+                  <span
+                    className={
+                      ev.change === "created"
+                        ? "text-emerald-400"
+                        : ev.change === "deleted"
+                        ? "text-red-400"
+                        : "text-amber-400"
+                    }
+                  >
+                    {ev.change[0].toUpperCase()}
+                  </span>{" "}
+                  {ev.path}
+                </span>
+                <span className="text-gray-600">{_relativeTime(ev.ts)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DirView({
+  listing, path, depth, expanded, loadSubdir, collapseSubdir, selectedPath, onSelect, onDelete,
+}: {
+  listing: DirListing;
+  path: string;
+  depth: number;
+  expanded: Map<string, DirListing>;
+  loadSubdir: (p: string) => void;
+  collapseSubdir: (p: string) => void;
+  selectedPath: string | null;
+  onSelect: (p: string) => void;
+  onDelete: (p: string) => void;
+}) {
+  return (
+    <div>
+      {listing.entries.map((entry) => {
+        const childPath = path ? `${path}/${entry.name}` : entry.name;
+        const isOpen = expanded.has(childPath);
+        return (
+          <div key={entry.name}>
+            <div
+              className={`group flex items-center gap-1 px-2 py-0.5 text-xs cursor-pointer
+                          hover:bg-gray-900 ${
+                            selectedPath === childPath ? "bg-gray-800 text-gray-100" : "text-gray-300"
+                          }`}
+              style={{ paddingLeft: 8 + depth * 12 }}
+              onClick={() => {
+                if (entry.is_dir) {
+                  if (isOpen) collapseSubdir(childPath);
+                  else loadSubdir(childPath);
+                } else {
+                  onSelect(childPath);
+                }
+              }}
+            >
+              <span className="w-3 text-gray-600">
+                {entry.is_dir ? (isOpen ? "▾" : "▸") : ""}
+              </span>
+              <span className="flex-1 truncate">
+                {entry.is_dir ? "📁 " : "📄 "}
+                {entry.name}
+              </span>
+              {!entry.is_dir && (
+                <span className="text-gray-600">{_formatSize(entry.size)}</span>
+              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(childPath);
+                }}
+                className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 px-1"
+                title="Delete"
+              >
+                ✕
+              </button>
+            </div>
+            {entry.is_dir && isOpen && expanded.get(childPath) && (
+              <DirView
+                listing={expanded.get(childPath)!}
+                path={childPath}
+                depth={depth + 1}
+                expanded={expanded}
+                loadSubdir={loadSubdir}
+                collapseSubdir={collapseSubdir}
+                selectedPath={selectedPath}
+                onSelect={onSelect}
+                onDelete={onDelete}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── File preview ──────────────────────────────────────────────────────
+
+function FilePreview({
+  kind, id, path, server, onClose,
+}: {
+  kind: Kind;
+  id: string;
+  path: string;
+  server?: string;
+  onClose: () => void;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [binary, setBinary] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  // Edit state. `draft` mirrors `content` while editing; on Save we PUT the
+  // draft and commit it back to `content`; on Cancel we discard the draft.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  // User-resizable preview height. Persisted across the session so editing
+  // a series of files doesn't keep resetting the size.
+  const [height, setHeight] = useState<number>(() => {
+    const stored = Number(localStorage.getItem("relay_preview_height"));
+    return Number.isFinite(stored) && stored >= 80 ? stored : 240;
+  });
+  const dragStart = useRef<{ y: number; h: number } | null>(null);
+
+  const onDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragStart.current = { y: e.clientY, h: height };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStart.current) return;
+    const dy = dragStart.current.y - e.clientY; // dragging up grows the pane
+    const next = Math.min(
+      Math.max(80, dragStart.current.h + dy),
+      Math.max(120, window.innerHeight - 160),
+    );
+    setHeight(next);
+  };
+  const onDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStart.current) return;
+    dragStart.current = null;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    try { localStorage.setItem("relay_preview_height", String(height)); }
+    catch { /* ignore */ }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      setContent(null);
+      setBinary(false);
+      setEditing(false);
+      try {
+        const resp = await readFile(kind, id, path, server);
+        const ct = resp.headers.get("content-type") ?? "";
+        if (ct.startsWith("text/") || ct.includes("json") || ct.includes("xml") || _hasTextExt(path)) {
+          const text = await resp.text();
+          if (!cancelled) setContent(text);
+        } else {
+          if (!cancelled) setBinary(true);
+        }
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [kind, id, path, server]);
+
+  const handleDownload = async () => {
+    try {
+      const resp = await readFile(kind, id, path, server);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = path.split("/").pop() || "file";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleStartEdit = () => {
+    setDraft(content ?? "");
+    setEditing(true);
+  };
+  const handleCancelEdit = () => {
+    setEditing(false);
+    setDraft("");
+  };
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await writeFile(kind, id, path, draft, server);
+      setContent(draft);
+      setEditing(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canEdit = !binary && !loading && content !== null && !error;
+
+  return (
+    <div
+      className="border-t border-gray-800 flex flex-col flex-shrink-0"
+      style={{ height }}
+    >
+      {/* Drag handle — sits flush with the top border, grows the pane up. */}
+      <div
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+        className="h-1 -mt-px cursor-row-resize hover:bg-blue-500/40 active:bg-blue-500/60"
+        title="Drag to resize"
+      />
+      <div className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-900">
+        <span className="font-mono truncate flex-1">{path}</span>
+        {editing ? (
+          <>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="text-emerald-400 hover:text-emerald-300 p-1 disabled:opacity-50"
+              title={saving ? "Saving…" : "Save"}
+            >
+              {saving ? <SpinnerIcon /> : <SaveIcon />}
+            </button>
+            <button
+              onClick={handleCancelEdit}
+              disabled={saving}
+              className="text-gray-400 hover:text-gray-200 p-1 disabled:opacity-50"
+              title="Cancel"
+            >
+              <CancelIcon />
+            </button>
+          </>
+        ) : (
+          <>
+            {canEdit && (
+              <button
+                onClick={handleStartEdit}
+                className="text-gray-400 hover:text-white p-1"
+                title="Edit"
+              >
+                <EditIcon />
+              </button>
+            )}
+            <button
+              onClick={handleDownload}
+              className="text-blue-400 hover:text-blue-300 p-1"
+              title="Download"
+            >
+              <DownloadIcon />
+            </button>
+            <button onClick={onClose} className="text-gray-500 hover:text-gray-300" title="Close">
+              ×
+            </button>
+          </>
+        )}
+      </div>
+      <div className="flex-1 overflow-auto bg-gray-950 p-2 text-xs font-mono text-gray-300">
+        {loading && "Loading…"}
+        {error && <span className="text-red-400">{error}</span>}
+        {binary && !error && (
+          <span className="text-gray-500 italic">
+            Binary file — use Download to save locally.
+          </span>
+        )}
+        {content !== null && !binary && !editing && (
+          <pre className="whitespace-pre-wrap break-words">{content}</pre>
+        )}
+        {editing && (
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            spellCheck={false}
+            autoFocus
+            className="w-full h-full min-h-[8rem] bg-gray-950 text-gray-100
+                       font-mono text-xs resize-none outline-none border-none p-0"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── helpers ──────────────────────────────────────────────────────────
+
+function _formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}M`;
+}
+
+function _relativeTime(ts: number): string {
+  const secs = Math.round((Date.now() - ts) / 1000);
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.round(secs / 60)}m`;
+  if (secs < 86400) return `${Math.round(secs / 3600)}h`;
+  return `${Math.round(secs / 86400)}d`;
+}
+
+// ── icons ────────────────────────────────────────────────────────────
+
+function ToolbarIcon({
+  children, onClick, disabled, title,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  title: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-800
+                 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+    >
+      {children}
+    </button>
+  );
+}
+
+function UploadIcon() {
+  // Tray with an upward arrow leaving it.
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M10 3a.75.75 0 01.75.75v6.69l1.97-1.97a.75.75 0 111.06 1.06l-3.25 3.25a.75.75 0 01-1.06 0L6.22 9.53a.75.75 0 011.06-1.06l1.97 1.97V3.75A.75.75 0 0110 3z" />
+      <path d="M3.5 13a.75.75 0 011.5 0v2.25c0 .138.112.25.25.25h9.5a.25.25 0 00.25-.25V13a.75.75 0 011.5 0v2.25A1.75 1.75 0 0114.75 17h-9.5A1.75 1.75 0 013.5 15.25V13z" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M10 3a.75.75 0 01.75.75v6.69l1.97-1.97a.75.75 0 111.06 1.06l-3.25 3.25a.75.75 0 01-1.06 0L6.22 9.53a.75.75 0 011.06-1.06l1.97 1.97V3.75A.75.75 0 0110 3z" transform="rotate(180 10 7.5)" />
+      <path d="M3.5 13a.75.75 0 011.5 0v2.25c0 .138.112.25.25.25h9.5a.25.25 0 00.25-.25V13a.75.75 0 011.5 0v2.25A1.75 1.75 0 0114.75 17h-9.5A1.75 1.75 0 013.5 15.25V13z" />
+    </svg>
+  );
+}
+
+function FolderPlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M2 5a2 2 0 012-2h3.586a1 1 0 01.707.293l1.121 1.121A2 2 0 0010.828 5H16a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V5z" />
+      <path d="M10 8.5a.5.5 0 01.5.5v1.5H12a.5.5 0 010 1h-1.5V13a.5.5 0 01-1 0v-1.5H8a.5.5 0 010-1h1.5V9a.5.5 0 01.5-.5z" fill="#0b0f19" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  // Circular arrow.
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0v2.43l-.31-.31A7 7 0 003.239 8.187a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  // Pencil.
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+    </svg>
+  );
+}
+
+function SaveIcon() {
+  // Floppy / disk silhouette.
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M3 4a2 2 0 012-2h9.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0117 4.414V16a2 2 0 01-2 2H5a2 2 0 01-2-2V4zm2 0v3h7V4H5zm0 6v6h10v-6H5z" />
+    </svg>
+  );
+}
+
+function CancelIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" className="animate-spin">
+      <path
+        fillRule="evenodd"
+        d="M10 2a8 8 0 100 16 8 8 0 000-16zm0 2a6 6 0 110 12 6 6 0 010-12z"
+        clipRule="evenodd"
+        opacity="0.25"
+      />
+      <path d="M10 2a8 8 0 018 8h-2a6 6 0 00-6-6V2z" />
+    </svg>
+  );
+}
+
+// ── helpers (continued) ──────────────────────────────────────────────
+
+function _hasTextExt(path: string): boolean {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return [
+    "txt", "md", "markdown", "json", "yaml", "yml", "toml", "ini", "cfg",
+    "csv", "tsv", "log", "py", "js", "ts", "tsx", "jsx", "swift", "go",
+    "rs", "rb", "java", "c", "h", "cpp", "hpp", "cs", "sh", "bash", "zsh",
+    "css", "scss", "html", "xml", "sql", "env", "gitignore",
+  ].includes(ext);
+}
