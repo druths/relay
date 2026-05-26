@@ -23,6 +23,8 @@ enum WebSocketEvent {
     case audioDone(AudioDonePayload)
     case transcription(TranscriptionPayload)
     case agentFile(AgentFilePayload)
+    case projectFileChanged(ProjectFileChangedPayload)
+    case workspaceFileChanged(WorkspaceFileChangedPayload)
     case error(ErrorPayload)
 }
 
@@ -198,6 +200,75 @@ struct AgentFilePayload: Codable {
     }
 }
 
+/// Relay forwards ark's `project_file_changed` events nested under
+/// `payload`. ark itself emits them flat — accept either shape so we cope
+/// with both wire formats without tweaking the backend.
+struct ProjectFileChangedPayload: Codable {
+    let projectId: String
+    let path: String
+    let change: String
+
+    enum OuterKeys: String, CodingKey {
+        case payload, projectId = "project_id", path, change
+    }
+    enum InnerKeys: String, CodingKey {
+        case projectId = "project_id", path, change
+    }
+
+    init(from decoder: Decoder) throws {
+        let outer = try decoder.container(keyedBy: OuterKeys.self)
+        if let nested = try? outer.nestedContainer(keyedBy: InnerKeys.self, forKey: .payload) {
+            projectId = try nested.decode(String.self, forKey: .projectId)
+            path = try nested.decode(String.self, forKey: .path)
+            change = try nested.decode(String.self, forKey: .change)
+        } else {
+            projectId = try outer.decode(String.self, forKey: .projectId)
+            path = try outer.decode(String.self, forKey: .path)
+            change = try outer.decode(String.self, forKey: .change)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: InnerKeys.self)
+        try c.encode(projectId, forKey: .projectId)
+        try c.encode(path, forKey: .path)
+        try c.encode(change, forKey: .change)
+    }
+}
+
+struct WorkspaceFileChangedPayload: Codable {
+    let agentName: String
+    let path: String
+    let change: String
+
+    enum OuterKeys: String, CodingKey {
+        case payload, agentName = "agent_name", path, change
+    }
+    enum InnerKeys: String, CodingKey {
+        case agentName = "agent_name", path, change
+    }
+
+    init(from decoder: Decoder) throws {
+        let outer = try decoder.container(keyedBy: OuterKeys.self)
+        if let nested = try? outer.nestedContainer(keyedBy: InnerKeys.self, forKey: .payload) {
+            agentName = try nested.decode(String.self, forKey: .agentName)
+            path = try nested.decode(String.self, forKey: .path)
+            change = try nested.decode(String.self, forKey: .change)
+        } else {
+            agentName = try outer.decode(String.self, forKey: .agentName)
+            path = try outer.decode(String.self, forKey: .path)
+            change = try outer.decode(String.self, forKey: .change)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: InnerKeys.self)
+        try c.encode(agentName, forKey: .agentName)
+        try c.encode(path, forKey: .path)
+        try c.encode(change, forKey: .change)
+    }
+}
+
 // MARK: - Decoding
 
 extension WebSocketEvent {
@@ -270,6 +341,10 @@ extension WebSocketEvent {
                 return .transcription(try decoder.decode(TranscriptionPayload.self, from: payloadData))
             case "agent_file":
                 return .agentFile(try decoder.decode(AgentFilePayload.self, from: payloadData))
+            case "project_file_changed":
+                return .projectFileChanged(try decoder.decode(ProjectFileChangedPayload.self, from: payloadData))
+            case "workspace_file_changed":
+                return .workspaceFileChanged(try decoder.decode(WorkspaceFileChangedPayload.self, from: payloadData))
             case "error":
                 return .error(try decoder.decode(ErrorPayload.self, from: payloadData))
             default:

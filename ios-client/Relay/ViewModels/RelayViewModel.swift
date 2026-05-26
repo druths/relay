@@ -17,6 +17,14 @@ final class RelayViewModel {
     var agents: [Agent] = []
     var sessions: [Session] = []
     var allLabels: [String] = []
+    /// ark projects, aggregated across every configured ark backend by the
+    /// Relay aggregator. Each entry carries `serverId` so the UI can route
+    /// single-project ops back to the right ark.
+    var projects: [Project] = []
+    /// Ring-buffered file-change events (project + workspace). Feeds the
+    /// "Recent changes" view in the file browser.
+    var fileChanges: [FileChangeEvent] = []
+    private static let fileChangeBufferCap = 200
     /// Client-side system markers keyed by sessionId — appended to sessionMessages
     /// on resume so the user can see when a session ended within the app's lifetime.
     private var sessionMarkers: [String: [Message]] = [:]
@@ -32,7 +40,7 @@ final class RelayViewModel {
     // MARK: - Services
 
     private let authService: AuthService
-    private let apiClient: APIClient
+    let apiClient: APIClient
     private let webSocketService = WebSocketService()
     private let speechService = SpeechRecognitionService()
     let audio = AudioViewModel()
@@ -129,6 +137,7 @@ final class RelayViewModel {
         await refreshAgents()
         await fetchSessions()
         await fetchLabels()
+        await fetchProjects()
         await checkSttStatus()
         await fetchPlatformSettings()
     }
@@ -363,6 +372,27 @@ final class RelayViewModel {
         } catch {
             print("[Relay] Failed to fetch sessions: \(error)")
         }
+    }
+
+    func fetchProjects() async {
+        do {
+            let fetched = try await apiClient.listProjects()
+            projects = fetched
+        } catch {
+            // Non-ark setups will fail or return empty — keep quiet.
+            print("[Relay] Failed to fetch projects: \(error)")
+        }
+    }
+
+    /// Append to the ring-buffered file-change log, dropping the oldest
+    /// entry when we cross the cap.
+    func appendFileChange(_ ev: FileChangeEvent) {
+        var next = fileChanges
+        next.append(ev)
+        if next.count > Self.fileChangeBufferCap {
+            next.removeFirst(next.count - Self.fileChangeBufferCap)
+        }
+        fileChanges = next
     }
 
     func setOutputMode(_ mode: OutputMode) {
@@ -848,6 +878,24 @@ final class RelayViewModel {
                 role: .agent,
                 textContent: payload.description ?? "",
                 attachments: [attachment]
+            ))
+
+        case .projectFileChanged(let payload):
+            appendFileChange(.init(
+                ts: Date(),
+                kind: .project,
+                scope: payload.projectId,
+                path: payload.path,
+                change: FileChangeEvent.Change(rawValue: payload.change) ?? .modified,
+            ))
+
+        case .workspaceFileChanged(let payload):
+            appendFileChange(.init(
+                ts: Date(),
+                kind: .workspace,
+                scope: payload.agentName,
+                path: payload.path,
+                change: FileChangeEvent.Change(rawValue: payload.change) ?? .modified,
             ))
 
         case .error(let payload):

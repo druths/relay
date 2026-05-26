@@ -29,6 +29,8 @@ struct RelayView: View {
     /// timestamp and agent bubbles show context-window / token usage when the
     /// underlying message has metadata attached.
     @AppStorage("relay_diagnostics") private var diagnostics: Bool = false
+    @State private var showProjectManager = false
+    @State private var showFileBrowser = false
 
     init(authService: AuthService, themeManager: ThemeManager) {
         self.authService = authService
@@ -75,6 +77,16 @@ struct RelayView: View {
         }
         .sheet(isPresented: $showLabelEditor) {
             labelEditorSheet
+        }
+        .sheet(isPresented: $showProjectManager) {
+            ProjectManagerView(relay: relay)
+                .environment(\.relayTheme, themeManager.current)
+        }
+        .sheet(isPresented: $showFileBrowser) {
+            if let s = activeSession {
+                FileBrowserView(relay: relay, session: s)
+                    .environment(\.relayTheme, themeManager.current)
+            }
         }
         .alert("Rename Session", isPresented: $showRenameAlert) {
             TextField("Session name", text: $renameText)
@@ -220,6 +232,16 @@ struct RelayView: View {
             Spacer()
 
             if relay.activeSessionId != nil {
+                if fileBrowserAvailable {
+                    Button(action: { showFileBrowser = true }) {
+                        ThemedIcon(systemName: "folder")
+                            .font(theme.bodyFont(size: 18, weight: .semibold))
+                            .foregroundStyle(theme.textPrimary)
+                            .frame(width: 44, height: 44)
+                            .background(theme.elevated)
+                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                    }
+                }
                 sessionKebabMenu
 
                 Button(action: { Task { await relay.leaveSession() } }) {
@@ -267,6 +289,16 @@ struct RelayView: View {
                 }
 
                 Spacer()
+
+                Button(action: { showProjectManager = true }) {
+                    ThemedIcon(systemName: "folder")
+                        .font(theme.bodyFont(size: 14, weight: .bold))
+                        .foregroundStyle(theme.textPrimary)
+                        .frame(width: 24, height: 24)
+                        .background(theme.elevated)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                }
+                .help("Projects")
 
                 Button(action: { showSettings = true }) {
                     ThemedIcon(systemName: "gearshape")
@@ -390,12 +422,39 @@ struct RelayView: View {
         }
     }
 
+    private var activeSession: Session? {
+        relay.sessions.first(where: { $0.sessionId == relay.activeSessionId })
+    }
+
+    /// The Files affordance shows when the active session is ark-backed
+    /// (workspace tab applicable) or bound to a project. Other providers
+    /// have no filesystem to expose.
+    private var fileBrowserAvailable: Bool {
+        guard let s = activeSession else { return false }
+        if s.projectId != nil { return true }
+        return relay.agents.first(where: { $0.agentId == s.agentId })?.llmProvider == "ark"
+    }
+
+    /// Look up the project name for a session's `projectId` against the
+    /// view-model's cached projects list. Returns nil if the session isn't
+    /// bound or the project hasn't loaded yet.
+    private func projectName(for session: Session) -> String? {
+        guard let pid = session.projectId else { return nil }
+        return relay.projects.first(where: { $0.id == pid })?.name
+    }
+
     private var sidebarSessionsSection: some View {
         let filtered = relay.sessions.filter { session in
             if let filter = sidebarLabelFilter, !session.labels.contains(filter) { return false }
             if !sidebarSearchQuery.isEmpty {
-                let name = (session.name ?? session.agentName).lowercased()
-                if !name.contains(sidebarSearchQuery.lowercased()) { return false }
+                let q = sidebarSearchQuery.lowercased()
+                // Search hits name / agent / labels / project name — chips and
+                // labels share the same conceptual space.
+                var haystack = (session.name ?? "").lowercased()
+                haystack += " " + session.agentName.lowercased()
+                haystack += " " + session.labels.joined(separator: " ").lowercased()
+                if let pn = projectName(for: session) { haystack += " " + pn.lowercased() }
+                if !haystack.contains(q) { return false }
             }
             return true
         }
@@ -478,8 +537,17 @@ struct RelayView: View {
                                     .foregroundStyle(theme.textQuaternary)
                             }
 
-                            if !session.labels.isEmpty {
+                            if !session.labels.isEmpty || projectName(for: session) != nil {
                                 HStack(spacing: 3) {
+                                    if let pn = projectName(for: session) {
+                                        Text(pn)
+                                            .font(theme.monoFont(size: 18, weight: .medium))
+                                            .foregroundStyle(theme.success)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1)
+                                            .background(theme.success.opacity(0.18))
+                                            .clipShape(Capsule())
+                                    }
                                     ForEach(session.labels.prefix(3), id: \.self) { label in
                                         Text(label)
                                             .font(theme.monoFont(size: 18, weight: .medium))
@@ -573,6 +641,16 @@ struct RelayView: View {
             Spacer()
 
             if relay.activeSessionId != nil {
+                if fileBrowserAvailable {
+                    Button(action: { showFileBrowser = true }) {
+                        ThemedIcon(systemName: "folder")
+                            .font(theme.bodyFont(size: 18, weight: .semibold))
+                            .foregroundStyle(theme.textPrimary)
+                            .frame(width: 44, height: 44)
+                            .background(theme.elevated)
+                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                    }
+                }
                 sessionKebabMenu
 
                 Button(action: { Task { await relay.leaveSession() } }) {
@@ -686,6 +764,16 @@ struct RelayView: View {
                     Button(action: {
                         showMenu = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showProjectManager = true
+                        }
+                    }) {
+                        ThemedLabel(title: "Projects", systemImage: "folder")
+                            .foregroundStyle(theme.textPrimary)
+                    }
+
+                    Button(action: {
+                        showMenu = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             showActivityLog = true
                         }
                     }) {
@@ -733,8 +821,12 @@ struct RelayView: View {
                     let filteredSessions = relay.sessions.filter { session in
                         if let filter = menuLabelFilter, !session.labels.contains(filter) { return false }
                         if !menuSearchQuery.isEmpty {
-                            let name = (session.name ?? session.agentName).lowercased()
-                            if !name.contains(menuSearchQuery.lowercased()) { return false }
+                            let q = menuSearchQuery.lowercased()
+                            var haystack = (session.name ?? "").lowercased()
+                            haystack += " " + session.agentName.lowercased()
+                            haystack += " " + session.labels.joined(separator: " ").lowercased()
+                            if let pn = projectName(for: session) { haystack += " " + pn.lowercased() }
+                            if !haystack.contains(q) { return false }
                         }
                         return true
                     }
@@ -802,8 +894,17 @@ struct RelayView: View {
                                             .foregroundStyle(theme.textQuaternary)
                                     }
 
-                                    if !session.labels.isEmpty {
+                                    if !session.labels.isEmpty || projectName(for: session) != nil {
                                         HStack(spacing: 4) {
+                                            if let pn = projectName(for: session) {
+                                                Text(pn)
+                                                    .font(theme.monoFont(size: 18, weight: .medium))
+                                                    .foregroundStyle(theme.success)
+                                                    .padding(.horizontal, 8)
+                                                    .padding(.vertical, 3)
+                                                    .background(theme.success.opacity(0.18))
+                                                    .clipShape(Capsule())
+                                            }
                                             ForEach(session.labels, id: \.self) { label in
                                                 Text(label)
                                                     .font(theme.monoFont(size: 18, weight: .medium))

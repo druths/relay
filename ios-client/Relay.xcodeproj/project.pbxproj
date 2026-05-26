@@ -37,9 +37,11 @@
 		5537BF2868592255AAF0F670 /* RelayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948EF6B3DA85FF1BA8CFC6EE /* RelayApp.swift */; };
 		5550A6B2CF4052B1F564AE69 /* thinking_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 3644EB5E1C3E31588DA8D14B /* thinking_1.wav */; };
 		55A6DB951D19BD6889B77075 /* live_start_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = D5AEC3C080AB67D402F85445 /* live_start_1.wav */; };
+		58B4C922AF47D2AF01829870 /* Project.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95916EC95C1B32173720A5D2 /* Project.swift */; };
 		5F50790D164B3A0797AFC1B3 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C249E903D59B7D654EA775C5 /* AccountStore.swift */; };
 		60324D4F56D4721206FA302D /* StatusIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F065FC446C9EC4F808468D10 /* StatusIndicator.swift */; };
 		604F6C89F33E6C1080964919 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99230868B22A5498D4052BB /* Session.swift */; };
+		65B26FD51C35E598416ECC58 /* ProjectsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1279FA47D6BF5378FDEAB722 /* ProjectsAPI.swift */; };
 		67153BF0B97E26F1F5CCCA5A /* RelayViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31CE01E4F023808B5ED73D41 /* RelayViewModel.swift */; };
 		6AB871F93C0780C5429EA861 /* CRTOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BEC5064987E5F1370CC3C0B /* CRTOverlay.swift */; };
 		77EDE977F3525B381A8C675D /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5629B936746D106D8B9034 /* ActivityLogView.swift */; };
@@ -56,6 +58,7 @@
 		9996E5FB3AB7CA3D363AFC02 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B1F2A24DC524D9098334350 /* APIClient.swift */; };
 		A1265EA794B82F430E6CD9B8 /* RelayColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C16E77EE957B8D8F2CB9659 /* RelayColors.swift */; };
 		A4EA4E59387250DED44FA16C /* SilentKeepAlive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 912432D794E9D1FE7165651C /* SilentKeepAlive.swift */; };
+		A80820F384AD84A776B054FE /* FileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */; };
 		AC91A1044DB20F944BE1B76C /* PixelIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63EC72F424782C30F8E737D8 /* PixelIcon.swift */; };
 		AF13179EAA0E12FA34792437 /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */; };
 		B3C6794809BCC03E5DD3D358 /* PixelFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = D26249E8004C02E5E5519D8B /* PixelFace.swift */; };
@@ -63,6 +66,7 @@
 		BD7FCA963D970827354C10EC /* RelayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DA7A3FBBC3B11BBD35A15B /* RelayView.swift */; };
 		BE840CD06FB3F261DFEF5B48 /* PressStart2P-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B2A4D843321C18FA4239E7A1 /* PressStart2P-Regular.ttf */; };
 		BEDCE5B68A34E5661B0F6C6B /* ThinkingToneService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */; };
+		C43B2D4EC161876BB6394543 /* ProjectManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50167414A32C6226B7563E20 /* ProjectManagerView.swift */; };
 		CD4CA122ED73A6E61C256435 /* AudioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 909727E85D2D35F4161B5F24 /* AudioViewModel.swift */; };
 		D542B8D8116E090123CE96ED /* WebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36867E74E2DB4F0F89C17EE2 /* WebSocketService.swift */; };
 		D758AFFBFBC56A617A0C3043 /* HapticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20F1A7CF1C37E5D68F02F84B /* HapticService.swift */; };
@@ -102,6 +106,7 @@
 		0EB4DDCF19266F408F07CFD1 /* InputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBar.swift; sourceTree = "<group>"; };
 		0F5629B936746D106D8B9034 /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
 		0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderDefaultsTabView.swift; sourceTree = "<group>"; };
+		1279FA47D6BF5378FDEAB722 /* ProjectsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsAPI.swift; sourceTree = "<group>"; };
 		1A668E4C226B3C74D17F6F2D /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingToneService.swift; sourceTree = "<group>"; };
 		20F1A7CF1C37E5D68F02F84B /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
@@ -121,6 +126,7 @@
 		43D1016F3351DFA80C729268 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		4B71D1E2344D1C02A44198F5 /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
 		4DC8B3E22C7703A96B3B4494 /* ChimeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChimeGenerator.swift; sourceTree = "<group>"; };
+		50167414A32C6226B7563E20 /* ProjectManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectManagerView.swift; sourceTree = "<group>"; };
 		5ABCA07E8AD78F33997BE464 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		5AFF15BA8C95399F13ABAA39 /* Base64Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Base64Extensions.swift; sourceTree = "<group>"; };
 		5D7EEAE95CA2B4222A6B2C85 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -139,6 +145,8 @@
 		909727E85D2D35F4161B5F24 /* AudioViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioViewModel.swift; sourceTree = "<group>"; };
 		912432D794E9D1FE7165651C /* SilentKeepAlive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilentKeepAlive.swift; sourceTree = "<group>"; };
 		948EF6B3DA85FF1BA8CFC6EE /* RelayApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayApp.swift; sourceTree = "<group>"; };
+		95916EC95C1B32173720A5D2 /* Project.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Project.swift; sourceTree = "<group>"; };
+		99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserView.swift; sourceTree = "<group>"; };
 		9C16E77EE957B8D8F2CB9659 /* RelayColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayColors.swift; sourceTree = "<group>"; };
 		A2C16BE961C550509F0634F5 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
 		A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicePickerSheet.swift; sourceTree = "<group>"; };
@@ -171,10 +179,12 @@
 				E587D02A8BB568FC7933144B /* AgentSelector.swift */,
 				692688A835BFFA0EC6600223 /* ConversationLog.swift */,
 				A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */,
+				99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */,
 				0EB4DDCF19266F408F07CFD1 /* InputBar.swift */,
 				6E3E6922C9E8819987A2C44C /* MarkdownText.swift */,
 				EACEBD78D17A8220B9722E73 /* MessageBubble.swift */,
 				D26249E8004C02E5E5519D8B /* PixelFace.swift */,
+				50167414A32C6226B7563E20 /* ProjectManagerView.swift */,
 				0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */,
 				A54D9305405BD042B6817944 /* SessionList.swift */,
 				39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */,
@@ -195,6 +205,7 @@
 				43D1016F3351DFA80C729268 /* AuthService.swift */,
 				20F1A7CF1C37E5D68F02F84B /* HapticService.swift */,
 				79719ECC3D01B1F82B573722 /* KeychainService.swift */,
+				1279FA47D6BF5378FDEAB722 /* ProjectsAPI.swift */,
 				912432D794E9D1FE7165651C /* SilentKeepAlive.swift */,
 				7CBE41AF5C080E5DED126546 /* SpeechRecognitionService.swift */,
 				1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */,
@@ -294,6 +305,7 @@
 				A807EC3870D8644C1B4DD413 /* LiveActivityIntents.swift */,
 				CB134658D8D2BA7B62B343A1 /* Message.swift */,
 				61FD94630C73BA584916A9DB /* PlatformSettings.swift */,
+				95916EC95C1B32173720A5D2 /* Project.swift */,
 				3DAFE76391BC23000E406FF9 /* ProviderSchemas.swift */,
 				B6D4C97F298DF8083BE24410 /* RelayActivityAttributes.swift */,
 				E99230868B22A5498D4052BB /* Session.swift */,
@@ -485,6 +497,7 @@
 				3546C7E1FB742933D480C0A6 /* ContentView.swift in Sources */,
 				1C03ACF908AF4CC1974D1C33 /* ConversationLog.swift in Sources */,
 				3650DE77A0CA3311BF3C42E8 /* DevicePickerSheet.swift in Sources */,
+				A80820F384AD84A776B054FE /* FileBrowserView.swift in Sources */,
 				D758AFFBFBC56A617A0C3043 /* HapticService.swift in Sources */,
 				16CCAE86C115D6B1FAB98D4E /* InputBar.swift in Sources */,
 				DA54A91DE82D7F2B4733AB7B /* KeychainService.swift in Sources */,
@@ -497,6 +510,9 @@
 				B3C6794809BCC03E5DD3D358 /* PixelFace.swift in Sources */,
 				AC91A1044DB20F944BE1B76C /* PixelIcon.swift in Sources */,
 				2E2D6803F353C124CFB03BAE /* PlatformSettings.swift in Sources */,
+				58B4C922AF47D2AF01829870 /* Project.swift in Sources */,
+				C43B2D4EC161876BB6394543 /* ProjectManagerView.swift in Sources */,
+				65B26FD51C35E598416ECC58 /* ProjectsAPI.swift in Sources */,
 				F0BD930A949D257E41813476 /* ProviderDefaultsTabView.swift in Sources */,
 				808B233B89F865DCF46FC3A9 /* ProviderSchemas.swift in Sources */,
 				3C261BCD405BCBF02C13013B /* RelayActivityAttributes.swift in Sources */,

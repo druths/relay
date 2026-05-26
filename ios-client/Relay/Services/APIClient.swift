@@ -55,6 +55,33 @@ actor APIClient {
         let _ = try await rawRequest("DELETE", path: path)
     }
 
+    /// PUT raw bytes with an explicit Content-Type. Mirrors `rawRequest` but
+    /// skips JSON-encoding the body — used for `writeFile` (project /
+    /// workspace filesystem PUT) where the body is raw file bytes.
+    func putRawBytes(
+        path: String, body: Data,
+        contentType: String = "application/octet-stream",
+    ) async throws {
+        let token = await authService.token
+        let url = URL(string: "\(AppConfig.apiBase)\(path)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 {
+            await authService.handleUnauthorized()
+            throw APIError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw APIError.httpError(http.statusCode)
+        }
+    }
+
     /// Upload a single file via multipart/form-data and decode the JSON response.
     func uploadMultipart<T: Decodable>(
         _ method: String, path: String,
