@@ -1030,9 +1030,12 @@ struct RelayView: View {
                 }
                 .padding(.horizontal, 16)
 
-                // Existing labels as quick-add suggestions
-                let existingLabels = Array(Set(relay.sessions.flatMap(\.labels)))
-                    .sorted()
+                // Existing labels as quick-add suggestions. Sourced from
+                // `relay.allLabels` (server-side authoritative list) — using
+                // `relay.sessions.flatMap(\.labels)` would only surface
+                // labels that happen to be on a session in the recent slice
+                // currently in memory, hiding labels on older sessions.
+                let existingLabels = relay.allLabels
                     .filter { !relay.activeSessionLabels.contains($0) }
                 if !existingLabels.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
