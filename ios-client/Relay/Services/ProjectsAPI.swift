@@ -71,22 +71,26 @@ extension APIClient {
         let projectId: String?
         let projectServerId: String?
         let labels: [String]?
+        let name: String?
 
         enum CodingKeys: String, CodingKey {
             case agentId = "agent_id"
             case projectId = "project_id"
             case projectServerId = "project_server_id"
             case labels
+            case name
         }
     }
 
     func createSession(
         agentId: String, projectId: String? = nil,
         projectServerId: String? = nil, labels: [String]? = nil,
+        name: String? = nil,
     ) async throws -> Session {
         let body = SessionCreateBody(
             agentId: agentId, projectId: projectId,
             projectServerId: projectServerId, labels: labels,
+            name: name?.trimmingCharacters(in: .whitespaces).isEmpty == false ? name : nil,
         )
         return try await request("POST", path: "/v1/sessions", body: body)
     }

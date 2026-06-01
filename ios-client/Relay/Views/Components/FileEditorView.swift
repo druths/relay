@@ -41,9 +41,43 @@ struct FileEditorView: View {
     #endif
     @State private var lastSeenFileChangeTs: Date = .distantPast
 
+    // ── Find ─────────────────────────────────────────────────────────
+    @State private var findOpen = false
+    @State private var findQuery = ""
+    @State private var findIndex = 0
+    @State private var selectedRange = NSRange(location: 0, length: 0)
+    /// Bumped to force `SelectableTextEditor` to scroll the current
+    /// selection into view; separate from the binding so the user's own
+    /// typing-driven selection updates don't trigger jumps.
+    @State private var scrollTarget = 0
+    @FocusState private var findFocused: Bool
+
+    private var findMatches: [NSRange] {
+        guard !findQuery.isEmpty, !draft.isEmpty else { return [] }
+        let nsDraft = draft as NSString
+        let needle = findQuery
+        var out: [NSRange] = []
+        var search = NSRange(location: 0, length: nsDraft.length)
+        while search.length > 0 {
+            let r = nsDraft.range(of: needle, options: .caseInsensitive, range: search)
+            if r.location == NSNotFound { break }
+            out.append(r)
+            let next = r.location + max(1, r.length)
+            search = NSRange(location: next, length: max(0, nsDraft.length - next))
+        }
+        return out
+    }
+
     private var isDirty: Bool {
         guard let saved = savedContent else { return false }
         return draft != saved
+    }
+
+    /// The match the editor should visibly highlight, if any. Nil when the
+    /// find bar is closed or the query has no matches.
+    private var currentFindMatch: NSRange? {
+        guard findOpen, !findMatches.isEmpty, findIndex < findMatches.count else { return nil }
+        return findMatches[findIndex]
     }
 
     private var isImageMode: Bool {
@@ -61,6 +95,9 @@ struct FileEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if findOpen {
+                findBar
+            }
             if staleBanner {
                 staleBannerView
             } else if notOnDisk {
@@ -82,6 +119,97 @@ struct FileEditorView: View {
         .task(id: path) { await loadFile() }
         .onChange(of: relay.fileChanges.count) { _, _ in handleFileChange() }
         .onChange(of: isDirty) { _, newValue in onDirtyChange(newValue) }
+        // ⌘F to open the find bar (no-op when an external keyboard isn't
+        // attached, and harmless on iPhone).
+        .background(
+            Button("") { openFind() }
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+        )
+    }
+
+    @ViewBuilder
+    private var findBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.textTertiary)
+            TextField("Find", text: $findQuery)
+                .font(.system(size: 13, design: .monospaced))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .focused($findFocused)
+                .submitLabel(.search)
+                .onSubmit { jumpToMatch(findIndex) } // re-anchor on Enter
+                .onChange(of: findQuery) { _, _ in
+                    findIndex = 0
+                    if !findMatches.isEmpty { jumpToMatch(0) }
+                }
+            Text(_matchCounter)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.textQuaternary)
+                .frame(minWidth: 44)
+            Button {
+                advanceMatch(by: -1)
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .disabled(findMatches.isEmpty)
+            .foregroundStyle(theme.textSecondary)
+            Button {
+                advanceMatch(by: 1)
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .disabled(findMatches.isEmpty)
+            .foregroundStyle(theme.textSecondary)
+            Button { closeFind() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11))
+            }
+            .foregroundStyle(theme.textQuaternary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+        }
+    }
+
+    private var _matchCounter: String {
+        guard !findQuery.isEmpty else { return "" }
+        if findMatches.isEmpty { return "0/0" }
+        return "\(findIndex + 1)/\(findMatches.count)"
+    }
+
+    private func openFind() {
+        guard !isBinary, !isImageMode else { return }
+        findOpen = true
+        DispatchQueue.main.async { findFocused = true }
+    }
+
+    private func closeFind() {
+        findOpen = false
+        findQuery = ""
+        findFocused = false
+    }
+
+    private func advanceMatch(by delta: Int) {
+        guard !findMatches.isEmpty else { return }
+        let n = findMatches.count
+        let ni = (findIndex + delta + n) % n
+        findIndex = ni
+        jumpToMatch(ni)
+    }
+
+    private func jumpToMatch(_ idx: Int) {
+        guard idx >= 0, idx < findMatches.count else { return }
+        selectedRange = findMatches[idx]
+        scrollTarget &+= 1
     }
 
     @ViewBuilder
@@ -94,6 +222,12 @@ struct FileEditorView: View {
                 .truncationMode(.middle)
             Spacer()
             if !isBinary && !loading && !isImageMode {
+                Button { openFind() } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15))
+                }
+                .foregroundStyle(theme.textSecondary)
+                .help("Find (⌘F)")
                 Button {
                     Task { await save() }
                 } label: {
@@ -189,11 +323,22 @@ struct FileEditorView: View {
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if savedContent != nil {
+            #if canImport(UIKit)
+            SelectableTextEditor(
+                text: $draft,
+                selectedRange: $selectedRange,
+                scrollTarget: scrollTarget,
+                shouldFocus: !findOpen,
+                highlightRange: currentFindMatch,
+            )
+            .background(theme.elevated)
+            #else
             TextEditor(text: $draft)
                 .font(.system(size: 14, design: .monospaced))
                 .scrollContentBackground(.hidden)
                 .background(theme.elevated)
                 .padding(.horizontal, 6)
+            #endif
         }
     }
 

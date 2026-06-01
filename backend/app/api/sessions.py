@@ -96,6 +96,10 @@ class SessionCreateIn(BaseModel):
     # operations on the session can locate the right ark.
     project_server_id: str | None = None
     labels: list[str] | None = None
+    # Optional display name. When set, the auto-name-after-2-turns logic in
+    # `handle_session_message_stream` is suppressed (it gates on name being
+    # null), so user intent is preserved.
+    name: str | None = None
 
 
 @router.post("", response_model=SessionOut, status_code=201)
@@ -129,6 +133,7 @@ async def create_session_endpoint(
         labels=body.labels,
         project_id=body.project_id,
         project_server_id=body.project_server_id,
+        name=(body.name or "").strip() or None,
     )
     labels = await get_session_labels(db, session.session_id)
     return SessionOut(

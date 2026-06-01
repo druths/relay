@@ -25,6 +25,14 @@ final class RelayViewModel {
     /// "Recent changes" view in the file browser.
     var fileChanges: [FileChangeEvent] = []
     private static let fileChangeBufferCap = 200
+
+    /// Per-scope file-tree expansion state, keyed by `"<kind>:<targetId>"`.
+    /// Survives sheet dismissals so reopening the file browser puts the
+    /// user back in the same tree state — important on iPad where the
+    /// browser is a sheet and gets dismissed every time a file is opened
+    /// into a central tab. Ephemeral: cleared on disconnect alongside
+    /// the rest of session state.
+    var fileTreeExpanded: [String: [String: DirListing]] = [:]
     /// Client-side system markers keyed by sessionId — appended to sessionMessages
     /// on resume so the user can see when a session ended within the app's lifetime.
     private var sessionMarkers: [String: [Message]] = [:]
@@ -155,6 +163,7 @@ final class RelayViewModel {
         lobbyMessages = []
         sessionMessages = []
         sessions = []
+        fileTreeExpanded = [:]
         status = "idle"
         activeSpeaker = "operator"
     }

@@ -13,6 +13,9 @@ struct RelayView: View {
     @State private var showMenu = false
     @State private var showActivityLog = false
     @State private var showRenameAlert = false
+    /// When set, present a confirm alert before closing the named tab —
+    /// it has unsaved edits and we don't want to silently drop them.
+    @State private var pendingCloseTabId: String? = nil
     @State private var renameSessionId: String?
     @State private var renameText = ""
     @State private var showLabelEditor = false
@@ -31,6 +34,10 @@ struct RelayView: View {
     @AppStorage("relay_diagnostics") private var diagnostics: Bool = false
     @State private var showProjectManager = false
     @State private var showFileBrowser = false
+    /// When set, present the Create-chat sheet for this agent. Cleared
+    /// after the user finishes (or cancels) — the new session is
+    /// resumed from the sheet's onCreated callback.
+    @State private var createChatAgent: Agent? = nil
 
     /// Per-session file tabs for the iPad central pane. Ephemeral —
     /// cleared whenever the active session changes. The conversation is
@@ -105,6 +112,21 @@ struct RelayView: View {
             ProjectManagerView(relay: relay)
                 .environment(\.relayTheme, themeManager.current)
         }
+        .sheet(item: $createChatAgent) { agent in
+            CreateChatSheet(
+                relay: relay,
+                agent: agent,
+                onCreated: { sessionId in
+                    Task {
+                        // Pull the freshly-created session into the list,
+                        // then enter it directly — no operator round-trip.
+                        await relay.fetchSessions()
+                        await relay.resumeSession(sessionId)
+                    }
+                },
+            )
+            .environment(\.relayTheme, themeManager.current)
+        }
         .sheet(isPresented: $showFileBrowser) {
             if let s = activeSession {
                 // On iPad, files open into central-pane tabs (the sheet
@@ -143,6 +165,11 @@ struct RelayView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .modifier(DirtyCloseAlert(
+            pendingCloseTabId: $pendingCloseTabId,
+            tabPath: { tid in openFileTabs.first(where: { $0.tabId == tid })?.path },
+            onDiscard: { tid in doCloseFileTab(tid) }
+        ))
         .task { await relay.connect() }
         .onDisappear { Task { await relay.disconnect() } }
         .onChange(of: scenePhase) { _, phase in
@@ -230,7 +257,8 @@ struct RelayView: View {
                     activeAgentName: relay.activeAgentName,
                     onSelect: { agent in
                         Task { await relay.sendMessage("connect me to \(agent.name)") }
-                    }
+                    },
+                    onCreateChat: { agent in createChatAgent = agent }
                 )
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(theme.border).frame(height: theme.borderWidth)
@@ -463,6 +491,15 @@ struct RelayView: View {
                         .background(isActive ? theme.agentActive : Color.clear)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        if agent.llmProvider == "ark" {
+                            Button {
+                                createChatAgent = agent
+                            } label: {
+                                Label("Create chat…", systemImage: "plus.bubble")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -816,8 +853,19 @@ struct RelayView: View {
     }
 
     private func closeFileTab(_ tabId: String) {
-        // Dirty-confirm via a simple alert flow would interrupt this with
-        // SwiftUI; for v1 we accept that closing a dirty tab discards.
+        // If the tab has unsaved edits, route through the confirm alert
+        // so the user can explicitly discard or back out. Clean tabs
+        // close immediately.
+        if let tab = openFileTabs.first(where: { $0.tabId == tabId }), tab.dirty {
+            pendingCloseTabId = tabId
+            return
+        }
+        doCloseFileTab(tabId)
+    }
+
+    /// Actually drops the tab from state — invoked either directly (clean
+    /// tab) or after the user confirms the discard.
+    private func doCloseFileTab(_ tabId: String) {
         let wasActive = activeTabId == tabId
         openFileTabs.removeAll(where: { $0.tabId == tabId })
         if wasActive {
@@ -1303,5 +1351,37 @@ struct RelayView: View {
         let newLabels = relay.activeSessionLabels + [trimmed]
         Task { await relay.updateSessionLabels(sessionId, labels: newLabels) }
         labelInputText = ""
+    }
+}
+
+/// Pulled out as a `ViewModifier` because inlining its `.alert(...)` chain
+/// into `RelayView`'s already-large `body` blew past Swift's type-check
+/// budget. Same behavior either way.
+private struct DirtyCloseAlert: ViewModifier {
+    @Binding var pendingCloseTabId: String?
+    let tabPath: (String) -> String?
+    let onDiscard: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Discard unsaved changes?",
+            isPresented: Binding(
+                get: { pendingCloseTabId != nil },
+                set: { if !$0 { pendingCloseTabId = nil } }
+            ),
+            presenting: pendingCloseTabId,
+        ) { tid in
+            Button("Discard", role: .destructive) {
+                onDiscard(tid)
+                pendingCloseTabId = nil
+            }
+            Button("Cancel", role: .cancel) { pendingCloseTabId = nil }
+        } message: { tid in
+            if let p = tabPath(tid) {
+                Text("\(p) has unsaved changes.")
+            } else {
+                Text("Unsaved changes will be lost.")
+            }
+        }
     }
 }

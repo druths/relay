@@ -146,10 +146,12 @@ export async function createSession(
   agentId: string,
   projectId?: string,
   projectServerId?: string,
+  name?: string,
 ): Promise<import("./types").Session> {
   const body: Record<string, string> = { agent_id: agentId };
   if (projectId) body.project_id = projectId;
   if (projectServerId) body.project_server_id = projectServerId;
+  if (name && name.trim()) body.name = name.trim();
   const resp = await apiFetch("/v1/sessions", {
     method: "POST",
     body: JSON.stringify(body),

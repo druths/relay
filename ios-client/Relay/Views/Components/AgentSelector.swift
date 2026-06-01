@@ -4,6 +4,9 @@ struct AgentSelector: View {
     let agents: [Agent]
     let activeAgentName: String?
     let onSelect: (Agent) -> Void
+    /// When provided, ark agents pick up a long-press context menu with
+    /// a "Create chat…" option. Non-ark agents stay on the lobby path.
+    var onCreateChat: ((Agent) -> Void)? = nil
 
     @Environment(\.relayTheme) private var theme
 
@@ -36,6 +39,7 @@ struct AgentSelector: View {
 
     private func agentRow(_ agent: Agent) -> some View {
         let isActive = agent.name == activeAgentName
+        let supportsCreateChat = onCreateChat != nil && agent.llmProvider == "ark"
 
         return Button(action: { onSelect(agent) }) {
             HStack(spacing: 8) {
@@ -51,6 +55,15 @@ struct AgentSelector: View {
             .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if supportsCreateChat {
+                Button {
+                    onCreateChat?(agent)
+                } label: {
+                    Label("Create chat…", systemImage: "plus.bubble")
+                }
+            }
+        }
     }
 
     private func statusColor(_ status: Agent.AgentStatus) -> Color {

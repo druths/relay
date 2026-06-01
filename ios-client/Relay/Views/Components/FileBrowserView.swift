@@ -163,6 +163,9 @@ private struct FileTreeView: View {
     @Environment(\.relayTheme) private var theme
 
     @State private var rootListing: DirListing?
+    /// Local mirror of the persisted expansion state. Read from the
+    /// view-model on first mount; written back on every change so the next
+    /// sheet open finds the tree the way the user left it.
     @State private var expanded: [String: DirListing] = [:]
     @State private var loading = false
     @State private var error: String?
@@ -175,6 +178,10 @@ private struct FileTreeView: View {
     @State private var newFileName = ""
     @State private var pathToDelete: String?
     @State private var lastSeenFileChangeTs: Date = .distantPast
+
+    /// Key used in `relay.fileTreeExpanded` so different projects /
+    /// workspaces have independent persisted state.
+    private var stateKey: String { "\(kind.rawValue):\(targetId)" }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -265,10 +272,20 @@ private struct FileTreeView: View {
             }
         }
         .task(id: "\(kind)-\(targetId)") {
+            // Seed local state from whatever the user had open last time
+            // the browser was up — survives sheet dismissals.
+            if let cached = relay.fileTreeExpanded[stateKey] {
+                expanded = cached
+            }
             await loadRoot()
         }
         .onChange(of: relay.fileChanges.count) { _, _ in
             handleFileChanges()
+        }
+        // Mirror local expansion changes back into the view-model so the
+        // next mount picks them up.
+        .onChange(of: expanded) { _, new in
+            relay.fileTreeExpanded[stateKey] = new
         }
         .alert("New folder", isPresented: $showMkdirAlert) {
             TextField("Folder name", text: $mkdirName)
@@ -347,7 +364,10 @@ private struct FileTreeView: View {
         defer { loading = false }
         do {
             rootListing = try await relay.apiClient.listDir(kind, id: targetId, path: "", server: server)
-            expanded = [:]
+            // Note: we intentionally do NOT clear `expanded` here. The
+            // persistence layer (relay.fileTreeExpanded) survives sheet
+            // dismissals and gets re-seeded in `.task(id:)` when the
+            // (kind, targetId) pair actually changes.
         } catch {
             self.error = String(describing: error)
         }

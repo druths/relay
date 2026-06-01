@@ -26,6 +26,7 @@
 		2ADD40A2159E60D16579813F /* WebSocketEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 071718BDCBB8F15D92597F38 /* WebSocketEvent.swift */; };
 		2E2D6803F353C124CFB03BAE /* PlatformSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61FD94630C73BA584916A9DB /* PlatformSettings.swift */; };
 		3030079E872051F3413460F7 /* AgentManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */; };
+		31BDFBA3E636C62A6CA73390 /* CreateChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D58D290F2871D77D97152DF /* CreateChatSheet.swift */; };
 		31DD5B4F7A11B45E892A15EF /* Base64Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AFF15BA8C95399F13ABAA39 /* Base64Extensions.swift */; };
 		3237E4F8E080FA8E456255E9 /* response_received_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = EE9CCA9FD1A8B0C89D7D7944 /* response_received_1.wav */; };
 		3546C7E1FB742933D480C0A6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABCA07E8AD78F33997BE464 /* ContentView.swift */; };
@@ -69,6 +70,7 @@
 		C43B2D4EC161876BB6394543 /* ProjectManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50167414A32C6226B7563E20 /* ProjectManagerView.swift */; };
 		CD4CA122ED73A6E61C256435 /* AudioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 909727E85D2D35F4161B5F24 /* AudioViewModel.swift */; };
 		D542B8D8116E090123CE96ED /* WebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36867E74E2DB4F0F89C17EE2 /* WebSocketService.swift */; };
+		D65F57A19CBE08B993453E65 /* SelectableTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13641BF20F696B8D8FAD4D20 /* SelectableTextEditor.swift */; };
 		D758AFFBFBC56A617A0C3043 /* HapticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20F1A7CF1C37E5D68F02F84B /* HapticService.swift */; };
 		D8870AE87B8F8567AACD3235 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE22E0410CA4D69AE33B8575 /* AppViewModel.swift */; };
 		DA54A91DE82D7F2B4733AB7B /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79719ECC3D01B1F82B573722 /* KeychainService.swift */; };
@@ -108,6 +110,7 @@
 		0F5629B936746D106D8B9034 /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
 		0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderDefaultsTabView.swift; sourceTree = "<group>"; };
 		1279FA47D6BF5378FDEAB722 /* ProjectsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsAPI.swift; sourceTree = "<group>"; };
+		13641BF20F696B8D8FAD4D20 /* SelectableTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableTextEditor.swift; sourceTree = "<group>"; };
 		14802FEDA5891387B4D1C15F /* FileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEditorView.swift; sourceTree = "<group>"; };
 		1A668E4C226B3C74D17F6F2D /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingToneService.swift; sourceTree = "<group>"; };
@@ -139,6 +142,7 @@
 		69AE7D992CD3BE725117CEB7 /* live_end_1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = live_end_1.wav; sourceTree = "<group>"; };
 		6A54EAB298182DB707F0D36A /* AudioPlayerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerService.swift; sourceTree = "<group>"; };
 		6B1F2A24DC524D9098334350 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		6D58D290F2871D77D97152DF /* CreateChatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateChatSheet.swift; sourceTree = "<group>"; };
 		6E3E6922C9E8819987A2C44C /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
 		73F8CE7B75365F8F88F0DA57 /* RelayLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayLiveActivity.swift; sourceTree = "<group>"; };
 		79719ECC3D01B1F82B573722 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
@@ -180,6 +184,7 @@
 				C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */,
 				E587D02A8BB568FC7933144B /* AgentSelector.swift */,
 				692688A835BFFA0EC6600223 /* ConversationLog.swift */,
+				6D58D290F2871D77D97152DF /* CreateChatSheet.swift */,
 				A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */,
 				99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */,
 				14802FEDA5891387B4D1C15F /* FileEditorView.swift */,
@@ -189,6 +194,7 @@
 				D26249E8004C02E5E5519D8B /* PixelFace.swift */,
 				50167414A32C6226B7563E20 /* ProjectManagerView.swift */,
 				0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */,
+				13641BF20F696B8D8FAD4D20 /* SelectableTextEditor.swift */,
 				A54D9305405BD042B6817944 /* SessionList.swift */,
 				39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */,
 				361BF127CF429820121827A5 /* StatusOrb.swift */,
@@ -499,6 +505,7 @@
 				807F6D93F5DB6F23C9A7A528 /* ChimeGenerator.swift in Sources */,
 				3546C7E1FB742933D480C0A6 /* ContentView.swift in Sources */,
 				1C03ACF908AF4CC1974D1C33 /* ConversationLog.swift in Sources */,
+				31BDFBA3E636C62A6CA73390 /* CreateChatSheet.swift in Sources */,
 				3650DE77A0CA3311BF3C42E8 /* DevicePickerSheet.swift in Sources */,
 				A80820F384AD84A776B054FE /* FileBrowserView.swift in Sources */,
 				EEDFACCE283D2AFB9AE6E489 /* FileEditorView.swift in Sources */,
@@ -525,6 +532,7 @@
 				0AA55ED3AC0FCC95E6C48746 /* RelayTheme.swift in Sources */,
 				BD7FCA963D970827354C10EC /* RelayView.swift in Sources */,
 				67153BF0B97E26F1F5CCCA5A /* RelayViewModel.swift in Sources */,
+				D65F57A19CBE08B993453E65 /* SelectableTextEditor.swift in Sources */,
 				604F6C89F33E6C1080964919 /* Session.swift in Sources */,
 				055F7970735EBA917899D839 /* SessionList.swift in Sources */,
 				A4EA4E59387250DED44FA16C /* SilentKeepAlive.swift in Sources */,

@@ -338,13 +338,18 @@ async def _persist_message(
 async def _create_agent_session(
     db: AsyncSession, user_id: str, agent: Agent, labels: list[str] | None = None,
     project_id: str | None = None, project_server_id: str | None = None,
+    name: str | None = None,
 ) -> Session:
     """Always create a fresh session for this user+agent pair. If
     `project_id` is provided, the session is bound to that ark project at
-    creation time (immutable for life — matches ark's semantics)."""
+    creation time (immutable for life — matches ark's semantics). When
+    `name` is provided, the session lands with that display name; the
+    auto-name-after-2-turns logic gates on name being null so this is
+    enough to override it."""
     session = Session(
         user_id=user_id, agent_id=agent.agent_id,
         project_id=project_id, project_server_id=project_server_id,
+        name=name,
     )
     db.add(session)
     await db.commit()

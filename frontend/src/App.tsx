@@ -9,6 +9,8 @@ import { AgentSelector } from "./components/AgentSelector";
 import { AgentManagement } from "./components/AgentManagement";
 import { ProjectManager } from "./components/ProjectManager";
 import { FileBrowserPanel } from "./components/FileBrowserPanel";
+import { CreateChatDialog } from "./components/CreateChatDialog";
+import type { Agent } from "./types";
 import { FileEditorTab } from "./components/FileEditorTab";
 import { uploadFiles } from "./api";
 
@@ -27,6 +29,9 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const [showSettings, setShowSettings] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showFileBrowser, setShowFileBrowser] = useState(false);
+  /** When set, the `CreateChatDialog` is presented for this agent. Cleared
+   * on close or after the dialog finishes creating a session. */
+  const [createChatAgent, setCreateChatAgent] = useState<Agent | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -402,6 +407,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             activeSpeaker={relay.activeSpeaker}
             onSelect={handleAgentSelect}
             disabled={false}
+            onCreateChat={(agent) => setCreateChatAgent(agent)}
           />
         )}
 
@@ -957,6 +963,21 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         <ProjectManager
           onClose={() => setShowProjects(false)}
           onChange={relay.refreshProjects}
+        />
+      )}
+
+      {/* Create chat dialog — launched from the agent kebab. POST /v1/sessions
+          + resume the new session_id so the user lands directly in it. */}
+      {createChatAgent && (
+        <CreateChatDialog
+          agent={createChatAgent}
+          projects={relay.projects}
+          onClose={() => setCreateChatAgent(null)}
+          onCreated={(sessionId) => {
+            setCreateChatAgent(null);
+            relay.fetchSessions();
+            relay.resumeSession(sessionId);
+          }}
         />
       )}
     </div>
