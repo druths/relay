@@ -73,6 +73,7 @@
 		D8870AE87B8F8567AACD3235 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE22E0410CA4D69AE33B8575 /* AppViewModel.swift */; };
 		DA54A91DE82D7F2B4733AB7B /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79719ECC3D01B1F82B573722 /* KeychainService.swift */; };
 		EBEF3DA54A41FE4B33D7210D /* SoundWaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */; };
+		EEDFACCE283D2AFB9AE6E489 /* FileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14802FEDA5891387B4D1C15F /* FileEditorView.swift */; };
 		F0BD930A949D257E41813476 /* ProviderDefaultsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */; };
 		F4067A28DBAE091CA99EC06B /* RelayLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F8CE7B75365F8F88F0DA57 /* RelayLiveActivity.swift */; };
 /* End PBXBuildFile section */
@@ -107,6 +108,7 @@
 		0F5629B936746D106D8B9034 /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
 		0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderDefaultsTabView.swift; sourceTree = "<group>"; };
 		1279FA47D6BF5378FDEAB722 /* ProjectsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsAPI.swift; sourceTree = "<group>"; };
+		14802FEDA5891387B4D1C15F /* FileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEditorView.swift; sourceTree = "<group>"; };
 		1A668E4C226B3C74D17F6F2D /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingToneService.swift; sourceTree = "<group>"; };
 		20F1A7CF1C37E5D68F02F84B /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
@@ -180,6 +182,7 @@
 				692688A835BFFA0EC6600223 /* ConversationLog.swift */,
 				A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */,
 				99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */,
+				14802FEDA5891387B4D1C15F /* FileEditorView.swift */,
 				0EB4DDCF19266F408F07CFD1 /* InputBar.swift */,
 				6E3E6922C9E8819987A2C44C /* MarkdownText.swift */,
 				EACEBD78D17A8220B9722E73 /* MessageBubble.swift */,
@@ -498,6 +501,7 @@
 				1C03ACF908AF4CC1974D1C33 /* ConversationLog.swift in Sources */,
 				3650DE77A0CA3311BF3C42E8 /* DevicePickerSheet.swift in Sources */,
 				A80820F384AD84A776B054FE /* FileBrowserView.swift in Sources */,
+				EEDFACCE283D2AFB9AE6E489 /* FileEditorView.swift in Sources */,
 				D758AFFBFBC56A617A0C3043 /* HapticService.swift in Sources */,
 				16CCAE86C115D6B1FAB98D4E /* InputBar.swift in Sources */,
 				DA54A91DE82D7F2B4733AB7B /* KeychainService.swift in Sources */,

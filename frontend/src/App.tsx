@@ -9,6 +9,7 @@ import { AgentSelector } from "./components/AgentSelector";
 import { AgentManagement } from "./components/AgentManagement";
 import { ProjectManager } from "./components/ProjectManager";
 import { FileBrowserPanel } from "./components/FileBrowserPanel";
+import { FileEditorTab } from "./components/FileEditorTab";
 import { uploadFiles } from "./api";
 
 function App() {
@@ -40,6 +41,99 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const [sessionRenameValue, setSessionRenameValue] = useState("");
   const [editingLabels, setEditingLabels] = useState(false);
   const [labelInputValue, setLabelInputValue] = useState("");
+
+  // Per-session file tabs. The conversation is always the leading tab (id
+  // `"conversation"`) and can't be closed. Files open into additional tabs
+  // here when the user clicks them in the FileBrowserPanel. Ephemeral —
+  // cleared when the session changes.
+  interface FileTabState {
+    tabId: string;        // `${kind}:${targetId}:${path}` — stable per file
+    kind: "project" | "workspace";
+    targetId: string;     // project_id or agent_id
+    path: string;
+    server?: string;
+    /** ark `agent_name` (workspace) or `project_id` (project) — what
+     * `FileEditorTab` uses to match `fileChanges` events. */
+    scope: string;
+    dirty: boolean;
+  }
+  const [openTabs, setOpenTabs] = useState<FileTabState[]>([]);
+  /** Which file tab is currently shown in the top split pane. null when
+   * no files are open (conversation takes the full pane) — `"conversation"`
+   * is no longer a value because conversation lives below the splitter
+   * permanently now. */
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+
+  // Reset tabs whenever the session changes — leaving a session ditches
+  // any open editors. Dirty-confirm on session leave isn't worth chasing
+  // for v1; closing an individual tab already prompts.
+  useEffect(() => {
+    setOpenTabs([]);
+    setActiveTabId(null);
+  }, [relay.activeSessionId]);
+
+  const openFileTab = useCallback((
+    kind: "project" | "workspace", targetId: string, path: string,
+    server: string | undefined, scope: string,
+  ) => {
+    const tabId = `${kind}:${targetId}:${path}`;
+    setOpenTabs((tabs) =>
+      tabs.find((t) => t.tabId === tabId)
+        ? tabs
+        : [...tabs, { tabId, kind, targetId, path, server, scope, dirty: false }],
+    );
+    setActiveTabId(tabId);
+  }, []);
+
+  const closeFileTab = useCallback((tabId: string) => {
+    setOpenTabs((tabs) => {
+      const tab = tabs.find((t) => t.tabId === tabId);
+      if (tab?.dirty && !window.confirm("Discard unsaved changes?")) return tabs;
+      const next = tabs.filter((t) => t.tabId !== tabId);
+      setActiveTabId((curr) => {
+        if (curr !== tabId) return curr;
+        // Closing the active tab → fall back to the last remaining one,
+        // or null if we just closed the only open file.
+        return next.length > 0 ? next[next.length - 1].tabId : null;
+      });
+      return next;
+    });
+  }, []);
+
+  // Splitter between the file pane (top) and the conversation (bottom).
+  // Defaults to 360px, clamped on drag, persisted across reloads.
+  const [filePaneHeight, setFilePaneHeight] = useState<number>(() => {
+    const stored = Number(localStorage.getItem("relay_file_pane_height"));
+    return Number.isFinite(stored) && stored >= 100 ? stored : 360;
+  });
+  const splitterDrag = useRef<{ y: number; h: number } | null>(null);
+
+  const onSplitterDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    splitterDrag.current = { y: e.clientY, h: filePaneHeight };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onSplitterMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!splitterDrag.current) return;
+    const dy = e.clientY - splitterDrag.current.y; // drag down = grow top pane
+    const next = Math.min(
+      Math.max(100, splitterDrag.current.h + dy),
+      Math.max(160, window.innerHeight - 220),
+    );
+    setFilePaneHeight(next);
+  };
+  const onSplitterUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!splitterDrag.current) return;
+    splitterDrag.current = null;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    try { localStorage.setItem("relay_file_pane_height", String(filePaneHeight)); }
+    catch { /* ignore */ }
+  };
+
+  const setTabDirty = useCallback((tabId: string, dirty: boolean) => {
+    setOpenTabs((tabs) =>
+      tabs.map((t) => (t.tabId === tabId ? { ...t, dirty } : t)),
+    );
+  }, []);
 
   // Diagnostics is a global UI preference: when on, every conversation bubble
   // shows its timestamp; agent bubbles also show token usage if the message
@@ -719,19 +813,94 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        <ConversationLog
-          lobbyMessages={relay.lobbyMessages}
-          sessionMessages={relay.sessionMessages}
-          activeSessionId={relay.activeSessionId}
-          activeAgentName={relay.activeAgentName}
-          diagnostics={diagnostics}
-        />
-        <TextInput
-          onSend={relay.sendMessage}
-          disabled={!relay.connected}
-          sessionId={relay.activeSessionId}
-          onAttachment={relay.appendUserAttachment}
-        />
+        {/* Top split: file tab bar + active editor. Only renders when files
+            are open. Conversation lives below — always visible — so the
+            user can chat and watch a file at the same time. */}
+        {inSession && openTabs.length > 0 && (
+          <div
+            className="flex flex-col flex-shrink-0 min-h-0 border-b border-gray-800"
+            style={{ height: `${filePaneHeight}px` }}
+          >
+            <div className="flex border-b border-gray-800 bg-gray-900/40 text-xs overflow-x-auto flex-shrink-0">
+              {openTabs.map((t) => {
+                const filename = t.path.split("/").pop() || t.path;
+                const active = activeTabId === t.tabId;
+                return (
+                  <div
+                    key={t.tabId}
+                    className={`flex items-center border-r border-gray-800 flex-shrink-0 ${
+                      active ? "bg-gray-950 text-gray-100" : "text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <button
+                      onClick={() => setActiveTabId(t.tabId)}
+                      className="pl-3 pr-1 py-2 flex items-center gap-1.5"
+                      title={t.path}
+                    >
+                      {t.dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" aria-label="unsaved" />}
+                      <span className="font-mono">{filename}</span>
+                    </button>
+                    <button
+                      onClick={() => closeFileTab(t.tabId)}
+                      className="px-2 py-2 text-gray-500 hover:text-red-400"
+                      title="Close tab"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex-1 min-h-0 flex flex-col">
+              {openTabs.map((t) => (
+                activeTabId === t.tabId && (
+                  <FileEditorTab
+                    key={t.tabId}
+                    kind={t.kind}
+                    targetId={t.targetId}
+                    path={t.path}
+                    server={t.server}
+                    scope={t.scope}
+                    fileChanges={relay.fileChanges}
+                    onDirtyChange={(dirty) => setTabDirty(t.tabId, dirty)}
+                  />
+                )
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Splitter — only present when files are open. Drag down/up to
+            redistribute vertical space between the file pane and the
+            conversation. */}
+        {inSession && openTabs.length > 0 && (
+          <div
+            onPointerDown={onSplitterDown}
+            onPointerMove={onSplitterMove}
+            onPointerUp={onSplitterUp}
+            onPointerCancel={onSplitterUp}
+            className="h-1 -mt-px flex-shrink-0 cursor-row-resize
+                       hover:bg-blue-500/40 active:bg-blue-500/60"
+            title="Drag to resize"
+          />
+        )}
+
+        {/* Conversation pane — always rendered at the bottom of `main`. */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <ConversationLog
+            lobbyMessages={relay.lobbyMessages}
+            sessionMessages={relay.sessionMessages}
+            activeSessionId={relay.activeSessionId}
+            activeAgentName={relay.activeAgentName}
+            diagnostics={diagnostics}
+          />
+          <TextInput
+            onSend={relay.sendMessage}
+            disabled={!relay.connected}
+            sessionId={relay.activeSessionId}
+            onAttachment={relay.appendUserAttachment}
+          />
+        </div>
       </main>
 
       {/* File browser side panel */}
@@ -752,6 +921,18 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           projectServerId={activeSession.project_server_id ?? null}
           workspaceAvailable={isArkAgent}
           fileChanges={relay.fileChanges}
+          onOpenFile={(kind, targetId, path, server) => {
+            // Resolve the scope the way the editor tab expects it: ark
+            // project ids for project files, the ark `agent_name` for
+            // workspace files.
+            const scope =
+              kind === "project"
+                ? targetId
+                : (activeAgent?.llm_model
+                    ? activeAgent.llm_model.replace(/^ark:/, "")
+                    : activeSession.agent_name);
+            openFileTab(kind, targetId, path, server, scope);
+          }}
           onClose={() => setShowFileBrowser(false)}
         />
       )}

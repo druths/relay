@@ -32,6 +32,29 @@ struct RelayView: View {
     @State private var showProjectManager = false
     @State private var showFileBrowser = false
 
+    /// Per-session file tabs for the iPad central pane. Ephemeral —
+    /// cleared whenever the active session changes. The conversation is
+    /// always the implicit leading tab (id `"conversation"`) and can't be
+    /// closed; file tabs append after it.
+    struct FileTabState: Identifiable, Equatable {
+        let tabId: String         // `${kind}:${targetId}:${path}` — stable
+        let kind: APIClient.FsKind
+        let targetId: String
+        let path: String
+        let server: String?
+        let scope: String         // project_id (project) or ark agent_name
+        var dirty: Bool
+
+        var id: String { tabId }
+    }
+    @State private var openFileTabs: [FileTabState] = []
+    /// Which file tab is currently shown in the top split pane. nil when
+    /// no files are open (conversation takes the full pane).
+    @State private var activeTabId: String? = nil
+    /// Persisted height of the file pane above the splitter. Defaults to
+    /// a comfortable starting size; users can drag the splitter to taste.
+    @AppStorage("relay_file_pane_height") private var filePaneHeight: Double = 380
+
     init(authService: AuthService, themeManager: ThemeManager) {
         self.authService = authService
         self.themeManager = themeManager
@@ -84,8 +107,31 @@ struct RelayView: View {
         }
         .sheet(isPresented: $showFileBrowser) {
             if let s = activeSession {
-                FileBrowserView(relay: relay, session: s)
-                    .environment(\.relayTheme, themeManager.current)
+                // On iPad, files open into central-pane tabs (the sheet
+                // dismisses itself after the callback runs); on iPhone we
+                // pass nil and the sheet keeps its inline preview/edit
+                // behavior — there's no central tab area on phone.
+                FileBrowserView(
+                    relay: relay,
+                    session: s,
+                    onOpenFile: horizontalSizeClass == .regular
+                        ? { kind, targetId, path, server in
+                            let scope: String = (kind == .project)
+                                ? targetId
+                                : (relay.agents.first(where: { $0.agentId == s.agentId })
+                                    .map { agent in
+                                        agent.llmModel.hasPrefix("ark:")
+                                            ? String(agent.llmModel.dropFirst("ark:".count))
+                                            : agent.llmModel
+                                    } ?? s.agentName)
+                            openFileTab(
+                                kind: kind, targetId: targetId, path: path,
+                                server: server, scope: scope,
+                            )
+                        }
+                        : nil,
+                )
+                .environment(\.relayTheme, themeManager.current)
             }
         }
         .alert("Rename Session", isPresented: $showRenameAlert) {
@@ -610,16 +656,175 @@ struct RelayView: View {
 
             sessionLabelsBar
 
-            ConversationLog(
-                messages: currentMessages,
-                activeSessionId: relay.activeSessionId,
-                activeAgentName: relay.activeAgentName,
-                connected: relay.connected,
-                diagnostics: diagnostics
-            )
-            .frame(maxHeight: .infinity)
+            // Top split — only visible when files are open. Conversation
+            // lives below permanently so the user can chat while watching
+            // a file.
+            if relay.activeSessionId != nil && !openFileTabs.isEmpty {
+                VStack(spacing: 0) {
+                    iPadTabBar
+                    if let tab = openFileTabs.first(where: { $0.tabId == activeTabId }) {
+                        FileEditorView(
+                            relay: relay,
+                            kind: tab.kind,
+                            targetId: tab.targetId,
+                            path: tab.path,
+                            server: tab.server,
+                            scope: tab.scope,
+                            onDirtyChange: { dirty in setTabDirty(tab.tabId, dirty: dirty) },
+                        )
+                        .id(tab.tabId)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Spacer()
+                    }
+                }
+                .frame(height: filePaneHeight)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+                }
 
-            InputBar(relay: relay, externalFocus: $messageInputFocused)
+                splitHandle
+            }
+
+            // Conversation pane — always at the bottom of the layout.
+            VStack(spacing: 0) {
+                ConversationLog(
+                    messages: currentMessages,
+                    activeSessionId: relay.activeSessionId,
+                    activeAgentName: relay.activeAgentName,
+                    connected: relay.connected,
+                    diagnostics: diagnostics
+                )
+                .frame(maxHeight: .infinity)
+
+                InputBar(relay: relay, externalFocus: $messageInputFocused)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onChange(of: relay.activeSessionId) { _, _ in
+            // Ephemeral tabs: leaving the session ditches every open editor.
+            openFileTabs = []
+            activeTabId = nil
+        }
+    }
+
+    /// Drag handle between the file pane and the conversation. Drag down
+    /// to grow the file pane, drag up to grow the conversation. Height is
+    /// clamped and persisted to `@AppStorage` so it sticks across opens.
+    @ViewBuilder
+    private var splitHandle: some View {
+        Rectangle()
+            .fill(theme.surface)
+            .frame(height: 6)
+            .overlay {
+                Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let next = filePaneHeight + value.translation.height
+                        // Crude per-frame snap; sufficient for the few hundred
+                        // pixels of travel we care about.
+                        filePaneHeight = max(120, min(900, next))
+                    }
+                    .onEnded { _ in
+                        // Re-clamp persisted value in case the trailing drag
+                        // pushed us briefly outside the range.
+                        filePaneHeight = max(120, min(900, filePaneHeight))
+                    }
+            )
+    }
+
+    @ViewBuilder
+    private var iPadTabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(openFileTabs) { tab in
+                    let filename = tab.path.split(separator: "/").last.map(String.init) ?? tab.path
+                    tabButton(
+                        label: filename,
+                        active: activeTabId == tab.tabId,
+                        dirty: tab.dirty,
+                        onTap: { activeTabId = tab.tabId },
+                        onClose: { closeFileTab(tab.tabId) },
+                    )
+                }
+            }
+        }
+        .frame(height: 34)
+        .background(theme.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+        }
+    }
+
+    private func tabButton(
+        label: String, active: Bool, dirty: Bool,
+        onTap: @escaping () -> Void, onClose: (() -> Void)?,
+    ) -> some View {
+        HStack(spacing: 4) {
+            if dirty {
+                Circle().fill(theme.warning).frame(width: 6, height: 6)
+            }
+            Button(action: onTap) {
+                Text(label)
+                    .font(theme.bodyFont(size: 13, weight: active ? .medium : .regular))
+                    .foregroundStyle(active ? theme.textPrimary : theme.textQuaternary)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            if let close = onClose {
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.textQuaternary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(active ? theme.elevated : Color.clear)
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(theme.border).frame(width: theme.borderWidth)
+        }
+    }
+
+    // MARK: - Tab actions
+
+    private func openFileTab(
+        kind: APIClient.FsKind, targetId: String, path: String,
+        server: String?, scope: String,
+    ) {
+        let tabId = "\(kind.rawValue):\(targetId):\(path)"
+        if openFileTabs.first(where: { $0.tabId == tabId }) == nil {
+            openFileTabs.append(
+                FileTabState(
+                    tabId: tabId, kind: kind, targetId: targetId,
+                    path: path, server: server, scope: scope, dirty: false,
+                ),
+            )
+        }
+        activeTabId = tabId
+    }
+
+    private func closeFileTab(_ tabId: String) {
+        // Dirty-confirm via a simple alert flow would interrupt this with
+        // SwiftUI; for v1 we accept that closing a dirty tab discards.
+        let wasActive = activeTabId == tabId
+        openFileTabs.removeAll(where: { $0.tabId == tabId })
+        if wasActive {
+            // Fall back to the last remaining tab, or nil if we just
+            // closed the only open file — the split pane collapses.
+            activeTabId = openFileTabs.last?.tabId
+        }
+    }
+
+    private func setTabDirty(_ tabId: String, dirty: Bool) {
+        guard let idx = openFileTabs.firstIndex(where: { $0.tabId == tabId }) else { return }
+        if openFileTabs[idx].dirty != dirty {
+            openFileTabs[idx].dirty = dirty
         }
     }
 

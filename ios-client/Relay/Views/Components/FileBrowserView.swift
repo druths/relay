@@ -8,6 +8,11 @@ import UniformTypeIdentifiers
 struct FileBrowserView: View {
     let relay: RelayViewModel
     let session: Session
+    /// When set, tapping a file calls this instead of opening the inline
+    /// preview. The iPad layout passes this to route the file into a
+    /// central-pane tab (and dismiss the sheet). iPhone leaves it nil and
+    /// keeps the inline preview.
+    var onOpenFile: ((APIClient.FsKind, String, String, String?) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.relayTheme) private var theme
 
@@ -15,9 +20,13 @@ struct FileBrowserView: View {
 
     enum Kind: Hashable { case project, workspace }
 
-    init(relay: RelayViewModel, session: Session) {
+    init(
+        relay: RelayViewModel, session: Session,
+        onOpenFile: ((APIClient.FsKind, String, String, String?) -> Void)? = nil,
+    ) {
         self.relay = relay
         self.session = session
+        self.onOpenFile = onOpenFile
         // Default to Project when bound; otherwise Workspace.
         _selectedTab = State(initialValue: session.projectId != nil ? .project : .workspace)
     }
@@ -54,6 +63,12 @@ struct FileBrowserView: View {
                         targetId: pid,
                         scope: pid,
                         server: session.projectServerId,
+                        onOpenFile: onOpenFile.map { cb in
+                            { kind, id, p, s in
+                                cb(kind, id, p, s)
+                                dismiss()
+                            }
+                        },
                     )
                 } else if selectedTab == .workspace, workspaceAvailable {
                     FileTreeView(
@@ -62,6 +77,12 @@ struct FileBrowserView: View {
                         targetId: session.agentId,
                         scope: workspaceArkName,
                         server: nil,
+                        onOpenFile: onOpenFile.map { cb in
+                            { kind, id, p, s in
+                                cb(kind, id, p, s)
+                                dismiss()
+                            }
+                        },
                     )
                 } else {
                     Spacer()
@@ -135,6 +156,9 @@ private struct FileTreeView: View {
     let targetId: String
     let scope: String
     let server: String?
+    /// iPad route: tap a file → invoke this (the parent opens a central
+    /// tab). nil = iPhone fallback — show the inline `FilePreviewSheet`.
+    let onOpenFile: ((APIClient.FsKind, String, String, String?) -> Void)?
 
     @Environment(\.relayTheme) private var theme
 
@@ -147,6 +171,8 @@ private struct FileTreeView: View {
     @State private var showFilePicker = false
     @State private var showMkdirAlert = false
     @State private var mkdirName = ""
+    @State private var showNewFileAlert = false
+    @State private var newFileName = ""
     @State private var pathToDelete: String?
     @State private var lastSeenFileChangeTs: Date = .distantPast
 
@@ -171,6 +197,9 @@ private struct FileTreeView: View {
                             selectedPath: $selectedPath,
                             onExpand: load,
                             onDelete: { pathToDelete = $0 },
+                            onOpenFile: onOpenFile.map { cb in
+                                { p in cb(kind, targetId, p, server) }
+                            },
                         )
                     } else if loading {
                         ProgressView().padding()
@@ -180,7 +209,10 @@ private struct FileTreeView: View {
                 .padding(.vertical, 4)
             }
 
-            if let path = selectedPath {
+            // Inline preview is only used when no parent intercepts taps
+            // (iPhone). iPad routes through `onOpenFile` to the central
+            // tab pane and never reaches this.
+            if let path = selectedPath, onOpenFile == nil {
                 FilePreviewSheet(
                     relay: relay,
                     kind: kind,
@@ -243,6 +275,15 @@ private struct FileTreeView: View {
             Button("Create") { Task { await doMkdir() } }
             Button("Cancel", role: .cancel) { mkdirName = "" }
         }
+        .alert("New file", isPresented: $showNewFileAlert) {
+            TextField("File path (relative to root)", text: $newFileName)
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.never)
+            Button("Open") { doNewFile() }
+            Button("Cancel", role: .cancel) { newFileName = "" }
+        } message: {
+            Text("Opens a tab for the new path. The file is created on first save.")
+        }
         .alert("Delete?", isPresented: Binding(
             get: { pathToDelete != nil },
             set: { if !$0 { pathToDelete = nil } },
@@ -273,6 +314,16 @@ private struct FileTreeView: View {
                 title: uploading ? "Uploading…" : "Upload",
                 disabled: uploading,
             ) { showFilePicker = true }
+            if onOpenFile != nil {
+                // New file relies on the parent's `onOpenFile` to land in a
+                // central-pane tab (iPad). On iPhone (where the callback is
+                // nil and there's no central tab area) we hide the button —
+                // the inline preview path wouldn't gracefully handle a
+                // not-on-disk start.
+                ToolbarIconButton(system: "doc.badge.plus", title: "New file") {
+                    showNewFileAlert = true
+                }
+            }
             ToolbarIconButton(system: "folder.badge.plus", title: "New folder") {
                 showMkdirAlert = true
             }
@@ -343,6 +394,15 @@ private struct FileTreeView: View {
         }
     }
 
+    private func doNewFile() {
+        let cleaned = newFileName
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        newFileName = ""
+        guard !cleaned.isEmpty, let cb = onOpenFile else { return }
+        cb(kind, targetId, cleaned, server)
+    }
+
     private func doDelete(_ path: String) async {
         do {
             try await relay.apiClient.deleteFile(kind, id: targetId, path: path, server: server)
@@ -389,6 +449,8 @@ private struct DirEntries: View {
     @Binding var selectedPath: String?
     let onExpand: (String) -> Void
     let onDelete: (String) -> Void
+    /// iPad route — preempts the inline preview path.
+    let onOpenFile: ((String) -> Void)?
 
     @Environment(\.relayTheme) private var theme
 
@@ -427,6 +489,8 @@ private struct DirEntries: View {
                 if entry.isDir {
                     if isOpen { expanded.removeValue(forKey: childPath) }
                     else { onExpand(childPath) }
+                } else if let cb = onOpenFile {
+                    cb(childPath)
                 } else {
                     selectedPath = childPath
                 }
@@ -446,6 +510,7 @@ private struct DirEntries: View {
                     selectedPath: $selectedPath,
                     onExpand: onExpand,
                     onDelete: onDelete,
+                    onOpenFile: onOpenFile,
                 )
             }
         }

@@ -5,7 +5,6 @@ import {
   deletePath,
   listDir,
   mkdir,
-  readFile,
   writeFile,
 } from "../api";
 
@@ -29,6 +28,10 @@ interface Props {
    * the active tab's scope (project_id / agent_ark_name) to refresh
    * listings and feed the "Recent changes" list. */
   fileChanges: FileChangeEvent[];
+  /** Called when the user clicks a file in the tree. The parent opens or
+   * focuses a tab in the central pane — the panel itself no longer
+   * renders an inline preview/editor. */
+  onOpenFile: (kind: Kind, targetId: string, path: string, server?: string) => void;
   onClose: () => void;
 }
 
@@ -41,6 +44,7 @@ export function FileBrowserPanel({
   projectServerId,
   workspaceAvailable,
   fileChanges,
+  onOpenFile,
   onClose,
 }: Props) {
   const projectTabAvailable = !!projectId;
@@ -96,6 +100,7 @@ export function FileBrowserPanel({
             scope={projectId}
             server={projectServerId ?? undefined}
             fileChanges={fileChanges}
+            onOpenFile={onOpenFile}
           />
         )}
         {tab === "workspace" && agentId && agentName && (
@@ -103,6 +108,7 @@ export function FileBrowserPanel({
             kind="workspace"
             id={agentId}
             scope={agentArkName ?? agentName}
+            onOpenFile={onOpenFile}
             fileChanges={fileChanges}
           />
         )}
@@ -132,19 +138,19 @@ function TabButton({
 // ── File tree view ────────────────────────────────────────────────────
 
 function FileTreeView({
-  kind, id, scope, server, fileChanges,
+  kind, id, scope, server, fileChanges, onOpenFile,
 }: {
   kind: Kind;
   id: string;
   scope: string;       // project_id or agent_name — used to filter file-change events
   server?: string;
   fileChanges: FileChangeEvent[];
+  onOpenFile: (kind: Kind, targetId: string, path: string, server?: string) => void;
 }) {
   const [root, setRoot] = useState<DirListing | null>(null);
   const [expanded, setExpanded] = useState<Map<string, DirListing>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -186,7 +192,6 @@ function FileTreeView({
   useEffect(() => {
     loadRoot();
     setExpanded(new Map());
-    setSelectedPath(null);
   }, [loadRoot]);
 
   // Re-load on every matching live file-change event. Previously we only
@@ -246,7 +251,6 @@ function FileTreeView({
       const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
       if (parent === "") loadRoot();
       else if (expanded.has(parent)) loadSubdir(parent);
-      if (selectedPath === path) setSelectedPath(null);
     } catch (e) {
       setError(String(e));
     }
@@ -261,6 +265,18 @@ function FileTreeView({
     } catch (e) {
       setError(String(e));
     }
+  };
+
+  /// Prompt for a filename and open a tab for it. The file isn't written
+  /// to disk yet — the editor lands in the "not on disk — save to create"
+  /// state, and the first save creates it. Matches the New folder
+  /// affordance shape.
+  const handleNewFile = () => {
+    const name = prompt("New file path (relative to root):");
+    if (!name) return;
+    const cleaned = name.replace(/^\/+/, "").trim();
+    if (!cleaned) return;
+    onOpenFile(kind, id, cleaned, server);
   };
 
   // ── render ──────────────────────────────────────────────
@@ -283,6 +299,9 @@ function FileTreeView({
           title={uploading ? "Uploading…" : "Upload files"}
         >
           {uploading ? <SpinnerIcon /> : <UploadIcon />}
+        </ToolbarIcon>
+        <ToolbarIcon onClick={handleNewFile} title="New file">
+          <DocPlusIcon />
         </ToolbarIcon>
         <ToolbarIcon onClick={handleMkdir} title="New folder">
           <FolderPlusIcon />
@@ -313,23 +332,11 @@ function FileTreeView({
             expanded={expanded}
             loadSubdir={loadSubdir}
             collapseSubdir={collapseSubdir}
-            selectedPath={selectedPath}
-            onSelect={setSelectedPath}
+            onOpenFile={(p) => onOpenFile(kind, id, p, server)}
             onDelete={handleDelete}
           />
         )}
       </div>
-
-      {selectedPath && (
-        <FilePreview
-          key={selectedPath}
-          kind={kind}
-          id={id}
-          path={selectedPath}
-          server={server}
-          onClose={() => setSelectedPath(null)}
-        />
-      )}
 
       {/* Recent changes feed */}
       {recent.length > 0 && (
@@ -366,7 +373,7 @@ function FileTreeView({
 }
 
 function DirView({
-  listing, path, depth, expanded, loadSubdir, collapseSubdir, selectedPath, onSelect, onDelete,
+  listing, path, depth, expanded, loadSubdir, collapseSubdir, onOpenFile, onDelete,
 }: {
   listing: DirListing;
   path: string;
@@ -374,8 +381,7 @@ function DirView({
   expanded: Map<string, DirListing>;
   loadSubdir: (p: string) => void;
   collapseSubdir: (p: string) => void;
-  selectedPath: string | null;
-  onSelect: (p: string) => void;
+  onOpenFile: (p: string) => void;
   onDelete: (p: string) => void;
 }) {
   return (
@@ -386,17 +392,15 @@ function DirView({
         return (
           <div key={entry.name}>
             <div
-              className={`group flex items-center gap-1 px-2 py-0.5 text-xs cursor-pointer
-                          hover:bg-gray-900 ${
-                            selectedPath === childPath ? "bg-gray-800 text-gray-100" : "text-gray-300"
-                          }`}
+              className="group flex items-center gap-1 px-2 py-0.5 text-xs cursor-pointer
+                         hover:bg-gray-900 text-gray-300"
               style={{ paddingLeft: 8 + depth * 12 }}
               onClick={() => {
                 if (entry.is_dir) {
                   if (isOpen) collapseSubdir(childPath);
                   else loadSubdir(childPath);
                 } else {
-                  onSelect(childPath);
+                  onOpenFile(childPath);
                 }
               }}
             >
@@ -429,8 +433,7 @@ function DirView({
                 expanded={expanded}
                 loadSubdir={loadSubdir}
                 collapseSubdir={collapseSubdir}
-                selectedPath={selectedPath}
-                onSelect={onSelect}
+                onOpenFile={onOpenFile}
                 onDelete={onDelete}
               />
             )}
@@ -441,206 +444,6 @@ function DirView({
   );
 }
 
-// ── File preview ──────────────────────────────────────────────────────
-
-function FilePreview({
-  kind, id, path, server, onClose,
-}: {
-  kind: Kind;
-  id: string;
-  path: string;
-  server?: string;
-  onClose: () => void;
-}) {
-  const [content, setContent] = useState<string | null>(null);
-  const [binary, setBinary] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  // Edit state. `draft` mirrors `content` while editing; on Save we PUT the
-  // draft and commit it back to `content`; on Cancel we discard the draft.
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [saving, setSaving] = useState(false);
-  // User-resizable preview height. Persisted across the session so editing
-  // a series of files doesn't keep resetting the size.
-  const [height, setHeight] = useState<number>(() => {
-    const stored = Number(localStorage.getItem("relay_preview_height"));
-    return Number.isFinite(stored) && stored >= 80 ? stored : 240;
-  });
-  const dragStart = useRef<{ y: number; h: number } | null>(null);
-
-  const onDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
-    dragStart.current = { y: e.clientY, h: height };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  };
-  const onDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragStart.current) return;
-    const dy = dragStart.current.y - e.clientY; // dragging up grows the pane
-    const next = Math.min(
-      Math.max(80, dragStart.current.h + dy),
-      Math.max(120, window.innerHeight - 160),
-    );
-    setHeight(next);
-  };
-  const onDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragStart.current) return;
-    dragStart.current = null;
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-    try { localStorage.setItem("relay_preview_height", String(height)); }
-    catch { /* ignore */ }
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      setContent(null);
-      setBinary(false);
-      setEditing(false);
-      try {
-        const resp = await readFile(kind, id, path, server);
-        const ct = resp.headers.get("content-type") ?? "";
-        if (ct.startsWith("text/") || ct.includes("json") || ct.includes("xml") || _hasTextExt(path)) {
-          const text = await resp.text();
-          if (!cancelled) setContent(text);
-        } else {
-          if (!cancelled) setBinary(true);
-        }
-      } catch (e) {
-        if (!cancelled) setError(String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [kind, id, path, server]);
-
-  const handleDownload = async () => {
-    try {
-      const resp = await readFile(kind, id, path, server);
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = path.split("/").pop() || "file";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
-  const handleStartEdit = () => {
-    setDraft(content ?? "");
-    setEditing(true);
-  };
-  const handleCancelEdit = () => {
-    setEditing(false);
-    setDraft("");
-  };
-  const handleSave = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await writeFile(kind, id, path, draft, server);
-      setContent(draft);
-      setEditing(false);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const canEdit = !binary && !loading && content !== null && !error;
-
-  return (
-    <div
-      className="border-t border-gray-800 flex flex-col flex-shrink-0"
-      style={{ height }}
-    >
-      {/* Drag handle — sits flush with the top border, grows the pane up. */}
-      <div
-        onPointerDown={onDragStart}
-        onPointerMove={onDragMove}
-        onPointerUp={onDragEnd}
-        onPointerCancel={onDragEnd}
-        className="h-1 -mt-px cursor-row-resize hover:bg-blue-500/40 active:bg-blue-500/60"
-        title="Drag to resize"
-      />
-      <div className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-900">
-        <span className="font-mono truncate flex-1">{path}</span>
-        {editing ? (
-          <>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="text-emerald-400 hover:text-emerald-300 p-1 disabled:opacity-50"
-              title={saving ? "Saving…" : "Save"}
-            >
-              {saving ? <SpinnerIcon /> : <SaveIcon />}
-            </button>
-            <button
-              onClick={handleCancelEdit}
-              disabled={saving}
-              className="text-gray-400 hover:text-gray-200 p-1 disabled:opacity-50"
-              title="Cancel"
-            >
-              <CancelIcon />
-            </button>
-          </>
-        ) : (
-          <>
-            {canEdit && (
-              <button
-                onClick={handleStartEdit}
-                className="text-gray-400 hover:text-white p-1"
-                title="Edit"
-              >
-                <EditIcon />
-              </button>
-            )}
-            <button
-              onClick={handleDownload}
-              className="text-blue-400 hover:text-blue-300 p-1"
-              title="Download"
-            >
-              <DownloadIcon />
-            </button>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-300" title="Close">
-              ×
-            </button>
-          </>
-        )}
-      </div>
-      <div className="flex-1 overflow-auto bg-gray-950 p-2 text-xs font-mono text-gray-300">
-        {loading && "Loading…"}
-        {error && <span className="text-red-400">{error}</span>}
-        {binary && !error && (
-          <span className="text-gray-500 italic">
-            Binary file — use Download to save locally.
-          </span>
-        )}
-        {content !== null && !binary && !editing && (
-          <pre className="whitespace-pre-wrap break-words">{content}</pre>
-        )}
-        {editing && (
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            spellCheck={false}
-            autoFocus
-            className="w-full h-full min-h-[8rem] bg-gray-950 text-gray-100
-                       font-mono text-xs resize-none outline-none border-none p-0"
-          />
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -691,11 +494,13 @@ function UploadIcon() {
   );
 }
 
-function DownloadIcon() {
+
+function DocPlusIcon() {
+  // Document with a "+" sigil — paired visually with FolderPlusIcon.
   return (
     <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-      <path d="M10 3a.75.75 0 01.75.75v6.69l1.97-1.97a.75.75 0 111.06 1.06l-3.25 3.25a.75.75 0 01-1.06 0L6.22 9.53a.75.75 0 011.06-1.06l1.97 1.97V3.75A.75.75 0 0110 3z" transform="rotate(180 10 7.5)" />
-      <path d="M3.5 13a.75.75 0 011.5 0v2.25c0 .138.112.25.25.25h9.5a.25.25 0 00.25-.25V13a.75.75 0 011.5 0v2.25A1.75 1.75 0 0114.75 17h-9.5A1.75 1.75 0 013.5 15.25V13z" />
+      <path d="M5 3a2 2 0 012-2h5l4 4v12a2 2 0 01-2 2H7a2 2 0 01-2-2V3zm6 0v3a1 1 0 001 1h3" stroke="currentColor" strokeWidth="1" fill="none" />
+      <path d="M10 9.5a.5.5 0 01.5.5v1.5H12a.5.5 0 010 1h-1.5V14a.5.5 0 01-1 0v-1.5H8a.5.5 0 010-1h1.5V10a.5.5 0 01.5-.5z" />
     </svg>
   );
 }
@@ -722,35 +527,6 @@ function RefreshIcon() {
   );
 }
 
-function EditIcon() {
-  // Pencil.
-  return (
-    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-    </svg>
-  );
-}
-
-function SaveIcon() {
-  // Floppy / disk silhouette.
-  return (
-    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-      <path d="M3 4a2 2 0 012-2h9.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0117 4.414V16a2 2 0 01-2 2H5a2 2 0 01-2-2V4zm2 0v3h7V4H5zm0 6v6h10v-6H5z" />
-    </svg>
-  );
-}
-
-function CancelIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-      <path
-        fillRule="evenodd"
-        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
 
 function SpinnerIcon() {
   return (
@@ -766,14 +542,3 @@ function SpinnerIcon() {
   );
 }
 
-// ── helpers (continued) ──────────────────────────────────────────────
-
-function _hasTextExt(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  return [
-    "txt", "md", "markdown", "json", "yaml", "yml", "toml", "ini", "cfg",
-    "csv", "tsv", "log", "py", "js", "ts", "tsx", "jsx", "swift", "go",
-    "rs", "rb", "java", "c", "h", "cpp", "hpp", "cs", "sh", "bash", "zsh",
-    "css", "scss", "html", "xml", "sql", "env", "gitignore",
-  ].includes(ext);
-}
