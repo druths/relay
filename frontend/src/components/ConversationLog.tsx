@@ -1,6 +1,51 @@
 import { useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import type { Message, FileAttachment } from "../types";
 import { apiFetch } from "../api";
+
+// Element overrides keep markdown output sized for chat bubbles: heading
+// levels collapse to slightly-bigger weights, code blocks pick up the dark
+// inline-code look, links open in a new tab. Same scope as iOS's
+// `MarkdownText` (headings, fenced code, bold/italic, inline code) so the
+// two clients stay in rough parity.
+const MARKDOWN_COMPONENTS: Components = {
+  p: ({ children }) => <p className="my-1 whitespace-pre-wrap">{children}</p>,
+  h1: ({ children }) => <h1 className="text-base font-semibold mt-2 mb-1">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-sm font-semibold mt-2 mb-1">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-sm font-semibold mt-1.5 mb-0.5">{children}</h3>,
+  h4: ({ children }) => <h4 className="text-sm font-semibold mt-1 mb-0.5">{children}</h4>,
+  h5: ({ children }) => <h5 className="text-sm font-medium mt-1 mb-0.5">{children}</h5>,
+  h6: ({ children }) => <h6 className="text-sm font-medium mt-1 mb-0.5">{children}</h6>,
+  ul: ({ children }) => <ul className="list-disc ml-5 my-1 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal ml-5 my-1 space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li>{children}</li>,
+  a: ({ children, href }) => (
+    <a href={href} target="_blank" rel="noreferrer noopener" className="text-blue-300 underline hover:text-blue-200">
+      {children}
+    </a>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-gray-600 pl-2 my-1 italic text-gray-400">{children}</blockquote>
+  ),
+  code: ({ className, children, ...props }) => {
+    // react-markdown gives code blocks a `language-*` class; inline code has none.
+    const isBlock = (className ?? "").includes("language-");
+    if (isBlock) {
+      return (
+        <pre className="bg-gray-900/70 border border-gray-800 rounded p-2 my-1 overflow-x-auto text-[12px] leading-snug">
+          <code {...props}>{children}</code>
+        </pre>
+      );
+    }
+    return (
+      <code className="bg-gray-900/70 rounded px-1 py-0.5 text-[12px]" {...props}>
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => <>{children}</>,
+};
 
 function _formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -107,8 +152,19 @@ export function ConversationLog({
             ROLE_STYLES[msg.role] || ROLE_STYLES.agent
           }`}
         >
-          <div className="whitespace-pre-wrap">
-            {msg.text_content}
+          <div className={msg.role === "user" || msg.streaming ? "whitespace-pre-wrap" : "msg-md"}>
+            {/* User messages and in-flight streaming text stay literal:
+                user input shouldn't be parsed as markup, and partially
+                streamed markdown (unclosed code fences, half-rendered
+                headers) looks worse than the raw text. Once the turn is
+                done we re-render through `ReactMarkdown`. */}
+            {msg.role === "user" || msg.streaming ? (
+              msg.text_content
+            ) : (
+              <ReactMarkdown components={MARKDOWN_COMPONENTS}>
+                {msg.text_content}
+              </ReactMarkdown>
+            )}
             {msg.attachments && msg.attachments.length > 0 && (
               <div className={`flex flex-col gap-1 ${msg.text_content ? "mt-2" : ""}`}>
                 {msg.attachments.map((att, ai) => (
