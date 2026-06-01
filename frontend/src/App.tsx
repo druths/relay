@@ -872,17 +872,23 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
         {/* Splitter — only present when files are open. Drag down/up to
             redistribute vertical space between the file pane and the
-            conversation. */}
+            conversation. The visible band sits between two contrast lines
+            with a small grip in the middle so it reads as a real handle
+            instead of the previous near-invisible 1px sliver. */}
         {inSession && openTabs.length > 0 && (
           <div
             onPointerDown={onSplitterDown}
             onPointerMove={onSplitterMove}
             onPointerUp={onSplitterUp}
             onPointerCancel={onSplitterUp}
-            className="h-1 -mt-px flex-shrink-0 cursor-row-resize
-                       hover:bg-blue-500/40 active:bg-blue-500/60"
+            className="group h-2.5 flex-shrink-0 cursor-row-resize
+                       bg-gray-800/70 border-y border-gray-700/80
+                       hover:bg-blue-500/30 active:bg-blue-500/50
+                       flex items-center justify-center"
             title="Drag to resize"
-          />
+          >
+            <span className="w-10 h-0.5 rounded-full bg-gray-500 group-hover:bg-blue-300 transition-colors" />
+          </div>
         )}
 
         {/* Conversation pane — always rendered at the bottom of `main`. */}

@@ -711,29 +711,35 @@ struct RelayView: View {
     /// Drag handle between the file pane and the conversation. Drag down
     /// to grow the file pane, drag up to grow the conversation. Height is
     /// clamped and persisted to `@AppStorage` so it sticks across opens.
+    /// Reads as a distinct band with a centered grip so users can see it's
+    /// interactive — earlier revisions blended into the surface fill.
     @ViewBuilder
     private var splitHandle: some View {
-        Rectangle()
-            .fill(theme.surface)
-            .frame(height: 6)
-            .overlay {
-                Rectangle().fill(theme.border).frame(height: theme.borderWidth)
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let next = filePaneHeight + value.translation.height
-                        // Crude per-frame snap; sufficient for the few hundred
-                        // pixels of travel we care about.
-                        filePaneHeight = max(120, min(900, next))
-                    }
-                    .onEnded { _ in
-                        // Re-clamp persisted value in case the trailing drag
-                        // pushed us briefly outside the range.
-                        filePaneHeight = max(120, min(900, filePaneHeight))
-                    }
-            )
+        ZStack {
+            theme.elevated
+            // Centered grip — a short pill that telegraphs draggability.
+            Capsule()
+                .fill(theme.textQuaternary)
+                .frame(width: 36, height: 3)
+        }
+        .frame(height: 12)
+        .overlay(alignment: .top) {
+            Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+        }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let next = filePaneHeight + value.translation.height
+                    filePaneHeight = max(120, min(900, next))
+                }
+                .onEnded { _ in
+                    filePaneHeight = max(120, min(900, filePaneHeight))
+                }
+        )
     }
 
     @ViewBuilder

@@ -318,6 +318,38 @@ body {
   border-radius: 0 !important;
 }
 
+/* ── Scrollbars (baseline) ──
+   Default browser scrollbars are jarringly light against the dark UI.
+   Drive them off the same CSS variables the rest of the palette uses so
+   they adapt to whichever theme is active. The TVA / mono block below
+   refines this with theme-specific overrides (sharper corners, thinner
+   track). */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-quaternary);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* Firefox uses the standardized properties. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
 /* ── TVA/Mono scrollbars ── */
 [data-theme="tva"] ::-webkit-scrollbar,
 [data-theme="tva_mono"] ::-webkit-scrollbar {

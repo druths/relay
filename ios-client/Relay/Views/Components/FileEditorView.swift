@@ -100,20 +100,23 @@ struct FileEditorView: View {
                     if saving {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Save").font(theme.bodyFont(size: 13, weight: .medium))
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 15))
                     }
                 }
                 .disabled(!isDirty || saving)
                 .foregroundStyle(isDirty ? theme.success : theme.textQuaternary)
+                .help(saving ? "Saving…" : "Save")
             }
             Button {
                 Task { await reload() }
             } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13))
+                    .font(.system(size: 15))
             }
             .disabled(loading)
             .foregroundStyle(theme.textSecondary)
+            .help("Reload from disk")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
