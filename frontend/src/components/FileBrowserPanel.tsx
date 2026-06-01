@@ -15,14 +15,19 @@ interface Props {
   /** Always shown as the panel title. */
   agentId: string | null;
   agentName: string | null;
+  /** The agent's name on the ark side (its `llm_model`, with any `ark:`
+   * prefix stripped). This is the value ark uses for `agent_name` in its
+   * `workspace_file_changed` events — Relay's display name (`agentName`)
+   * may differ in case, so we keep them as separate concepts. */
+  agentArkName: string | null;
   projectId: string | null;
   projectName: string | null;
   projectServerId: string | null;
   /** When true the Workspace tab is available — ark sessions only. */
   workspaceAvailable: boolean;
   /** File-change WS events relayed from `useRelay`. The panel filters by
-   * the active tab's scope (project_id / agent_name) to refresh listings
-   * and feed the "Recent changes" list. */
+   * the active tab's scope (project_id / agent_ark_name) to refresh
+   * listings and feed the "Recent changes" list. */
   fileChanges: FileChangeEvent[];
   onClose: () => void;
 }
@@ -30,6 +35,7 @@ interface Props {
 export function FileBrowserPanel({
   agentId,
   agentName,
+  agentArkName,
   projectId,
   projectName,
   projectServerId,
@@ -96,7 +102,7 @@ export function FileBrowserPanel({
           <FileTreeView
             kind="workspace"
             id={agentId}
-            scope={agentName}
+            scope={agentArkName ?? agentName}
             fileChanges={fileChanges}
           />
         )}
@@ -183,27 +189,29 @@ function FileTreeView({
     setSelectedPath(null);
   }, [loadRoot]);
 
-  // Re-load the affected directory listing when a relevant file-change
-  // event arrives. We re-fetch the deepest open ancestor of the changed
-  // path; anything closed will refresh on next expansion.
+  // Re-load on every matching live file-change event. Previously we only
+  // refreshed the deepest open ancestor of the changed path — but when the
+  // change happened in a directory that wasn't currently expanded (e.g.
+  // the agent writing to a sibling subtree), nothing reloaded and the
+  // panel stayed stale. Refresh root + every expanded subdir on any hit;
+  // listings are cheap and ark coalesces bursts to ~200ms.
   const lastFileChangeTs = useRef(0);
+  // `expanded` keys, captured fresh each render via a ref so the effect
+  // can iterate them without re-running on every Map mutation.
+  const expandedKeysRef = useRef<string[]>([]);
+  expandedKeysRef.current = Array.from(expanded.keys());
+
   useEffect(() => {
-    const recent = fileChanges.filter((e) => e.kind === kind && e.scope === scope && e.ts > lastFileChangeTs.current);
+    const recent = fileChanges.filter(
+      (e) => e.kind === kind && e.scope === scope && e.ts > lastFileChangeTs.current,
+    );
     if (recent.length === 0) return;
     lastFileChangeTs.current = Math.max(...recent.map((e) => e.ts));
-    const touchedDirs = new Set<string>();
-    for (const ev of recent) {
-      const parent = ev.path.includes("/") ? ev.path.split("/").slice(0, -1).join("/") : "";
-      touchedDirs.add(parent);
+    loadRoot();
+    for (const dir of expandedKeysRef.current) {
+      loadSubdir(dir);
     }
-    for (const dir of touchedDirs) {
-      if (dir === "") {
-        loadRoot();
-      } else if (expanded.has(dir)) {
-        loadSubdir(dir);
-      }
-    }
-  }, [fileChanges, kind, scope, loadRoot, loadSubdir, expanded]);
+  }, [fileChanges, kind, scope, loadRoot, loadSubdir]);
 
   // ── actions ─────────────────────────────────────────────
 

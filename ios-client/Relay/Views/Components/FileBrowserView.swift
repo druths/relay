@@ -28,6 +28,21 @@ struct FileBrowserView: View {
         relay.agents.first(where: { $0.agentId == session.agentId })?.llmProvider == "ark"
     }
 
+    /// ark's `agent_name` in `workspace_file_changed` events is the agent's
+    /// `llm_model` (minus any `ark:` prefix), which can differ in case from
+    /// Relay's display name. Use this for scope matching; the tab label
+    /// keeps the display name.
+    private var workspaceArkName: String {
+        guard let agent = relay.agents.first(where: { $0.agentId == session.agentId }) else {
+            return session.agentName
+        }
+        let model = agent.llmModel
+        if model.hasPrefix("ark:") {
+            return String(model.dropFirst("ark:".count))
+        }
+        return model.isEmpty ? session.agentName : model
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -45,7 +60,7 @@ struct FileBrowserView: View {
                         relay: relay,
                         kind: .workspace,
                         targetId: session.agentId,
-                        scope: session.agentName,
+                        scope: workspaceArkName,
                         server: nil,
                     )
                 } else {

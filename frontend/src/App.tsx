@@ -739,6 +739,14 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
         <FileBrowserPanel
           agentId={activeSession.agent_id}
           agentName={activeSession.agent_name}
+          // ark uses the agent's `llm_model` (minus any `ark:` prefix) as
+          // its `agent_name` in `workspace_file_changed` events. Pass that
+          // through so the panel's scope filter matches what ark sends.
+          agentArkName={
+            activeAgent?.llm_model
+              ? activeAgent.llm_model.replace(/^ark:/, "")
+              : activeSession.agent_name
+          }
           projectId={activeSession.project_id ?? null}
           projectName={projectNameOf(activeSession.project_id)}
           projectServerId={activeSession.project_server_id ?? null}
