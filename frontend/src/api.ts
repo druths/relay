@@ -142,6 +142,46 @@ export async function mkdir(
   if (!resp.ok) throw new Error(await resp.text());
 }
 
+export async function renamePath(
+  kind: "project" | "workspace", id: string, path: string, to: string,
+  server?: string,
+): Promise<void> {
+  const t = fsTarget(kind, id, server);
+  const sep = t.q ? "&" : "?";
+  const resp = await apiFetch(
+    `${t.base}/${path.replace(/^\/+/, "")}${t.q}${sep}op=rename`,
+    { method: "POST", body: JSON.stringify({ to: to.replace(/^\/+/, "") }) },
+  );
+  if (!resp.ok) throw new Error(await resp.text());
+}
+
+/** Triggers a browser download of the path. For files this fetches the
+ * bytes directly; for directories the backend builds a zip
+ * (`?op=zip`). Streams through a blob → synthetic `<a download>` because
+ * the auth header can't ride a plain `<a href>`. */
+export async function downloadPath(
+  kind: "project" | "workspace", id: string, path: string,
+  isDir: boolean, server?: string,
+): Promise<void> {
+  const t = fsTarget(kind, id, server);
+  const cleaned = path.replace(/^\/+/, "");
+  const url = isDir
+    ? `${t.base}/${cleaned}${t.q}${t.q ? "&" : "?"}op=zip`
+    : `${t.base}/${cleaned}${t.q}`;
+  const resp = await apiFetch(url);
+  if (!resp.ok) throw new Error(`download failed: ${resp.status}`);
+  const blob = await resp.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  const basename = cleaned.split("/").pop() || "download";
+  a.download = isDir ? `${basename}.zip` : basename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+}
+
 export async function createSession(
   agentId: string,
   projectId?: string,

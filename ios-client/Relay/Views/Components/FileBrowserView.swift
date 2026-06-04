@@ -177,6 +177,11 @@ private struct FileTreeView: View {
     @State private var showNewFileAlert = false
     @State private var newFileName = ""
     @State private var pathToDelete: String?
+    // Rename + download flow state. `renamePath` triggers the rename
+    // alert; `downloadShareURL` triggers the system share sheet.
+    @State private var renamePath: String? = nil
+    @State private var renameText: String = ""
+    @State private var downloadShareURL: _DownloadRef? = nil
     @State private var lastSeenFileChangeTs: Date = .distantPast
 
     /// Key used in `relay.fileTreeExpanded` so different projects /
@@ -204,6 +209,13 @@ private struct FileTreeView: View {
                             selectedPath: $selectedPath,
                             onExpand: load,
                             onDelete: { pathToDelete = $0 },
+                            onRename: { p in
+                                renamePath = p
+                                renameText = p.split(separator: "/").last.map(String.init) ?? p
+                            },
+                            onDownload: { p, isDir in
+                                Task { await doDownload(path: p, isDir: isDir) }
+                            },
                             onOpenFile: onOpenFile.map { cb in
                                 { p in cb(kind, targetId, p, server) }
                             },
@@ -311,6 +323,29 @@ private struct FileTreeView: View {
             Button("Cancel", role: .cancel) { pathToDelete = nil }
         } message: {
             Text(pathToDelete.map { "Delete \($0)?" } ?? "")
+        }
+        .alert(
+            "Rename",
+            isPresented: Binding(
+                get: { renamePath != nil },
+                set: { if !$0 { renamePath = nil } }
+            ),
+        ) {
+            TextField("New name", text: $renameText)
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.never)
+            Button("Rename") {
+                if let src = renamePath { Task { await doRename(src) } }
+            }
+            Button("Cancel", role: .cancel) {
+                renamePath = nil
+                renameText = ""
+            }
+        } message: {
+            Text(renamePath.map { "Rename \($0)" } ?? "")
+        }
+        .sheet(item: $downloadShareURL) { ref in
+            _ShareSheet(url: ref.url)
         }
         .fileImporter(
             isPresented: $showFilePicker, allowedContentTypes: [.data], allowsMultipleSelection: true,
@@ -436,6 +471,46 @@ private struct FileTreeView: View {
         }
     }
 
+    private func doRename(_ src: String) async {
+        let newName = renameText.trimmingCharacters(in: .whitespaces)
+        renamePath = nil
+        renameText = ""
+        guard !newName.isEmpty, newName != (src.split(separator: "/").last.map(String.init) ?? src) else { return }
+        let parent = src.contains("/") ? String(src[..<(src.lastIndex(of: "/") ?? src.endIndex)]) : ""
+        let dst = parent.isEmpty ? newName : "\(parent)/\(newName)"
+        do {
+            try await relay.apiClient.renamePath(
+                kind, id: targetId, path: src, to: dst, server: server,
+            )
+            // Refresh the parent listing — the source disappears and the
+            // destination appears, both in the same directory.
+            if parent.isEmpty { await loadRoot() } else { load(path: parent) }
+        } catch {
+            self.error = String(describing: error)
+        }
+    }
+
+    private func doDownload(path: String, isDir: Bool) async {
+        do {
+            let data = try await relay.apiClient.downloadPath(
+                kind, id: targetId, path: path, isDir: isDir, server: server,
+            )
+            // Write to a temp file with the right extension so the share
+            // sheet can offer "Save to Files", AirDrop, etc. Name picks
+            // up `.zip` for directories.
+            let basename = path.split(separator: "/").last.map(String.init) ?? "download"
+            let filename = isDir ? "\(basename).zip" : basename
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(filename)
+            try data.write(to: url)
+            downloadShareURL = _DownloadRef(url: url)
+        } catch {
+            self.error = String(describing: error)
+        }
+    }
+
     /// Refresh the deepest open ancestor of every newly-arrived file-change
     /// event for our scope. Closed subdirs are left alone (they'll reload
     /// next time the user expands them).
@@ -469,6 +544,8 @@ private struct DirEntries: View {
     @Binding var selectedPath: String?
     let onExpand: (String) -> Void
     let onDelete: (String) -> Void
+    let onRename: (String) -> Void
+    let onDownload: (String, Bool) -> Void
     /// iPad route — preempts the inline preview path.
     let onOpenFile: ((String) -> Void)?
 
@@ -516,6 +593,15 @@ private struct DirEntries: View {
                 }
             }
             .contextMenu {
+                Button { onRename(childPath) } label: {
+                    Label("Rename…", systemImage: "pencil")
+                }
+                Button { onDownload(childPath, entry.isDir) } label: {
+                    Label(
+                        entry.isDir ? "Download zip" : "Download",
+                        systemImage: "square.and.arrow.down",
+                    )
+                }
                 Button(role: .destructive) { onDelete(childPath) } label: {
                     Label("Delete", systemImage: "trash")
                 }
@@ -530,6 +616,8 @@ private struct DirEntries: View {
                     selectedPath: $selectedPath,
                     onExpand: onExpand,
                     onDelete: onDelete,
+                    onRename: onRename,
+                    onDownload: onDownload,
                     onOpenFile: onOpenFile,
                 )
             }
@@ -771,6 +859,23 @@ private func _presentShareSheet(url: URL) {
         .rootViewController?
         .present(sheet, animated: true)
 }
+
+/// Identifiable wrapper so `.sheet(item:)` can present the share sheet
+/// for a freshly downloaded file URL.
+struct _DownloadRef: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+}
+
+struct _ShareSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
 #else
 private func _presentShareSheet(url: URL) {}
+struct _DownloadRef: Identifiable { let url: URL; var id: String { url.absoluteString } }
+struct _ShareSheet: View { let url: URL; var body: some View { EmptyView() } }
 #endif

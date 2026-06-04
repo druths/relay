@@ -143,6 +143,39 @@ extension APIClient {
         )
     }
 
+    struct RenameBody: Encodable { let to: String }
+
+    func renamePath(
+        _ kind: FsKind, id: String, path: String, to: String, server: String? = nil,
+    ) async throws {
+        let (base, q) = _fsBase(kind, id: id, server: server)
+        let sep = q.isEmpty ? "?" : "&"
+        let _ : EmptyResponse = try await request(
+            "POST",
+            path: "\(base)/\(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))\(q)\(sep)op=rename",
+            body: RenameBody(to: to.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
+        )
+    }
+
+    /// Downloads the path's bytes (zip for directories via `?op=zip`).
+    /// Returns the raw data; the UI can hand it off to a share sheet so
+    /// the user picks where to save / send.
+    func downloadPath(
+        _ kind: FsKind, id: String, path: String, isDir: Bool, server: String? = nil,
+    ) async throws -> Data {
+        let (base, q) = _fsBase(kind, id: id, server: server)
+        let cleaned = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let url: String
+        if isDir {
+            let sep = q.isEmpty ? "?" : "&"
+            url = "\(base)/\(cleaned)\(q)\(sep)op=zip"
+        } else {
+            url = "\(base)/\(cleaned)\(q)"
+        }
+        let (data, _) = try await rawRequest("GET", path: url)
+        return data
+    }
+
     // ── helpers ───────────────────────────────────────────────────────
 
     nonisolated private func _pct(_ s: String) -> String {

@@ -3,8 +3,10 @@ import type { DirListing } from "../types";
 import type { FileChangeEvent } from "../hooks/useRelay";
 import {
   deletePath,
+  downloadPath,
   listDir,
   mkdir,
+  renamePath,
   writeFile,
 } from "../api";
 
@@ -244,13 +246,42 @@ function FileTreeView({
     }
   };
 
+  const _refreshParent = (path: string) => {
+    const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+    if (parent === "") loadRoot();
+    else if (expanded.has(parent)) loadSubdir(parent);
+  };
+
   const handleDelete = async (path: string) => {
     if (!confirm(`Delete ${path}?`)) return;
     try {
       await deletePath(kind, id, path, server);
-      const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
-      if (parent === "") loadRoot();
-      else if (expanded.has(parent)) loadSubdir(parent);
+      _refreshParent(path);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleRename = async (path: string) => {
+    const current = path.split("/").pop() ?? path;
+    const next = prompt("Rename to:", current);
+    if (!next || next === current) return;
+    const cleaned = next.trim().replace(/^\/+/, "");
+    if (!cleaned) return;
+    // Resolve relative to the same parent dir as the source.
+    const parent = path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+    const dst = parent ? `${parent}/${cleaned}` : cleaned;
+    try {
+      await renamePath(kind, id, path, dst, server);
+      _refreshParent(path);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleDownload = async (path: string, isDir: boolean) => {
+    try {
+      await downloadPath(kind, id, path, isDir, server);
     } catch (e) {
       setError(String(e));
     }
@@ -334,6 +365,8 @@ function FileTreeView({
             collapseSubdir={collapseSubdir}
             onOpenFile={(p) => onOpenFile(kind, id, p, server)}
             onDelete={handleDelete}
+            onRename={handleRename}
+            onDownload={handleDownload}
           />
         )}
       </div>
@@ -373,7 +406,8 @@ function FileTreeView({
 }
 
 function DirView({
-  listing, path, depth, expanded, loadSubdir, collapseSubdir, onOpenFile, onDelete,
+  listing, path, depth, expanded, loadSubdir, collapseSubdir,
+  onOpenFile, onDelete, onRename, onDownload,
 }: {
   listing: DirListing;
   path: string;
@@ -383,6 +417,8 @@ function DirView({
   collapseSubdir: (p: string) => void;
   onOpenFile: (p: string) => void;
   onDelete: (p: string) => void;
+  onRename: (p: string) => void;
+  onDownload: (p: string, isDir: boolean) => void;
 }) {
   return (
     <div>
@@ -414,16 +450,13 @@ function DirView({
               {!entry.is_dir && (
                 <span className="text-gray-600">{_formatSize(entry.size)}</span>
               )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete(childPath);
-                }}
-                className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 px-1"
-                title="Delete"
-              >
-                ✕
-              </button>
+              <RowMenu
+                path={childPath}
+                isDir={entry.is_dir}
+                onRename={onRename}
+                onDownload={onDownload}
+                onDelete={onDelete}
+              />
             </div>
             {entry.is_dir && isOpen && expanded.get(childPath) && (
               <DirView
@@ -435,12 +468,80 @@ function DirView({
                 collapseSubdir={collapseSubdir}
                 onOpenFile={onOpenFile}
                 onDelete={onDelete}
+                onRename={onRename}
+                onDownload={onDownload}
               />
             )}
           </div>
         );
       })}
     </div>
+  );
+}
+
+/** Hover-visible kebab on each row that opens a tiny action menu.
+ *  Earlier the row had a single × delete; we kept the same hover-show
+ *  pattern but expanded to a dropdown with Rename / Download / Delete. */
+function RowMenu({
+  path, isDir, onRename, onDownload, onDelete,
+}: {
+  path: string;
+  isDir: boolean;
+  onRename: (p: string) => void;
+  onDownload: (p: string, isDir: boolean) => void;
+  onDelete: (p: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // Close on any click anywhere else.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open]);
+  return (
+    <span className="relative">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-gray-200 px-1"
+        title="Actions"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+          <circle cx="8" cy="3" r="1.3" />
+          <circle cx="8" cy="8" r="1.3" />
+          <circle cx="8" cy="13" r="1.3" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute right-0 top-5 z-40 w-36 py-1 rounded-md
+                     bg-gray-900 border border-gray-700 shadow-xl text-gray-200"
+        >
+          <button
+            onClick={() => { setOpen(false); onRename(path); }}
+            className="block w-full text-left px-3 py-1 hover:bg-gray-800"
+          >
+            Rename…
+          </button>
+          <button
+            onClick={() => { setOpen(false); onDownload(path, isDir); }}
+            className="block w-full text-left px-3 py-1 hover:bg-gray-800"
+          >
+            {isDir ? "Download zip" : "Download"}
+          </button>
+          <button
+            onClick={() => { setOpen(false); onDelete(path); }}
+            className="block w-full text-left px-3 py-1 text-red-400 hover:bg-gray-800"
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </span>
   );
 }
 

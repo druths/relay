@@ -284,6 +284,112 @@ async def _proxy_fs_mkdir(
     return resp.json() if resp.content else {}
 
 
+# ── Rename + zip-download (Relay-side compositions) ───────────────────
+
+
+async def _ark_listing(
+    base: str, api_key: str | None, *, suffix: str,
+) -> dict[str, Any]:
+    """GET a directory listing — JSON shape per ark's docs/projects.md."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{base}{suffix}", headers=_auth_headers(api_key))
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+
+async def _ark_file_bytes(
+    base: str, api_key: str | None, *, suffix: str,
+) -> bytes:
+    """GET a single file from ark and return its bytes."""
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.get(f"{base}{suffix}", headers=_auth_headers(api_key))
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.content
+
+
+async def _ark_rename(
+    base: str, api_key: str | None, *,
+    suffix_template: str, src: str, dst: str,
+) -> None:
+    """Pass-through to ark's native rename. ark handles files and
+    directories and refuses to silently overwrite (409 on dst conflict).
+    Earlier revisions of this helper rolled a GET→PUT→DELETE composition
+    here when ark didn't have rename — see git history if you need it."""
+    src_suffix = suffix_template.format(path=src)
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            f"{base}{src_suffix}",
+            headers=_auth_headers(api_key),
+            params={"op": "rename", "dest": dst},
+        )
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+
+def _safe_rel(path: str) -> str:
+    """Strip leading slashes and refuse path-traversal escapes. ark
+    enforces this server-side too but we double-check here so user input
+    can't slip a `..` into our zip walk."""
+    if "\\" in path or path.startswith("/"):
+        raise HTTPException(status_code=400, detail="invalid path")
+    parts = path.split("/")
+    if any(p == ".." or p == "" or p == "." for p in parts if p):
+        raise HTTPException(status_code=400, detail="invalid path")
+    return path.strip("/")
+
+
+async def _build_zip(
+    base: str, api_key: str | None, *,
+    suffix_template: str, root_path: str, archive_name: str,
+) -> tuple[bytes, str]:
+    """Recursively walk `root_path` via ark's listing endpoint, build a zip
+    in memory, return (bytes, archive_filename). Capped at 500 MB to keep
+    memory usage bounded; clients that need bigger should download files
+    individually for now."""
+    import io
+    import zipfile
+
+    MAX_BYTES = 500 * 1024 * 1024
+    buf = io.BytesIO()
+    total_bytes = 0
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+
+        async def _walk(rel: str) -> None:
+            nonlocal total_bytes
+            suffix = suffix_template.format(path=rel)
+            listing = await _ark_listing(base, api_key, suffix=suffix)
+            for entry in listing.get("entries") or []:
+                name = entry.get("name")
+                if not isinstance(name, str) or name in (".", ".."):
+                    continue
+                child = f"{rel}/{name}" if rel else name
+                if entry.get("is_dir"):
+                    await _walk(child)
+                else:
+                    data = await _ark_file_bytes(
+                        base, api_key, suffix=suffix_template.format(path=child),
+                    )
+                    total_bytes += len(data)
+                    if total_bytes > MAX_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="Directory too large to zip (>500 MB)",
+                        )
+                    # Strip the root path prefix so archive paths start
+                    # at the user-selected directory rather than carrying
+                    # absolute ark paths.
+                    rel_in_zip = child
+                    if root_path and rel_in_zip.startswith(root_path + "/"):
+                        rel_in_zip = rel_in_zip[len(root_path) + 1:]
+                    zf.writestr(rel_in_zip or name, data)
+
+        await _walk(root_path)
+
+    return buf.getvalue(), archive_name
+
+
 # ── Project filesystem ─────────────────────────────────────────────────
 
 
@@ -302,9 +408,23 @@ async def project_file_or_listing(
     project_id: str,
     path: str,
     server: str | None = Query(None),
+    op: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     _sid, base, api_key = await _ark_for_server(db, server)
+    if op == "zip":
+        safe = _safe_rel(path)
+        archive_name = (safe.rsplit("/", 1)[-1] or "project") + ".zip"
+        data, _ = await _build_zip(
+            base, api_key,
+            suffix_template=f"/projects/{project_id}/files/{{path}}",
+            root_path=safe, archive_name=archive_name,
+        )
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{archive_name}"'},
+        )
     return await _proxy_fs_get(
         base, api_key, suffix=f"/projects/{project_id}/files/{path}",
     )
@@ -341,20 +461,36 @@ async def project_file_delete(
     return Response(status_code=204)
 
 
+class RenameBody(BaseModel):
+    to: str
+
+
 @projects_router.post("/{project_id}/files/{path:path}")
-async def project_file_mkdir(
+async def project_file_post(
     project_id: str,
     path: str,
-    op: str = Query(..., description="Must be 'mkdir'"),
+    op: str = Query(..., description="'mkdir' or 'rename'"),
     server: str | None = Query(None),
+    body: RenameBody | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    if op != "mkdir":
-        raise HTTPException(status_code=400, detail="Only ?op=mkdir is supported")
     _sid, base, api_key = await _ark_for_server(db, server)
-    return await _proxy_fs_mkdir(
-        base, api_key, suffix=f"/projects/{project_id}/files/{path}",
-    )
+    if op == "mkdir":
+        return await _proxy_fs_mkdir(
+            base, api_key, suffix=f"/projects/{project_id}/files/{path}",
+        )
+    if op == "rename":
+        if body is None or not body.to.strip():
+            raise HTTPException(status_code=400, detail="rename needs `to` in body")
+        src = _safe_rel(path)
+        dst = _safe_rel(body.to.strip())
+        await _ark_rename(
+            base, api_key,
+            suffix_template=f"/projects/{project_id}/files/{{path}}",
+            src=src, dst=dst,
+        )
+        return {"renamed": src, "to": dst}
+    raise HTTPException(status_code=400, detail=f"unsupported op {op!r}")
 
 
 # ── Workspace filesystem (per-agent) ───────────────────────────────────
@@ -374,10 +510,24 @@ async def list_workspace_root(
 async def workspace_file_or_listing(
     agent_id: str,
     path: str,
+    op: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     _sid, base, api_key, agent = await _ark_for_agent(db, agent_id)
     name = _ark_agent_name(agent)
+    if op == "zip":
+        safe = _safe_rel(path)
+        archive_name = (safe.rsplit("/", 1)[-1] or "workspace") + ".zip"
+        data, _ = await _build_zip(
+            base, api_key,
+            suffix_template=f"/agents/{name}/files/{{path}}",
+            root_path=safe, archive_name=archive_name,
+        )
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{archive_name}"'},
+        )
     return await _proxy_fs_get(base, api_key, suffix=f"/agents/{name}/files/{path}")
 
 
@@ -409,16 +559,28 @@ async def workspace_file_delete(
 
 
 @workspaces_router.post("/{agent_id}/workspace/files/{path:path}")
-async def workspace_file_mkdir(
+async def workspace_file_post(
     agent_id: str,
     path: str,
-    op: str = Query(..., description="Must be 'mkdir'"),
+    op: str = Query(..., description="'mkdir' or 'rename'"),
+    body: RenameBody | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    if op != "mkdir":
-        raise HTTPException(status_code=400, detail="Only ?op=mkdir is supported")
     _sid, base, api_key, agent = await _ark_for_agent(db, agent_id)
     name = _ark_agent_name(agent)
-    return await _proxy_fs_mkdir(
-        base, api_key, suffix=f"/agents/{name}/files/{path}",
-    )
+    if op == "mkdir":
+        return await _proxy_fs_mkdir(
+            base, api_key, suffix=f"/agents/{name}/files/{path}",
+        )
+    if op == "rename":
+        if body is None or not body.to.strip():
+            raise HTTPException(status_code=400, detail="rename needs `to` in body")
+        src = _safe_rel(path)
+        dst = _safe_rel(body.to.strip())
+        await _ark_rename(
+            base, api_key,
+            suffix_template=f"/agents/{name}/files/{{path}}",
+            src=src, dst=dst,
+        )
+        return {"renamed": src, "to": dst}
+    raise HTTPException(status_code=400, detail=f"unsupported op {op!r}")
