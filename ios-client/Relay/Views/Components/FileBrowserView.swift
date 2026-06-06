@@ -201,25 +201,18 @@ private struct FileTreeView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let root = rootListing {
-                        DirEntries(
-                            listing: root,
-                            path: "",
-                            depth: 0,
-                            expanded: $expanded,
-                            selectedPath: $selectedPath,
-                            onExpand: load,
-                            onDelete: { pathToDelete = $0 },
-                            onRename: { p in
-                                renamePath = p
-                                renameText = p.split(separator: "/").last.map(String.init) ?? p
-                            },
-                            onDownload: { p, isDir in
-                                Task { await doDownload(path: p, isDir: isDir) }
-                            },
-                            onOpenFile: onOpenFile.map { cb in
-                                { p in cb(kind, targetId, p, server) }
-                            },
+                        // Flatten the visible tree into an ordered list of
+                        // (path, depth, entry) rows. Recursive nested
+                        // ForEach inside LazyVStack used to leave
+                        // un-measured placeholder space ("giant empty
+                        // gaps") for every expansion after the first;
+                        // a flat list lets LazyVStack do its job.
+                        let flat = _flattenTree(
+                            root, parent: "", depth: 0, expanded: expanded,
                         )
+                        ForEach(flat) { row in
+                            entryRow(row)
+                        }
                     } else if loading {
                         ProgressView().padding()
                     }
@@ -353,6 +346,69 @@ private struct FileTreeView: View {
             switch result {
             case .success(let urls): Task { await uploadFiles(urls) }
             case .failure(let err): self.error = String(describing: err)
+            }
+        }
+    }
+
+    // ── Row rendering ────────────────────────────────────────────────
+
+    @ViewBuilder
+    private func entryRow(_ row: _FlatRow) -> some View {
+        let entry = row.entry
+        let childPath = row.path
+        let isOpen = expanded[childPath] != nil
+        HStack(spacing: 4) {
+            Text(entry.isDir ? (isOpen ? "▾" : "▸") : " ")
+                .font(theme.monoFont(size: 13))
+                .foregroundStyle(theme.textQuaternary)
+                .frame(width: 10)
+            Image(systemName: entry.isDir ? "folder.fill" : "doc")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.textTertiary)
+            Text(entry.name)
+                .font(theme.bodyFont(size: 13))
+                .foregroundStyle(theme.textSecondary)
+                .lineLimit(1)
+            Spacer()
+            if !entry.isDir {
+                Text(_formatSize(entry.size))
+                    .font(theme.monoFont(size: 11))
+                    .foregroundStyle(theme.textQuaternary)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.leading, CGFloat(row.depth) * 14)
+        .padding(.horizontal, 6)
+        .background(selectedPath == childPath ? theme.elevated : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if entry.isDir {
+                if isOpen { expanded.removeValue(forKey: childPath) }
+                else { load(path: childPath) }
+            } else if let cb = onOpenFile {
+                cb(kind, targetId, childPath, server)
+            } else {
+                selectedPath = childPath
+            }
+        }
+        .contextMenu {
+            Button {
+                renamePath = childPath
+                renameText = childPath.split(separator: "/").last.map(String.init) ?? childPath
+            } label: {
+                Label("Rename…", systemImage: "pencil")
+            }
+            Button {
+                Task { await doDownload(path: childPath, isDir: entry.isDir) }
+            } label: {
+                Label(
+                    entry.isDir ? "Download zip" : "Download",
+                    systemImage: "square.and.arrow.down",
+                )
+            }
+            Button(role: .destructive) { pathToDelete = childPath } label: {
+                Label("Delete", systemImage: "trash")
             }
         }
     }
@@ -534,96 +590,6 @@ private struct FileTreeView: View {
     }
 }
 
-// MARK: - Directory entries (recursive)
-
-private struct DirEntries: View {
-    let listing: DirListing
-    let path: String
-    let depth: Int
-    @Binding var expanded: [String: DirListing]
-    @Binding var selectedPath: String?
-    let onExpand: (String) -> Void
-    let onDelete: (String) -> Void
-    let onRename: (String) -> Void
-    let onDownload: (String, Bool) -> Void
-    /// iPad route — preempts the inline preview path.
-    let onOpenFile: ((String) -> Void)?
-
-    @Environment(\.relayTheme) private var theme
-
-    var body: some View {
-        ForEach(listing.entries) { entry in
-            let childPath = path.isEmpty ? entry.name : "\(path)/\(entry.name)"
-            let isOpen = expanded[childPath] != nil
-            HStack(spacing: 4) {
-                Text(entry.isDir ? (isOpen ? "▾" : "▸") : " ")
-                    .font(theme.monoFont(size: 13))
-                    .foregroundStyle(theme.textQuaternary)
-                    .frame(width: 10)
-                Image(systemName: entry.isDir ? "folder.fill" : "doc")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.textTertiary)
-                Text(entry.name)
-                    .font(theme.bodyFont(size: 13))
-                    .foregroundStyle(theme.textSecondary)
-                    .lineLimit(1)
-                Spacer()
-                if !entry.isDir {
-                    Text(_formatSize(entry.size))
-                        .font(theme.monoFont(size: 11))
-                        .foregroundStyle(theme.textQuaternary)
-                }
-            }
-            .padding(.vertical, 4)
-            .padding(.leading, CGFloat(depth) * 14)
-            .padding(.horizontal, 6)
-            .background(
-                selectedPath == childPath ? theme.elevated : Color.clear,
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if entry.isDir {
-                    if isOpen { expanded.removeValue(forKey: childPath) }
-                    else { onExpand(childPath) }
-                } else if let cb = onOpenFile {
-                    cb(childPath)
-                } else {
-                    selectedPath = childPath
-                }
-            }
-            .contextMenu {
-                Button { onRename(childPath) } label: {
-                    Label("Rename…", systemImage: "pencil")
-                }
-                Button { onDownload(childPath, entry.isDir) } label: {
-                    Label(
-                        entry.isDir ? "Download zip" : "Download",
-                        systemImage: "square.and.arrow.down",
-                    )
-                }
-                Button(role: .destructive) { onDelete(childPath) } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
-
-            if let sub = expanded[childPath] {
-                DirEntries(
-                    listing: sub,
-                    path: childPath,
-                    depth: depth + 1,
-                    expanded: $expanded,
-                    selectedPath: $selectedPath,
-                    onExpand: onExpand,
-                    onDelete: onDelete,
-                    onRename: onRename,
-                    onDownload: onDownload,
-                    onOpenFile: onOpenFile,
-                )
-            }
-        }
-    }
-}
 
 // MARK: - File preview / editor
 
@@ -811,6 +777,40 @@ private struct ToolbarIconButton: View {
         .disabled(disabled)
         .help(title)
     }
+}
+
+// MARK: - Flat tree
+
+/// One visible row in the file tree. `path` is the full slash-joined
+/// path (unique across the whole tree), `depth` controls indentation.
+private struct _FlatRow: Identifiable {
+    let path: String
+    let depth: Int
+    let entry: DirEntry
+    var id: String { path }
+}
+
+/// Walk a `DirListing` plus the user's expanded-paths dictionary into
+/// an ordered flat list of visible rows. Recursive during data prep,
+/// but the SwiftUI view sees a single flat ForEach — which is what
+/// LazyVStack needs to lay out correctly.
+private func _flattenTree(
+    _ listing: DirListing, parent: String, depth: Int,
+    expanded: [String: DirListing],
+) -> [_FlatRow] {
+    var out: [_FlatRow] = []
+    for entry in listing.entries {
+        let childPath = parent.isEmpty ? entry.name : "\(parent)/\(entry.name)"
+        out.append(_FlatRow(path: childPath, depth: depth, entry: entry))
+        if let sub = expanded[childPath] {
+            out.append(
+                contentsOf: _flattenTree(
+                    sub, parent: childPath, depth: depth + 1, expanded: expanded,
+                ),
+            )
+        }
+    }
+    return out
 }
 
 // MARK: - helpers
