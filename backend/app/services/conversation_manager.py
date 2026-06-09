@@ -691,7 +691,12 @@ async def handle_session_message(
     if not session:
         return [{"type": "error", "payload": {"message": "Session not found"}}]
 
-    # Check for disconnect / switch intent before persisting
+    # In-session message: check ONLY for the exact-string "operator"
+    # disconnect escape. The CONNECT regex (`connect\s+(?:me\s+)?(?:to\s+)?(\w+)`)
+    # was also being matched here, but it's far too permissive for
+    # in-session text — "we need to connect to a broader audience"
+    # shouldn't yank the user out of the session they're in. Lobby
+    # routing intents only apply in the lobby.
     intent = parse_intent(text)
 
     if intent.intent == Intent.DISCONNECT:
@@ -699,17 +704,13 @@ async def handle_session_message(
         reply = operator_disconnect_message()
         return [
             _handoff_event("agent", "operator"),
-            _session_left_event(session),
+            _session_left_event(
+                session,
+                reason="intent_disconnect",
+                detail={"matched_text": text},
+            ),
             _lobby_state_event(),
             _text_event("operator", reply),
-        ]
-
-    if intent.intent == Intent.CONNECT:
-        # Switch agents: pause current, tell WS handler to re-route through lobby
-        await pause_session(db, session_id)
-        return [
-            _session_left_event(session),
-            {"type": "lobby_redirect", "payload": {"text": text}},
         ]
 
     # Normal agent conversation
@@ -771,22 +772,21 @@ async def handle_session_message_stream(
         yield {"type": "error", "payload": {"message": "Session not found"}}
         return
 
-    # Check for disconnect / switch intent before persisting
+    # In-session: only the exact-string "operator" disconnect escape is
+    # honored. See the matching note in `handle_session_message`.
     intent = parse_intent(text)
 
     if intent.intent == Intent.DISCONNECT:
         await pause_session(db, session_id)
         reply = operator_disconnect_message()
         yield _handoff_event("agent", "operator")
-        yield _session_left_event(session)
+        yield _session_left_event(
+            session,
+            reason="intent_disconnect",
+            detail={"matched_text": text},
+        )
         yield _lobby_state_event()
         yield _text_event("operator", reply)
-        return
-
-    if intent.intent == Intent.CONNECT:
-        await pause_session(db, session_id)
-        yield _session_left_event(session)
-        yield {"type": "lobby_redirect", "payload": {"text": text}}
         return
 
     # Normal agent conversation
@@ -903,10 +903,22 @@ def _session_entered_event(session: Session, agent_name: str, labels: list[str] 
     }
 
 
-def _session_left_event(session: Session) -> dict:
-    return {
-        "type": "session_left",
-        "payload": {
-            "session_id": str(session.session_id),
-        },
+def _session_left_event(
+    session: Session, *, reason: str, detail: dict | None = None,
+) -> dict:
+    """Build the wire frame for a session_left event.
+
+    Every emission carries a structured `reason` so the client's activity
+    log can show exactly what made it exit — particularly useful when the
+    regex-based intent matcher picks something up the user didn't intend
+    as a command (e.g. "we need to connect to a broader audience" hits
+    `Intent.CONNECT` and ejects them). When applicable, `detail` carries
+    the original text + the matched intent target.
+    """
+    payload: dict = {
+        "session_id": str(session.session_id),
+        "reason": reason,
     }
+    if detail:
+        payload["detail"] = detail
+    return {"type": "session_left", "payload": payload}

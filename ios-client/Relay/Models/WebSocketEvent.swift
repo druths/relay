@@ -7,7 +7,7 @@ enum WebSocketEvent {
     case text(TextPayload)
     case handoff(HandoffPayload)
     case sessionEntered(SessionEnteredPayload)
-    case sessionLeft
+    case sessionLeft(SessionLeftPayload)
     case sessionHistory(SessionHistoryPayload)
     case sessionNamed(SessionNamedPayload)
     case sessionRenamed(SessionRenamedPayload)
@@ -125,6 +125,24 @@ struct SessionDeletedPayload: Codable {
         case sessionId = "session_id"
     }
 }
+
+/// Payload for `session_left`. `sessionId` is the session that was left
+/// (or `nil` when the server cleared us from a session that no longer
+/// exists). `reason` is a stable token the client can switch on; `detail`
+/// carries unstructured context (e.g. the matched text that tripped the
+/// regex intent matcher) for the activity log.
+struct SessionLeftPayload: Codable, Sendable {
+    let sessionId: String?
+    let reason: String?
+    let detail: [String: JSONValue]?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case reason
+        case detail
+    }
+}
+
 
 struct SessionUnreadPayload: Codable {
     let sessionId: String
@@ -291,8 +309,12 @@ extension WebSocketEvent {
 
         // Re-encode the payload portion for type-specific decoding
         guard let payloadData = envelope.payload?.data else {
-            // Some events (like leave_session response) may have no payload
-            if envelope.type == "session_left" { return .sessionLeft }
+            // Older servers send `session_left` with no payload — keep
+            // accepting it, but emit an empty SessionLeftPayload so the
+            // type system is consistent with the payload-bearing variant.
+            if envelope.type == "session_left" {
+                return .sessionLeft(SessionLeftPayload(sessionId: nil, reason: nil, detail: nil))
+            }
             print("[WS] No payload for type: \(envelope.type)")
             return nil
         }
@@ -310,7 +332,7 @@ extension WebSocketEvent {
             case "session_entered":
                 return .sessionEntered(try decoder.decode(SessionEnteredPayload.self, from: payloadData))
             case "session_left":
-                return .sessionLeft
+                return .sessionLeft(try decoder.decode(SessionLeftPayload.self, from: payloadData))
             case "session_history":
                 return .sessionHistory(try decoder.decode(SessionHistoryPayload.self, from: payloadData))
             case "session_named":
@@ -377,8 +399,11 @@ struct AnyCodablePayload: Codable {
     }
 }
 
-// Generic JSON value type for re-encoding payloads
-private enum JSONValue: Codable {
+/// Generic JSON value type. Used internally by `AnyCodablePayload` for
+/// round-tripping raw payload JSON, and by `SessionLeftPayload.detail`
+/// (and any future payload that needs to carry an open-shaped object
+/// without losing fidelity for diagnostics).
+enum JSONValue: Codable, Sendable {
     case string(String)
     case number(Double)
     case bool(Bool)
@@ -414,6 +439,19 @@ private enum JSONValue: Codable {
         case .object(let o): try container.encode(o)
         case .array(let a): try container.encode(a)
         case .null: try container.encodeNil()
+        }
+    }
+
+    /// Coerce into the plain-Any form `ActivityLog`'s serialiser already
+    /// knows how to print as JSON.
+    var anyValue: Any {
+        switch self {
+        case .string(let v): return v
+        case .number(let v): return v
+        case .bool(let v): return v
+        case .object(let v): return v.mapValues(\.anyValue)
+        case .array(let v): return v.map(\.anyValue)
+        case .null: return NSNull()
         }
     }
 }

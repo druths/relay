@@ -269,7 +269,13 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                                     await db.commit()
                                 await websocket.send_json({
                                     "type": "session_left",
-                                    "payload": {"session_id": None},
+                                    "payload": {
+                                        "session_id": None,
+                                        "reason": "client_leave_session",
+                                        "detail": {
+                                            "previous_session_id": str(left_session_id),
+                                        },
+                                    },
                                 })
 
                             await websocket.send_json({
@@ -703,7 +709,13 @@ async def _do_resume(
         # routed to the lobby while the UI still claims to be in a session.
         await websocket.send_json({
             "type": "session_left",
-            "payload": {"session_id": None},
+            "payload": {
+                "session_id": None,
+                "reason": "session_not_found_on_resume",
+                "detail": {
+                    "requested_session_id": str(target_sid),
+                },
+            },
         })
         await websocket.send_json({
             "type": "state_update",

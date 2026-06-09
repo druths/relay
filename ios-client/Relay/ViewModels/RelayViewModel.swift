@@ -664,7 +664,7 @@ final class RelayViewModel {
                 Task { await fetchSessions() }
             }
 
-        case .sessionLeft:
+        case .sessionLeft(let payload):
             audio.stopAudio()
             audioGapTask?.cancel()
             audioGapTask = nil
@@ -688,11 +688,25 @@ final class RelayViewModel {
                 lobbyMessages.append(lobbyMarker)
                 if isLiveMode { ChimeGenerator.playSessionLeave() }
             }
-            ActivityLog.shared.add("session_left", context: [
+            var ctx: [String: Any] = [
                 "previous_session_id": oldSessionId as Any,
                 "previous_agent": oldAgentName as Any,
                 "in_live_mode": isLiveMode,
-            ])
+                "reason": payload.reason as Any,
+            ]
+            // Server-reported session_id is the one the server just left us
+            // out of — useful when it differs from what the client thought
+            // was active (e.g. resume-of-missing-session edge case).
+            if let serverSid = payload.sessionId {
+                ctx["server_session_id"] = serverSid
+            }
+            // Spread `detail` keys into the context so the JSON dump shows
+            // the matched text, target agent, etc. on individual lines
+            // rather than as a nested blob.
+            if let detail = payload.detail {
+                for (k, v) in detail { ctx[k] = v.anyValue }
+            }
+            ActivityLog.shared.add("session_left", context: ctx)
 
             activeSessionId = nil
             activeAgentName = nil
