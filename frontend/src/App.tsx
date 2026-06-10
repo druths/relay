@@ -643,7 +643,12 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
       </aside>
 
       {/* Main conversation area */}
-      <main className="flex-1 flex flex-col">
+      {/* `min-w-0` here matters once the file editor is open: CodeMirror's
+          `.cm-editor` has `min-width: max-content` when wrap is off (= width
+          of the longest line). Without min-w-0, the default `min-width: auto`
+          on the flex item lets that propagate up and balloon the whole pane.
+          Same fix repeats on every flex ancestor down to the editor wrapper. */}
+      <main className="flex-1 min-w-0 flex flex-col">
         {/* In-session header bar */}
         {inSession && (
           <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800 bg-gray-900/50">
@@ -824,7 +829,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             user can chat and watch a file at the same time. */}
         {inSession && openTabs.length > 0 && (
           <div
-            className="flex flex-col flex-shrink-0 min-h-0 border-b border-gray-800"
+            className="flex flex-col flex-shrink-0 min-h-0 min-w-0 border-b border-gray-800"
             style={{ height: `${filePaneHeight}px` }}
           >
             <div className="flex border-b border-gray-800 bg-gray-900/40 text-xs overflow-x-auto flex-shrink-0">
@@ -857,7 +862,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                 );
               })}
             </div>
-            <div className="flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 min-w-0 flex flex-col">
               {openTabs.map((t) => (
                 activeTabId === t.tabId && (
                   <FileEditorTab

@@ -32,6 +32,20 @@ struct SelectableTextEditor: UIViewRepresentable {
     /// highlight when it's first responder, which we avoid during find
     /// so the find input keeps focus.
     var highlightRange: NSRange? = nil
+    /// When true, the text container's width tracks the view (soft-wrap
+    /// on). When false, the container is given a huge fixed width so
+    /// each `\n` is one visual line and the gutter stays honest.
+    var wrap: Bool = false
+    /// Called whenever the underlying UITextView becomes / resigns first
+    /// responder. The parent uses this to gate single-letter keyboard
+    /// shortcuts on the iPad — they should be silent while the user is
+    /// typing in the editor.
+    var onFocusChange: ((Bool) -> Void)? = nil
+    /// Bump this counter from the parent to ask the editor to resign
+    /// first responder (e.g. on Escape). Decoupled from focus state so a
+    /// parent push doesn't echo back through `onFocusChange` and create
+    /// a feedback loop.
+    var resignTrigger: Int = 0
 
     func makeUIView(context: Context) -> EditorContainer {
         let v = EditorContainer()
@@ -40,14 +54,24 @@ struct SelectableTextEditor: UIViewRepresentable {
     }
 
     func updateUIView(_ v: EditorContainer, context: Context) {
+        // Refresh the coordinator's parent reference so its delegate
+        // callbacks see the latest closures + bindings (otherwise
+        // `onFocusChange` could end up pointing at a stale RelayView).
+        context.coordinator.parent = self
         if v.editor.text != text {
             v.editor.text = text
         }
+        v.setWrap(wrap)
         v.refreshGutter()
 
         let safe = _clamp(selectedRange, in: v.editor.text)
         if v.editor.selectedRange != safe {
             v.editor.selectedRange = safe
+        }
+        // Honor parent-requested resignFirstResponder (Escape from RelayView).
+        if context.coordinator.lastResignTrigger != resignTrigger {
+            context.coordinator.lastResignTrigger = resignTrigger
+            DispatchQueue.main.async { v.editor.resignFirstResponder() }
         }
         if context.coordinator.lastScrollTarget != scrollTarget {
             context.coordinator.lastScrollTarget = scrollTarget
@@ -71,6 +95,7 @@ struct SelectableTextEditor: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: SelectableTextEditor
         var lastScrollTarget: Int = .min
+        var lastResignTrigger: Int = 0
 
         init(_ parent: SelectableTextEditor) { self.parent = parent }
 
@@ -84,6 +109,12 @@ struct SelectableTextEditor: UIViewRepresentable {
             if parent.selectedRange != tv.selectedRange {
                 parent.selectedRange = tv.selectedRange
             }
+        }
+        func textViewDidBeginEditing(_ tv: UITextView) {
+            parent.onFocusChange?(true)
+        }
+        func textViewDidEndEditing(_ tv: UITextView) {
+            parent.onFocusChange?(false)
         }
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard let tv = scrollView as? UITextView else { return }
@@ -174,25 +205,65 @@ final class EditorContainer: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Cached current wrap mode. Layout / gutter rendering branch on this.
+    private var wrapEnabled: Bool = false
+
+    /// Toggle word-wrap on the underlying UITextView. When ON, the text
+    /// container's width tracks the view (soft wrap) and the line-number
+    /// gutter is hidden — per-row alignment with wrapped continuations
+    /// would otherwise drift since each logical line can span multiple
+    /// visual rows.
+    func setWrap(_ on: Bool) {
+        guard on != wrapEnabled else { return }
+        wrapEnabled = on
+        if on {
+            editor.textContainer.widthTracksTextView = true
+            editor.textContainer.size = CGSize(
+                width: bounds.width,
+                height: CGFloat.greatestFiniteMagnitude,
+            )
+            editor.alwaysBounceHorizontal = false
+        } else {
+            editor.textContainer.widthTracksTextView = false
+            editor.textContainer.size = CGSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude,
+            )
+            editor.alwaysBounceHorizontal = true
+        }
+        gutter.isHidden = on
+        separator.isHidden = on
+        setNeedsLayout()
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        let lineCount = max(1, _lineCount(editor.text))
-        let digitWidth: CGFloat = "9".size(withAttributes: [.font: Self.monoFont]).width
-        let digits = max(2, String(lineCount).count)
-        // 8pt padding on each side plus enough room for the widest line number.
-        let gutterWidth = (CGFloat(digits) * digitWidth) + 16
-        gutter.frame = CGRect(x: 0, y: 0, width: gutterWidth, height: bounds.height)
-        separator.frame = CGRect(x: gutterWidth, y: 0, width: 1.0 / UIScreen.main.scale, height: bounds.height)
-        editor.frame = CGRect(
-            x: gutterWidth, y: 0,
-            width: bounds.width - gutterWidth,
-            height: bounds.height,
-        )
+        if wrapEnabled {
+            // Gutter / separator hidden — editor takes the full width.
+            gutter.frame = .zero
+            separator.frame = .zero
+            editor.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
+        } else {
+            let lineCount = max(1, _lineCount(editor.text))
+            let digitWidth: CGFloat = "9".size(withAttributes: [.font: Self.monoFont]).width
+            let digits = max(2, String(lineCount).count)
+            // 8pt padding on each side plus enough room for the widest line number.
+            let gutterWidth = (CGFloat(digits) * digitWidth) + 16
+            gutter.frame = CGRect(x: 0, y: 0, width: gutterWidth, height: bounds.height)
+            separator.frame = CGRect(x: gutterWidth, y: 0, width: 1.0 / UIScreen.main.scale, height: bounds.height)
+            editor.frame = CGRect(
+                x: gutterWidth, y: 0,
+                width: bounds.width - gutterWidth,
+                height: bounds.height,
+            )
+        }
     }
 
     /// Re-render the gutter's "1\n2\n…\nN" payload and re-lay it out so the
     /// gutter widens as the line count grows past a digit threshold.
+    /// No-op when wrap is on — the gutter is hidden then.
     func refreshGutter() {
+        if wrapEnabled { return }
         let n = max(1, _lineCount(editor.text))
         gutter.text = (1...n).map(String.init).joined(separator: "\n")
         setNeedsLayout()

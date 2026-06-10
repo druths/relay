@@ -33,6 +33,16 @@ final class RelayViewModel {
     /// into a central tab. Ephemeral: cleared on disconnect alongside
     /// the rest of session state.
     var fileTreeExpanded: [String: [String: DirListing]] = [:]
+
+    /// True while the central-pane file editor's underlying UITextView is
+    /// first responder. The iPad layout uses this to silence its
+    /// single-letter keyboard shortcuts ("/" and "m") while the user is
+    /// typing — otherwise those keys never reach the editor.
+    var editorFocused: Bool = false
+    /// Counter that the editor wrapper observes; bumping it tells the
+    /// active editor to `resignFirstResponder` (used by Escape from the
+    /// iPad layout).
+    var resignEditorFocusTrigger: Int = 0
     /// Client-side system markers keyed by sessionId — appended to sessionMessages
     /// on resume so the user can see when a session ended within the app's lifetime.
     private var sessionMarkers: [String: [Message]] = [:]

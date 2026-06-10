@@ -318,6 +318,22 @@ body {
   border-radius: 0 !important;
 }
 
+/* ── CodeMirror containment ──
+   CodeMirror's `.cm-editor` declares `min-width: max-content` when wrap is
+   off — i.e. it wants to be as wide as its longest line. Combined with the
+   default `min-width: auto` on flex items above it in the tree, that pushes
+   the whole pane outward instead of letting horizontal scroll happen
+   internally. Force the editor to take parent's width and let `.cm-scroller`
+   handle the overflow. */
+.cm-editor {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.cm-scroller {
+  overflow: auto;
+}
+
 /* ── Scrollbars (baseline) ──
    Default browser scrollbars are jarringly light against the dark UI.
    Drive them off the same CSS variables the rest of the palette uses so

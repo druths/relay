@@ -31,6 +31,9 @@ struct FileEditorView: View {
     @State private var error: String?
     @State private var saving = false
     @State private var staleBanner = false
+    /// Persisted across files (and app launches) — most users want the
+    /// same wrap behavior in every editor they open.
+    @AppStorage("relay_editor_wrap") private var wrap: Bool = false
     /// True when the file isn't currently on disk — either it 404'd on
     /// load or a delete event arrived. The tab stays open, the draft is
     /// kept, and Save recreates the file.
@@ -228,6 +231,12 @@ struct FileEditorView: View {
                 }
                 .foregroundStyle(theme.textSecondary)
                 .help("Find (⌘F)")
+                Button { wrap.toggle() } label: {
+                    Image(systemName: wrap ? "arrow.turn.down.left" : "arrow.right.to.line")
+                        .font(.system(size: 15))
+                }
+                .foregroundStyle(wrap ? theme.primary : theme.textSecondary)
+                .help(wrap ? "Disable word wrap" : "Enable word wrap")
                 Button {
                     Task { await save() }
                 } label: {
@@ -330,6 +339,9 @@ struct FileEditorView: View {
                 scrollTarget: scrollTarget,
                 shouldFocus: !findOpen,
                 highlightRange: currentFindMatch,
+                wrap: wrap,
+                onFocusChange: { relay.editorFocused = $0 },
+                resignTrigger: relay.resignEditorFocusTrigger,
             )
             .background(theme.elevated)
             #else

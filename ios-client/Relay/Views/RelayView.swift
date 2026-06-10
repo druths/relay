@@ -223,7 +223,11 @@ struct RelayView: View {
             }
         }
         .onKeyPress("/") {
-            // Only handle if iPad layout AND no text field is currently focused
+            // Don't steal single-letter shortcuts while the user is typing
+            // in the central-pane file editor — the UITextView's first
+            // responder state isn't tracked by SwiftUI's FocusState, so
+            // we check the view-model flag the editor wrapper sets.
+            if relay.editorFocused { return .ignored }
             if isRegular && !messageInputFocused && !sidebarSearchFocused {
                 sidebarSearchFocused = true
                 return .handled
@@ -231,6 +235,7 @@ struct RelayView: View {
             return .ignored
         }
         .onKeyPress("m") {
+            if relay.editorFocused { return .ignored }
             if !messageInputFocused && !sidebarSearchFocused {
                 messageInputFocused = true
                 return .handled
@@ -238,6 +243,11 @@ struct RelayView: View {
             return .ignored
         }
         .onKeyPress(.escape) {
+            // Editor focused → ask it to resign first responder.
+            if relay.editorFocused {
+                relay.resignEditorFocusTrigger &+= 1
+                return .handled
+            }
             if messageInputFocused { messageInputFocused = false; return .handled }
             if sidebarSearchFocused { sidebarSearchFocused = false; return .handled }
             return .ignored
