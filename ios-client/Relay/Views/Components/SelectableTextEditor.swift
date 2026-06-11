@@ -33,6 +33,7 @@ struct SelectableTextEditor: UIViewRepresentable {
         let v = Runestone.TextView()
         v.editorDelegate = context.coordinator
         v.text = text
+        context.coordinator.lastSyncedText = text
         v.theme = DefaultTheme()
         v.showLineNumbers = true
         v.isLineWrappingEnabled = wrap
@@ -52,7 +53,15 @@ struct SelectableTextEditor: UIViewRepresentable {
         // closures + bindings (otherwise `onFocusChange` could end up
         // pointing at a stale parent).
         context.coordinator.parent = self
-        if v.text != text { v.text = text }
+        // Only push text down if it actually changed from outside (e.g.
+        // loadFile / reload). Comparing against the coordinator's cached
+        // last-synced value avoids reading `v.text`, which walks
+        // Runestone's piece tree — that read fires on every SwiftUI tick
+        // when the user is typing and was the source of editor lag.
+        if context.coordinator.lastSyncedText != text {
+            context.coordinator.lastSyncedText = text
+            v.text = text
+        }
         if v.isLineWrappingEnabled != wrap {
             v.isLineWrappingEnabled = wrap
         }
@@ -74,11 +83,18 @@ struct SelectableTextEditor: UIViewRepresentable {
         var parent: SelectableTextEditor
         var lastResignTrigger: Int = 0
         var lastFindTrigger: Int = 0
+        /// Last text value the parent binding and the underlying TextView
+        /// agreed on. Used by `updateUIView` to skip the O(n) `v.text` read
+        /// + string-compare on every keystroke — we already know what was
+        /// pushed down or pulled up most recently.
+        var lastSyncedText: String = ""
 
         init(_ parent: SelectableTextEditor) { self.parent = parent }
 
         func textViewDidChange(_ textView: Runestone.TextView) {
-            if parent.text != textView.text { parent.text = textView.text }
+            let newText = textView.text
+            lastSyncedText = newText
+            if parent.text != newText { parent.text = newText }
         }
         func textViewDidBeginEditing(_ textView: Runestone.TextView) {
             parent.onFocusChange?(true)
