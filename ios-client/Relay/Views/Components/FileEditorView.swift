@@ -25,7 +25,13 @@ struct FileEditorView: View {
     @Environment(\.relayTheme) private var theme
 
     @State private var savedContent: String?
-    @State private var draft: String = ""
+    @State private var isDirty = false
+    /// Bumped on each successful load / save. Tells the editor to
+    /// install `savedContent` as a fresh clean baseline.
+    @State private var editorCleanVersion = 0
+    /// Read-back surface into the editor's live buffer. Used on save to
+    /// pull the current text without forcing a per-keystroke binding.
+    @State private var handle = EditorTextHandle()
     @State private var isBinary = false
     @State private var loading = true
     @State private var error: String?
@@ -48,11 +54,6 @@ struct FileEditorView: View {
     /// Bumped to ask `SelectableTextEditor` to present Runestone's
     /// built-in UIFindInteraction (system find navigator).
     @State private var findTrigger = 0
-
-    private var isDirty: Bool {
-        guard let saved = savedContent else { return false }
-        return draft != saved
-    }
 
     private var isImageMode: Bool {
         #if canImport(UIKit)
@@ -221,22 +222,24 @@ struct FileEditorView: View {
                 .italic()
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-        } else if savedContent != nil {
+        } else if let saved = savedContent {
             #if canImport(UIKit)
             SelectableTextEditor(
-                text: $draft,
+                handle: handle,
+                cleanText: saved,
+                cleanVersion: editorCleanVersion,
                 wrap: wrap,
+                onDirtyChange: { isDirty = $0 },
                 onFocusChange: { relay.editorFocused = $0 },
                 resignTrigger: relay.resignEditorFocusTrigger,
                 findTrigger: findTrigger,
             )
             .background(theme.elevated)
             #else
-            TextEditor(text: $draft)
+            Text("Editor unavailable on this platform.")
                 .font(.system(size: 14, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .background(theme.elevated)
-                .padding(.horizontal, 6)
+                .foregroundStyle(theme.textTertiary)
+                .padding()
             #endif
         }
     }
@@ -260,7 +263,8 @@ struct FileEditorView: View {
             if isText {
                 let text = String(data: data, encoding: .utf8) ?? ""
                 savedContent = text
-                draft = text
+                editorCleanVersion &+= 1
+                isDirty = false
             } else if isImage {
                 #if canImport(UIKit)
                 image = UIImage(data: data)
@@ -278,12 +282,16 @@ struct FileEditorView: View {
             }
             notOnDisk = false
         } catch APIClient.APIError.httpError(404) {
-            // Treat the tab as a "new file" — empty saved state, draft
-            // preserved (so a delete-while-editing keeps the user's work).
-            // Save will recreate the file on disk.
+            // Treat the tab as a "new file." If the editor was already
+            // mounted (reload-while-mounted 404 or post-delete reload),
+            // the user's in-progress buffer is preserved — flag dirty so
+            // save is enabled and they can recreate the file. On the
+            // initial-mount 404 path, the buffer just starts empty.
+            let wasMounted = savedContent != nil
             savedContent = ""
             isBinary = false
             notOnDisk = true
+            if wasMounted { isDirty = true } else { isDirty = false }
         } catch {
             self.error = String(describing: error)
         }
@@ -305,11 +313,16 @@ struct FileEditorView: View {
         error = nil
         defer { saving = false }
         do {
+            // Pull the live buffer once at save time — the only place we
+            // need to materialize the Runestone piece tree into a String.
+            let text = handle.currentText
             try await relay.apiClient.writeFile(
                 kind, id: targetId, path: path,
-                body: draft.data(using: .utf8) ?? Data(), server: server,
+                body: text.data(using: .utf8) ?? Data(), server: server,
             )
-            savedContent = draft
+            savedContent = text
+            editorCleanVersion &+= 1
+            isDirty = false
             staleBanner = false
             notOnDisk = false
         } catch {
@@ -335,6 +348,9 @@ struct FileEditorView: View {
             savedContent = ""
             notOnDisk = true
             staleBanner = false
+            // The editor still holds the user's work; flag dirty so save
+            // is enabled and they can re-create the file by saving.
+            isDirty = true
             return
         }
         if isDirty {
