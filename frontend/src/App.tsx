@@ -255,7 +255,13 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
     const handler = (e: globalThis.KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
-      const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      // CodeMirror (and any other rich editor) renders into a
+      // contenteditable div rather than an <input>/<textarea>, so the
+      // tag check alone isn't enough — `isContentEditable` covers it
+      // (and nested elements within an editable region).
+      const inField =
+        tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+        target?.isContentEditable === true;
 
       if (e.key === "Escape" && inField) {
         e.preventDefault();
