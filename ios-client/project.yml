@@ -6,6 +6,11 @@ options:
   xcodeVersion: "16.0"
   generateEmptyDirectories: false
 
+packages:
+  Runestone:
+    url: https://github.com/simonbs/Runestone
+    from: "0.4.0"
+
 targets:
   Relay:
     type: application
@@ -53,6 +58,7 @@ targets:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
     dependencies:
       - target: RelayWidgetExtension
+      - package: Runestone
 
   RelayWidgetExtension:
     type: app-extension

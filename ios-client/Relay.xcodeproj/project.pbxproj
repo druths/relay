@@ -35,6 +35,7 @@
 		3EC69077C140DED12C6E435F /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2C16BE961C550509F0634F5 /* Agent.swift */; };
 		45E17BA3AD68410A2FC2E05A /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AEEB07DBA1DF0CDC1A99B74 /* AudioSessionManager.swift */; };
 		4727621A68E27C6972481B87 /* StatusOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361BF127CF429820121827A5 /* StatusOrb.swift */; };
+		4900F6EF78F8F5B2F3228ECA /* Runestone in Frameworks */ = {isa = PBXBuildFile; productRef = AB2E926FF4DEE24B40AE5587 /* Runestone */; };
 		5537BF2868592255AAF0F670 /* RelayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948EF6B3DA85FF1BA8CFC6EE /* RelayApp.swift */; };
 		5550A6B2CF4052B1F564AE69 /* thinking_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 3644EB5E1C3E31588DA8D14B /* thinking_1.wav */; };
 		55A6DB951D19BD6889B77075 /* live_start_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = D5AEC3C080AB67D402F85445 /* live_start_1.wav */; };
@@ -176,6 +177,17 @@
 		F065FC446C9EC4F808468D10 /* StatusIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusIndicator.swift; sourceTree = "<group>"; };
 		FE22E0410CA4D69AE33B8575 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		EF50208E6B06E9FF6A31ED33 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4900F6EF78F8F5B2F3228ECA /* Runestone in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		107B34D8180D73B0E645BFA8 /* Components */ = {
@@ -375,6 +387,7 @@
 			buildPhases = (
 				EC79C452CC5E84280E112945 /* Sources */,
 				B2BD664DAF308B86A7FDF1AC /* Resources */,
+				EF50208E6B06E9FF6A31ED33 /* Frameworks */,
 				5F3B7ABEA79ECBF792965B47 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
@@ -384,6 +397,7 @@
 			);
 			name = Relay;
 			packageProductDependencies = (
+				AB2E926FF4DEE24B40AE5587 /* Runestone */,
 			);
 			productName = Relay;
 			productReference = B2640FB004F58617990C7498 /* Relay.app */;
@@ -434,6 +448,9 @@
 			);
 			mainGroup = DC658091D1A7F7FB428FB8C2;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				985B14F42C4CAD8BB1ED151C /* XCRemoteSwiftPackageReference "Runestone" */,
+			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
@@ -789,6 +806,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		985B14F42C4CAD8BB1ED151C /* XCRemoteSwiftPackageReference "Runestone" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/simonbs/Runestone";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.4.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AB2E926FF4DEE24B40AE5587 /* Runestone */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 985B14F42C4CAD8BB1ED151C /* XCRemoteSwiftPackageReference "Runestone" */;
+			productName = Runestone;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 00400E7BA46B4893DB3DAE46 /* Project object */;
 }

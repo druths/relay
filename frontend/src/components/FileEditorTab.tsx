@@ -62,10 +62,15 @@ export function FileEditorTab({
    * Save recreates the file. */
   const [notOnDisk, setNotOnDisk] = useState(false);
   /** Persisted global preference. CodeMirror handles per-row line numbers
-   * in both modes natively, so the gutter stays visible either way. */
+   * in both modes natively, so the gutter stays visible either way.
+   * Defaults to ON: most ark/project files are prose-like (markdown,
+   * configs, drafts) where horizontal scrolling for unwrapped long lines
+   * is more friction than wrapping. */
   const [wrap, setWrap] = useState<boolean>(() => {
-    try { return localStorage.getItem("relay_editor_wrap") === "1"; }
-    catch { return false; }
+    try {
+      const stored = localStorage.getItem("relay_editor_wrap");
+      return stored === null ? true : stored === "1";
+    } catch { return true; }
   });
   useEffect(() => {
     try { localStorage.setItem("relay_editor_wrap", wrap ? "1" : "0"); }
