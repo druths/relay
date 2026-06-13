@@ -5,7 +5,15 @@ struct InputBar: View {
     @Bindable var relay: RelayViewModel
     var externalFocus: FocusState<Bool>.Binding? = nil
     @Environment(\.relayTheme) private var theme
-    @State private var text = ""
+    @Environment(\.relayChatFontSize) private var chatFontSize
+    /// Read-back surface into the UIKit-backed message field.
+    @State private var handle = ChatMessageFieldHandle()
+    /// Trimmed-non-empty state of the buffer. Driven by the field's
+    /// edge callback so we don't burn a SwiftUI re-render per keystroke
+    /// just to disable/enable the send button.
+    @State private var hasContent = false
+    /// Bumped after each successful send to clear the field.
+    @State private var clearTrigger = 0
     @State private var showInputPicker = false
     @State private var showOutputPicker = false
     @State private var showFilePicker = false
@@ -68,12 +76,23 @@ struct InputBar: View {
             attachButton
         }
 
-        TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(theme.textQuaternary), axis: .vertical)
-            .textFieldStyle(RelayInputFieldStyle(isDisabled: disabled))
-            .lineLimit(1...6)
-            .disabled(disabled)
-            .focused(externalFocus ?? $localFocus)
-            .onSubmit { handleSend() }
+        ChatMessageField(
+            handle: handle,
+            placeholder: placeholder,
+            font: uiBodyFont,
+            textColor: UIColor(theme.textSecondary),
+            placeholderColor: UIColor(theme.textQuaternary),
+            focused: externalFocus ?? $localFocus,
+            onHasContentChange: { hasContent = $0 },
+            onSubmit: { handleSend() },
+            clearTrigger: clearTrigger,
+        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(theme.elevated)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        .opacity(disabled ? 0.5 : 1)
+        .disabled(disabled)
 
         Button(action: handleSend) {
             ThemedIcon(systemName: "paperplane.fill")
@@ -205,40 +224,32 @@ struct InputBar: View {
     }
 
     private var sendButtonEnabled: Bool {
-        !disabled && !text.trimmingCharacters(in: .whitespaces).isEmpty
+        !disabled && hasContent
+    }
+
+    /// UIFont version of the active theme's body font at the user's
+    /// chosen chat font size. Falls back to the system font when the
+    /// theme's custom font isn't loadable for any reason.
+    private var uiBodyFont: UIFont {
+        if let name = theme.bodyFontName, let f = UIFont(name: name, size: chatFontSize) {
+            return f
+        }
+        return .systemFont(ofSize: chatFontSize)
     }
 
     // MARK: - Actions
 
     private func handleSend() {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let trimmed = handle.currentText.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         Task { await relay.sendMessage(trimmed) }
-        text = ""
+        clearTrigger &+= 1
+        hasContent = false
     }
 
     private func handleGoLive() {
         guard !disabled else { return }
         relay.enterLiveMode()
-    }
-}
-
-// MARK: - Input text field style
-
-struct RelayInputFieldStyle: TextFieldStyle {
-    @Environment(\.relayTheme) private var theme
-    @Environment(\.relayChatFontSize) private var chatFontSize
-    let isDisabled: Bool
-
-    func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(theme.elevated)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-            .foregroundStyle(theme.textSecondary)
-            .font(theme.bodyFont(size: chatFontSize))
-            .opacity(isDisabled ? 0.5 : 1)
     }
 }
 

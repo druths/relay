@@ -62,6 +62,7 @@
 		A4EA4E59387250DED44FA16C /* SilentKeepAlive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 912432D794E9D1FE7165651C /* SilentKeepAlive.swift */; };
 		A80820F384AD84A776B054FE /* FileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */; };
 		AC91A1044DB20F944BE1B76C /* PixelIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63EC72F424782C30F8E737D8 /* PixelIcon.swift */; };
+		AEFD9D9C7AE07F18F6BEBEB2 /* ChatMessageField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D179EE498262D338A18559 /* ChatMessageField.swift */; };
 		AF13179EAA0E12FA34792437 /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */; };
 		B3C6794809BCC03E5DD3D358 /* PixelFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = D26249E8004C02E5E5519D8B /* PixelFace.swift */; };
 		B81D27BE882F438441283A47 /* RelayQuickLaunchWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38FE2FDAE86B55169328875B /* RelayQuickLaunchWidget.swift */; };
@@ -133,6 +134,7 @@
 		4B71D1E2344D1C02A44198F5 /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
 		4DC8B3E22C7703A96B3B4494 /* ChimeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChimeGenerator.swift; sourceTree = "<group>"; };
 		50167414A32C6226B7563E20 /* ProjectManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectManagerView.swift; sourceTree = "<group>"; };
+		54D179EE498262D338A18559 /* ChatMessageField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageField.swift; sourceTree = "<group>"; };
 		5ABCA07E8AD78F33997BE464 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		5AFF15BA8C95399F13ABAA39 /* Base64Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Base64Extensions.swift; sourceTree = "<group>"; };
 		5D7EEAE95CA2B4222A6B2C85 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -195,6 +197,7 @@
 			children = (
 				C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */,
 				E587D02A8BB568FC7933144B /* AgentSelector.swift */,
+				54D179EE498262D338A18559 /* ChatMessageField.swift */,
 				692688A835BFFA0EC6600223 /* ConversationLog.swift */,
 				6D58D290F2871D77D97152DF /* CreateChatSheet.swift */,
 				A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */,
@@ -519,6 +522,7 @@
 				0EE57061232DC2E589139D18 /* AuthService.swift in Sources */,
 				31DD5B4F7A11B45E892A15EF /* Base64Extensions.swift in Sources */,
 				6AB871F93C0780C5429EA861 /* CRTOverlay.swift in Sources */,
+				AEFD9D9C7AE07F18F6BEBEB2 /* ChatMessageField.swift in Sources */,
 				807F6D93F5DB6F23C9A7A528 /* ChimeGenerator.swift in Sources */,
 				3546C7E1FB742933D480C0A6 /* ContentView.swift in Sources */,
 				1C03ACF908AF4CC1974D1C33 /* ConversationLog.swift in Sources */,
