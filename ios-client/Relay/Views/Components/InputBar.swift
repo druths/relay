@@ -14,6 +14,10 @@ struct InputBar: View {
     @State private var hasContent = false
     /// Bumped after each successful send to clear the field.
     @State private var clearTrigger = 0
+    /// Line-bounded preferred height the field reports as the user
+    /// types. Initially a one-line estimate that the field corrects on
+    /// first layout via `onPreferredHeightChange`.
+    @State private var fieldHeight: CGFloat = 22
     @State private var showInputPicker = false
     @State private var showOutputPicker = false
     @State private var showFilePicker = false
@@ -85,8 +89,10 @@ struct InputBar: View {
             focused: externalFocus ?? $localFocus,
             onHasContentChange: { hasContent = $0 },
             onSubmit: { handleSend() },
+            onPreferredHeightChange: { fieldHeight = $0 },
             clearTrigger: clearTrigger,
         )
+        .frame(height: fieldHeight)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(theme.elevated)

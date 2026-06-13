@@ -40,6 +40,12 @@ struct ChatMessageField: UIViewRepresentable {
     /// Fires when the user presses Cmd+Return — the multi-line send
     /// shortcut. Plain Return inserts a newline.
     var onSubmit: (() -> Void)? = nil
+    /// Fires only when the field's preferred height changes (e.g. a new
+    /// soft-wrapped line, an explicit \n, deletion that drops a line).
+    /// Parent applies it via `.frame(height:)` so SwiftUI's layout
+    /// converges on the line-bounded height instead of letting the
+    /// HStack hand the field whatever space is around.
+    var onPreferredHeightChange: ((CGFloat) -> Void)? = nil
     /// Bump to clear the buffer after a send.
     var clearTrigger: Int = 0
 
@@ -67,6 +73,13 @@ struct ChatMessageField: UIViewRepresentable {
             coord?.parent.onSubmit?()
         }
         handle.view = v
+        // Report the initial measurement once SwiftUI has placed us and
+        // we have a real width. Without this the parent stays at its
+        // default `.frame(height:)` placeholder and the field's actual
+        // line height doesn't reach SwiftUI.
+        DispatchQueue.main.async { [weak coord = context.coordinator] in
+            coord?.reportHeight(for: v)
+        }
         return v
     }
 
@@ -110,6 +123,9 @@ struct ChatMessageField: UIViewRepresentable {
         var parent: ChatMessageField
         /// Cached edge — re-render the send button only when this flips.
         var hasContent: Bool = false
+        /// Last height reported to the parent. Used to suppress duplicate
+        /// callbacks on keystrokes that don't change the line count.
+        var lastReportedHeight: CGFloat = 0
         var lastClearTrigger: Int = 0
 
         init(_ parent: ChatMessageField) { self.parent = parent }
@@ -120,8 +136,21 @@ struct ChatMessageField: UIViewRepresentable {
                 hasContent = has
                 parent.onHasContentChange?(has)
             }
-            (tv as? ChatTextView)?.refreshPlaceholder()
-            tv.invalidateIntrinsicContentSize()
+            if let chat = tv as? ChatTextView {
+                chat.refreshPlaceholder()
+                reportHeight(for: chat)
+            }
+        }
+
+        /// Recompute the line-bounded height and notify the parent only
+        /// when it changes. Most keystrokes don't change the line count,
+        /// so the callback fires rarely.
+        func reportHeight(for v: ChatTextView) {
+            let h = v.preferredHeight()
+            if abs(h - lastReportedHeight) > 0.5 {
+                lastReportedHeight = h
+                parent.onPreferredHeightChange?(h)
+            }
         }
 
         func textViewDidBeginEditing(_ tv: UITextView) {
@@ -174,7 +203,11 @@ final class ChatTextView: UITextView {
         placeholderLabel.isHidden = !text.isEmpty
     }
 
-    override var intrinsicContentSize: CGSize {
+    /// Line-bounded height for the current content. Caller is responsible
+    /// for surfacing this to SwiftUI (e.g. via `.frame(height:)`) — the
+    /// representable can't push intrinsic-size changes mid-typing on its
+    /// own. Also flips `isScrollEnabled` once the content needs to scroll.
+    func preferredHeight() -> CGFloat {
         let f = font ?? Self.defaultFont
         let lineH = ceil(f.lineHeight)
         let insets = textContainerInset.top + textContainerInset.bottom
@@ -184,8 +217,7 @@ final class ChatTextView: UITextView {
         let fitted = sizeThatFits(CGSize(width: widthForFit, height: .greatestFiniteMagnitude))
         let needsScroll = fitted.height > maxH
         if isScrollEnabled != needsScroll { isScrollEnabled = needsScroll }
-        let h = max(minH, min(maxH, fitted.height))
-        return CGSize(width: UIView.noIntrinsicMetric, height: h)
+        return max(minH, min(maxH, fitted.height))
     }
 
     override var keyCommands: [UIKeyCommand]? {
