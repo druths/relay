@@ -3,7 +3,10 @@ import UniformTypeIdentifiers
 
 struct InputBar: View {
     @Bindable var relay: RelayViewModel
-    var externalFocus: FocusState<Bool>.Binding? = nil
+    /// Optional binding into a viewmodel-level focus flag. Falls back to
+    /// a private local state when not provided. The wrapper mirrors
+    /// first-responder state both ways through it.
+    var messageFocus: Binding<Bool>? = nil
     @Environment(\.relayTheme) private var theme
     @Environment(\.relayChatFontSize) private var chatFontSize
     /// Read-back surface into the UIKit-backed message field.
@@ -22,7 +25,8 @@ struct InputBar: View {
     @State private var showOutputPicker = false
     @State private var showFilePicker = false
     @State private var isUploading = false
-    @FocusState private var localFocus: Bool
+    /// Fallback focus state when no viewmodel-level binding is provided.
+    @State private var localFocus = false
 
     private var recorderState: AudioRecorderService.State {
         relay.audio.recorderState
@@ -86,7 +90,7 @@ struct InputBar: View {
             font: uiBodyFont,
             textColor: UIColor(theme.textSecondary),
             placeholderColor: UIColor(theme.textQuaternary),
-            focused: externalFocus ?? $localFocus,
+            focused: messageFocus ?? $localFocus,
             onHasContentChange: { hasContent = $0 },
             onSubmit: { handleSend() },
             onPreferredHeightChange: { fieldHeight = $0 },

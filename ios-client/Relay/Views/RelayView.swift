@@ -27,7 +27,6 @@ struct RelayView: View {
     @State private var menuSessionSearch = ""
     @State private var menuSearchQuery = ""
     @FocusState private var sidebarSearchFocused: Bool
-    @FocusState private var messageInputFocused: Bool
     /// Global Diagnostics preference: when on, every bubble shows its
     /// timestamp and agent bubbles show context-window / token usage when the
     /// underlying message has metadata attached.
@@ -224,11 +223,11 @@ struct RelayView: View {
         }
         .onKeyPress("/") {
             // Don't steal single-letter shortcuts while the user is typing
-            // in the central-pane file editor — the UITextView's first
-            // responder state isn't tracked by SwiftUI's FocusState, so
-            // we check the view-model flag the editor wrapper sets.
+            // in any UIKit-backed text view — first-responder state isn't
+            // visible to SwiftUI's FocusState, so we check view-model
+            // flags the wrappers set instead.
             if relay.editorFocused { return .ignored }
-            if isRegular && !messageInputFocused && !sidebarSearchFocused {
+            if isRegular && !relay.messageInputFocused && !sidebarSearchFocused {
                 sidebarSearchFocused = true
                 return .handled
             }
@@ -236,8 +235,8 @@ struct RelayView: View {
         }
         .onKeyPress("m") {
             if relay.editorFocused { return .ignored }
-            if !messageInputFocused && !sidebarSearchFocused {
-                messageInputFocused = true
+            if !relay.messageInputFocused && !sidebarSearchFocused {
+                relay.messageInputFocused = true
                 return .handled
             }
             return .ignored
@@ -248,7 +247,10 @@ struct RelayView: View {
                 relay.resignEditorFocusTrigger &+= 1
                 return .handled
             }
-            if messageInputFocused { messageInputFocused = false; return .handled }
+            if relay.messageInputFocused {
+                relay.messageInputFocused = false
+                return .handled
+            }
             if sidebarSearchFocused { sidebarSearchFocused = false; return .handled }
             return .ignored
         }
@@ -286,7 +288,7 @@ struct RelayView: View {
             )
             .frame(maxHeight: .infinity)
 
-            InputBar(relay: relay, externalFocus: $messageInputFocused)
+            InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
         }
     }
 
@@ -744,7 +746,7 @@ struct RelayView: View {
                 )
                 .frame(maxHeight: .infinity)
 
-                InputBar(relay: relay, externalFocus: $messageInputFocused)
+                InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

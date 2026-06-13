@@ -29,11 +29,13 @@ struct ChatMessageField: UIViewRepresentable {
     /// still shows min lines; above max it scrolls internally.
     var minLines: Int = 1
     var maxLines: Int = 6
-    /// Two-way mirror of the underlying first-responder state into the
-    /// parent's SwiftUI focus system. Lets the parent programmatically
-    /// focus / blur and read whether the input has focus (for global
-    /// shortcut gating).
-    var focused: FocusState<Bool>.Binding? = nil
+    /// Two-way mirror of the underlying first-responder state. UIKit
+    /// first-responder isn't visible to SwiftUI's `@FocusState`, so we
+    /// take a plain Bool binding (typically pointing at a viewmodel
+    /// flag) — coordinator writes to it on edit-begin/end and the
+    /// wrapper reads it to drive becomeFirstResponder / resign on
+    /// programmatic focus requests.
+    var focused: Binding<Bool>? = nil
     /// Fires only on the trimmed empty↔non-empty edge. Use for send
     /// button enable/disable — won't fire on intermediate keystrokes.
     var onHasContentChange: ((Bool) -> Void)? = nil

@@ -43,6 +43,11 @@ final class RelayViewModel {
     /// active editor to `resignFirstResponder` (used by Escape from the
     /// iPad layout).
     var resignEditorFocusTrigger: Int = 0
+    /// True while the message-input UITextView is first responder. Same
+    /// purpose as `editorFocused` — UIKit-backed first-responder state
+    /// is invisible to SwiftUI's `@FocusState`, so the iPad shortcut
+    /// gate (`/`, `m`, Escape) reads this instead.
+    var messageInputFocused: Bool = false
     /// Client-side system markers keyed by sessionId — appended to sessionMessages
     /// on resume so the user can see when a session ended within the app's lifetime.
     private var sessionMarkers: [String: [Message]] = [:]
