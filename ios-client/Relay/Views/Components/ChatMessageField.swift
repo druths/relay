@@ -205,6 +205,16 @@ final class ChatTextView: UITextView {
         placeholderLabel.isHidden = !text.isEmpty
     }
 
+    /// Disclaim any intrinsic size opinion. Default UITextView behaviour
+    /// (esp. with `isScrollEnabled = false`) reports the rendered text
+    /// width here, which makes SwiftUI's HStack stretch the field
+    /// horizontally with the longest line instead of wrapping. Height is
+    /// driven via SwiftUI `.frame(height:)` from the height callback;
+    /// width is driven by the surrounding `.frame(maxWidth: .infinity)`.
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
+    }
+
     /// Line-bounded height for the current content. Caller is responsible
     /// for surfacing this to SwiftUI (e.g. via `.frame(height:)`) — the
     /// representable can't push intrinsic-size changes mid-typing on its

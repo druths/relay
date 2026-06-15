@@ -96,6 +96,7 @@ struct InputBar: View {
             onPreferredHeightChange: { fieldHeight = $0 },
             clearTrigger: clearTrigger,
         )
+        .frame(maxWidth: .infinity)
         .frame(height: fieldHeight)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
