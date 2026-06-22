@@ -10,6 +10,7 @@ import { AgentManagement } from "./components/AgentManagement";
 import { ProjectManager } from "./components/ProjectManager";
 import { FileBrowserPanel } from "./components/FileBrowserPanel";
 import { CreateChatDialog } from "./components/CreateChatDialog";
+import { EndpointCheckDialog } from "./components/EndpointCheckDialog";
 import type { Agent } from "./types";
 import { FileEditorTab } from "./components/FileEditorTab";
 import { uploadFiles } from "./api";
@@ -32,6 +33,8 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   /** When set, the `CreateChatDialog` is presented for this agent. Cleared
    * on close or after the dialog finishes creating a session. */
   const [createChatAgent, setCreateChatAgent] = useState<Agent | null>(null);
+  /** When set, the `EndpointCheckDialog` is presented for this agent. */
+  const [endpointCheckAgent, setEndpointCheckAgent] = useState<Agent | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -414,6 +417,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             onSelect={handleAgentSelect}
             disabled={false}
             onCreateChat={(agent) => setCreateChatAgent(agent)}
+            onEndpointCheck={(agent) => setEndpointCheckAgent(agent)}
           />
         )}
 
@@ -989,6 +993,15 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             relay.fetchSessions();
             relay.resumeSession(sessionId);
           }}
+        />
+      )}
+
+      {/* Endpoint check dialog — runs the backend diagnostic for this
+          agent's LLM endpoint and renders the structured report. */}
+      {endpointCheckAgent && (
+        <EndpointCheckDialog
+          agent={endpointCheckAgent}
+          onClose={() => setEndpointCheckAgent(null)}
         />
       )}
     </div>

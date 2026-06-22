@@ -7,6 +7,9 @@ struct AgentSelector: View {
     /// When provided, ark agents pick up a long-press context menu with
     /// a "Create chat…" option. Non-ark agents stay on the lobby path.
     var onCreateChat: ((Agent) -> Void)? = nil
+    /// When provided, the agent context menu gains an "Endpoint check"
+    /// item that opens the diagnostic sheet for that agent's LLM endpoint.
+    var onEndpointCheck: ((Agent) -> Void)? = nil
 
     @Environment(\.relayTheme) private var theme
 
@@ -61,6 +64,13 @@ struct AgentSelector: View {
                     onCreateChat?(agent)
                 } label: {
                     Label("Create chat…", systemImage: "plus.bubble")
+                }
+            }
+            if onEndpointCheck != nil {
+                Button {
+                    onEndpointCheck?(agent)
+                } label: {
+                    Label("Endpoint check", systemImage: "stethoscope")
                 }
             }
         }

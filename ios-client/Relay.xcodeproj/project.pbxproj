@@ -31,6 +31,7 @@
 		3237E4F8E080FA8E456255E9 /* response_received_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = EE9CCA9FD1A8B0C89D7D7944 /* response_received_1.wav */; };
 		3546C7E1FB742933D480C0A6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABCA07E8AD78F33997BE464 /* ContentView.swift */; };
 		3650DE77A0CA3311BF3C42E8 /* DevicePickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */; };
+		3794FB3C2CCD2F839E83082E /* EndpointReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0F195C0BD6FC71FCE98179 /* EndpointReport.swift */; };
 		3C261BCD405BCBF02C13013B /* RelayActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D4C97F298DF8083BE24410 /* RelayActivityAttributes.swift */; };
 		3EC69077C140DED12C6E435F /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2C16BE961C550509F0634F5 /* Agent.swift */; };
 		45E17BA3AD68410A2FC2E05A /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AEEB07DBA1DF0CDC1A99B74 /* AudioSessionManager.swift */; };
@@ -79,6 +80,7 @@
 		EBEF3DA54A41FE4B33D7210D /* SoundWaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */; };
 		EEDFACCE283D2AFB9AE6E489 /* FileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14802FEDA5891387B4D1C15F /* FileEditorView.swift */; };
 		F0BD930A949D257E41813476 /* ProviderDefaultsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FA55F097504FADFF30970E1 /* ProviderDefaultsTabView.swift */; };
+		F33D14F2610C080121FC956A /* EndpointCheckSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE537F15CE61190AD9245FA9 /* EndpointCheckSheet.swift */; };
 		F4067A28DBAE091CA99EC06B /* RelayLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F8CE7B75365F8F88F0DA57 /* RelayLiveActivity.swift */; };
 /* End PBXBuildFile section */
 
@@ -165,6 +167,7 @@
 		B2A4D843321C18FA4239E7A1 /* PressStart2P-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "PressStart2P-Regular.ttf"; sourceTree = "<group>"; };
 		B6D4C97F298DF8083BE24410 /* RelayActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayActivityAttributes.swift; sourceTree = "<group>"; };
 		B99A604D8909ADBA703343E9 /* ActivityLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLog.swift; sourceTree = "<group>"; };
+		BE0F195C0BD6FC71FCE98179 /* EndpointReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndpointReport.swift; sourceTree = "<group>"; };
 		C249E903D59B7D654EA775C5 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManagementView.swift; sourceTree = "<group>"; };
 		CB134658D8D2BA7B62B343A1 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
@@ -175,6 +178,7 @@
 		E587D02A8BB568FC7933144B /* AgentSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSelector.swift; sourceTree = "<group>"; };
 		E99230868B22A5498D4052BB /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		EACEBD78D17A8220B9722E73 /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
+		EE537F15CE61190AD9245FA9 /* EndpointCheckSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndpointCheckSheet.swift; sourceTree = "<group>"; };
 		EE9CCA9FD1A8B0C89D7D7944 /* response_received_1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = response_received_1.wav; sourceTree = "<group>"; };
 		F065FC446C9EC4F808468D10 /* StatusIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusIndicator.swift; sourceTree = "<group>"; };
 		FE22E0410CA4D69AE33B8575 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
@@ -201,6 +205,7 @@
 				692688A835BFFA0EC6600223 /* ConversationLog.swift */,
 				6D58D290F2871D77D97152DF /* CreateChatSheet.swift */,
 				A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */,
+				EE537F15CE61190AD9245FA9 /* EndpointCheckSheet.swift */,
 				99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */,
 				14802FEDA5891387B4D1C15F /* FileEditorView.swift */,
 				0EB4DDCF19266F408F07CFD1 /* InputBar.swift */,
@@ -326,6 +331,7 @@
 			isa = PBXGroup;
 			children = (
 				A2C16BE961C550509F0634F5 /* Agent.swift */,
+				BE0F195C0BD6FC71FCE98179 /* EndpointReport.swift */,
 				A807EC3870D8644C1B4DD413 /* LiveActivityIntents.swift */,
 				CB134658D8D2BA7B62B343A1 /* Message.swift */,
 				61FD94630C73BA584916A9DB /* PlatformSettings.swift */,
@@ -528,6 +534,8 @@
 				1C03ACF908AF4CC1974D1C33 /* ConversationLog.swift in Sources */,
 				31BDFBA3E636C62A6CA73390 /* CreateChatSheet.swift in Sources */,
 				3650DE77A0CA3311BF3C42E8 /* DevicePickerSheet.swift in Sources */,
+				F33D14F2610C080121FC956A /* EndpointCheckSheet.swift in Sources */,
+				3794FB3C2CCD2F839E83082E /* EndpointReport.swift in Sources */,
 				A80820F384AD84A776B054FE /* FileBrowserView.swift in Sources */,
 				EEDFACCE283D2AFB9AE6E489 /* FileEditorView.swift in Sources */,
 				D758AFFBFBC56A617A0C3043 /* HapticService.swift in Sources */,

@@ -37,6 +37,8 @@ struct RelayView: View {
     /// after the user finishes (or cancels) — the new session is
     /// resumed from the sheet's onCreated callback.
     @State private var createChatAgent: Agent? = nil
+    /// When set, present the Endpoint-check sheet for this agent.
+    @State private var endpointCheckAgent: Agent? = nil
 
     /// Per-session file tabs for the iPad central pane. Ephemeral —
     /// cleared whenever the active session changes. The conversation is
@@ -125,6 +127,10 @@ struct RelayView: View {
                 },
             )
             .environment(\.relayTheme, themeManager.current)
+        }
+        .sheet(item: $endpointCheckAgent) { agent in
+            EndpointCheckSheet(relay: relay, agent: agent)
+                .environment(\.relayTheme, themeManager.current)
         }
         .sheet(isPresented: $showFileBrowser) {
             if let s = activeSession {
@@ -270,7 +276,8 @@ struct RelayView: View {
                     onSelect: { agent in
                         Task { await relay.sendMessage("connect me to \(agent.name)") }
                     },
-                    onCreateChat: { agent in createChatAgent = agent }
+                    onCreateChat: { agent in createChatAgent = agent },
+                    onEndpointCheck: { agent in endpointCheckAgent = agent }
                 )
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(theme.border).frame(height: theme.borderWidth)
@@ -510,6 +517,11 @@ struct RelayView: View {
                             } label: {
                                 Label("Create chat…", systemImage: "plus.bubble")
                             }
+                        }
+                        Button {
+                            endpointCheckAgent = agent
+                        } label: {
+                            Label("Endpoint check", systemImage: "stethoscope")
                         }
                     }
                 }

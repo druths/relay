@@ -392,6 +392,23 @@ async def get_stt_status(db: AsyncSession = Depends(get_db)):
     return {"available": provider is not None}
 
 
+@router.get("/{agent_id}/endpoint-check")
+async def endpoint_check(
+    agent_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Run a structured diagnostic against this agent's LLM endpoint:
+    DNS, HTTP reachability, auth probe, model/agent-name listing,
+    websocket where applicable, plus introspection of Relay's own
+    registered connection (for ark). Returns a `EndpointReport`."""
+    agent = await get_agent_by_id(db, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    from app.services.endpoint_check import run_endpoint_check
+    report = await run_endpoint_check(agent)
+    return report.to_dict()
+
+
 @router.patch("/{agent_id}/config", response_model=AgentOut)
 async def update_agent_config(
     agent_id: uuid.UUID,
