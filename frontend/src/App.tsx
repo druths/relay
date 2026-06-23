@@ -162,10 +162,22 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const dragDepth = useRef(0);
   const [dropUploading, setDropUploading] = useState(false);
 
+  /// Opt-out check: nested regions (like the file browser, which has its
+  /// own drop targets and runs its own upload) mark themselves with
+  /// `data-no-attach-drop` so this top-level handler ignores the event.
+  /// Without this, dragenter into the file browser bumps `dragDepth`,
+  /// the inner panel's `stopPropagation` swallows the matching drop, and
+  /// the "Drop to attach" overlay sticks until the user reloads.
+  const isInsideAttachOptOut = (e: DragEvent<HTMLDivElement>): boolean => {
+    const target = e.target as HTMLElement | null;
+    return !!target?.closest?.("[data-no-attach-drop]");
+  };
+
   const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
     // Only react to OS drags that actually carry files. Ignore text/element
     // drags happening inside the page.
     if (!e.dataTransfer?.types?.includes("Files")) return;
+    if (isInsideAttachOptOut(e)) return;
     e.preventDefault();
     dragDepth.current += 1;
     setIsDraggingFile(true);
@@ -173,6 +185,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     if (!e.dataTransfer?.types?.includes("Files")) return;
+    if (isInsideAttachOptOut(e)) return;
     // preventDefault on dragover is what tells the browser this element is a
     // valid drop target — otherwise drop never fires.
     e.preventDefault();
@@ -181,12 +194,21 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
 
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     if (!e.dataTransfer?.types?.includes("Files")) return;
+    if (isInsideAttachOptOut(e)) return;
     dragDepth.current = Math.max(0, dragDepth.current - 1);
     if (dragDepth.current === 0) setIsDraggingFile(false);
   }, []);
 
   const handleDrop = useCallback(async (e: DragEvent<HTMLDivElement>) => {
     if (!e.dataTransfer?.types?.includes("Files")) return;
+    if (isInsideAttachOptOut(e)) {
+      // The inner handler ran its own upload via stopPropagation. Just
+      // reset our overlay state in case the user dragged through the
+      // attach zone on the way in.
+      dragDepth.current = 0;
+      setIsDraggingFile(false);
+      return;
+    }
     e.preventDefault();
     dragDepth.current = 0;
     setIsDraggingFile(false);

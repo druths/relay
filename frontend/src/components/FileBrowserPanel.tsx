@@ -63,7 +63,10 @@ export function FileBrowserPanel({
   }, [projectTabAvailable, workspaceAvailable, tab]);
 
   return (
-    <div className="h-full flex flex-col bg-gray-950 border-l border-gray-800 w-96">
+    <div
+      className="h-full flex flex-col bg-gray-950 border-l border-gray-800 w-96"
+      data-no-attach-drop="true"
+    >
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
         <div className="text-sm font-medium text-gray-300">Files</div>
         <button
@@ -151,6 +154,9 @@ function FileTreeView({
 }) {
   const [root, setRoot] = useState<DirListing | null>(null);
   const [expanded, setExpanded] = useState<Map<string, DirListing>>(new Map());
+  /// Path currently hovered as a drag-and-drop target ("" = root). Set
+  /// by row-level onDragOver, cleared on drop / outer dragleave.
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -232,18 +238,50 @@ function FileTreeView({
         await writeFile(kind, id, path, f, server);
       }
       // Listings refresh via the WS event, but if ark misses the event for
-      // some reason, force a reload.
-      if (targetDir === "" || targetDir == null) {
-        await loadRoot();
-      } else if (expanded.has(targetDir)) {
-        await loadSubdir(targetDir);
-      }
+      // some reason, force a reload. For a non-root target we always
+      // loadSubdir — that also expands a previously-closed folder, so the
+      // user sees what landed there instead of a silent success.
+      if (!targetDir) await loadRoot();
+      else await loadSubdir(targetDir);
     } catch (e) {
       setError(String(e));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  /// Drop-target helpers, factored so every directory row + the root
+  /// scroll area share the same behaviour. We stop event propagation so
+  /// the deepest target wins (the row's onDragOver fires before the
+  /// container's bubbled handler).
+  const makeDropHandlers = (targetDir: string) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "copy";
+      if (dragOverPath !== targetDir) setDragOverPath(targetDir);
+    },
+    onDrop: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverPath(null);
+      void handleUpload(e.dataTransfer.files, targetDir);
+    },
+  });
+
+  /// Outer container's leave handler — clears the highlight when the
+  /// drag pointer leaves the panel entirely. Each child's dragenter
+  /// will re-set it.
+  const handleOuterDragLeave = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    // dragleave fires when entering child elements too. Only clear if
+    // we've actually left the panel (relatedTarget is outside).
+    const next = e.relatedTarget as Node | null;
+    if (next && (e.currentTarget as Node).contains(next)) return;
+    setDragOverPath(null);
   };
 
   const _refreshParent = (path: string) => {
@@ -353,7 +391,12 @@ function FileTreeView({
         <div className="px-3 py-1 text-xs text-red-400 border-b border-gray-800">{error}</div>
       )}
 
-      <div className="flex-1 min-h-0 overflow-y-auto py-1">
+      <div
+        className={`flex-1 min-h-0 overflow-y-auto py-1 relative transition-colors
+                    ${dragOverPath === "" ? "bg-emerald-950/30" : ""}`}
+        {...makeDropHandlers("")}
+        onDragLeave={handleOuterDragLeave}
+      >
         {loading && !root && <div className="text-xs text-gray-600 px-3 py-2">Loading…</div>}
         {root && (
           <DirView
@@ -367,7 +410,17 @@ function FileTreeView({
             onDelete={handleDelete}
             onRename={handleRename}
             onDownload={handleDownload}
+            dragOverPath={dragOverPath}
+            makeDropHandlers={makeDropHandlers}
           />
+        )}
+        {dragOverPath === "" && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="px-3 py-1.5 rounded-md bg-emerald-900/80 text-emerald-100
+                            text-xs font-medium border border-emerald-700/60">
+              Drop to upload to root
+            </div>
+          </div>
         )}
       </div>
 
@@ -408,6 +461,7 @@ function FileTreeView({
 function DirView({
   listing, path, depth, expanded, loadSubdir, collapseSubdir,
   onOpenFile, onDelete, onRename, onDownload,
+  dragOverPath, makeDropHandlers,
 }: {
   listing: DirListing;
   path: string;
@@ -419,17 +473,30 @@ function DirView({
   onDelete: (p: string) => void;
   onRename: (p: string) => void;
   onDownload: (p: string, isDir: boolean) => void;
+  dragOverPath: string | null;
+  makeDropHandlers: (targetDir: string) => {
+    onDragOver: (e: React.DragEvent) => void;
+    onDrop: (e: React.DragEvent) => void;
+  };
 }) {
   return (
     <div>
       {listing.entries.map((entry) => {
         const childPath = path ? `${path}/${entry.name}` : entry.name;
         const isOpen = expanded.has(childPath);
+        // Folders drop into themselves; files drop into their parent so
+        // dragging onto a file uploads alongside it.
+        const dropTarget = entry.is_dir ? childPath : path;
+        const isDropActive = dragOverPath === dropTarget;
         return (
           <div key={entry.name}>
             <div
-              className="group flex items-center gap-1 px-2 py-0.5 text-xs cursor-pointer
-                         hover:bg-gray-900 text-gray-300"
+              {...makeDropHandlers(dropTarget)}
+              className={`group flex items-center gap-1 px-2 py-0.5 text-xs cursor-pointer
+                          text-gray-300 transition-colors
+                          ${isDropActive
+                            ? "bg-emerald-900/60 ring-1 ring-emerald-600/60 ring-inset"
+                            : "hover:bg-gray-900"}`}
               style={{ paddingLeft: 8 + depth * 12 }}
               onClick={() => {
                 if (entry.is_dir) {
@@ -470,6 +537,8 @@ function DirView({
                 onDelete={onDelete}
                 onRename={onRename}
                 onDownload={onDownload}
+                dragOverPath={dragOverPath}
+                makeDropHandlers={makeDropHandlers}
               />
             )}
           </div>
