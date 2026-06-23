@@ -9,6 +9,16 @@ final class ChatMessageFieldHandle {
     fileprivate weak var view: UITextView?
     /// Current buffer contents.
     var currentText: String { view?.text ?? "" }
+    /// The height the field should be when empty — one line of text plus
+    /// container insets. Used by `handleSend` to reset the parent's
+    /// `.frame(height:)` immediately, since the wrapper-driven path
+    /// through `onPreferredHeightChange` doesn't reliably settle after
+    /// a programmatic clear (race with SwiftUI's layout pass).
+    var oneLineHeight: CGFloat {
+        guard let view else { return 22 }
+        let f = view.font ?? .preferredFont(forTextStyle: .body)
+        return ceil(f.lineHeight) + view.textContainerInset.top + view.textContainerInset.bottom
+    }
 }
 
 /// Multi-line chat input backed by `UITextView`. Replaces the SwiftUI
@@ -111,7 +121,21 @@ struct ChatMessageField: UIViewRepresentable {
             coord.lastClearTrigger = clearTrigger
             v.text = ""
             v.refreshPlaceholder()
+            // Reset scroll state — once the field grew enough to scroll,
+            // `sizeThatFits` returns junk and `reportHeight` can't recover.
+            if v.isScrollEnabled { v.isScrollEnabled = false }
             v.invalidateIntrinsicContentSize()
+            // Compute the one-line height directly. `textViewDidChange`
+            // doesn't fire on programmatic `v.text =` assignments, so
+            // without this the parent's `.frame(height:)` stays pinned
+            // at whatever multi-line height it grew to before the send.
+            let f = v.font ?? .preferredFont(forTextStyle: .body)
+            let oneLineHeight = ceil(f.lineHeight)
+                + v.textContainerInset.top + v.textContainerInset.bottom
+            if abs(oneLineHeight - coord.lastReportedHeight) > 0.5 {
+                coord.lastReportedHeight = oneLineHeight
+                onPreferredHeightChange?(oneLineHeight)
+            }
             if coord.hasContent {
                 coord.hasContent = false
                 onHasContentChange?(false)

@@ -256,6 +256,13 @@ struct InputBar: View {
         Task { await relay.sendMessage(trimmed) }
         clearTrigger &+= 1
         hasContent = false
+        // Snap the row back to one line immediately. The wrapper-driven
+        // height update through `onPreferredHeightChange` is unreliable
+        // here — the closure fires inside `updateUIView` during a
+        // SwiftUI layout pass, and the resulting `@State` write can be
+        // deferred long enough that the field appears "stuck" at the
+        // multi-line height the user just sent from.
+        fieldHeight = handle.oneLineHeight
     }
 
     private func handleGoLive() {
