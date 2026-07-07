@@ -12,6 +12,11 @@ import {
 
 type Kind = "project" | "workspace";
 
+/** Custom MIME used to distinguish internal file/folder moves (drag one
+ *  row onto another) from OS file drops (drag from Finder / Explorer,
+ *  which carry the "Files" type). Value is the source path. */
+const INTERNAL_DRAG_MIME = "application/x-relay-fs";
+
 interface Props {
   /** Always shown as the panel title. */
   agentId: string | null;
@@ -157,6 +162,13 @@ function FileTreeView({
   /// Path currently hovered as a drag-and-drop target ("" = root). Set
   /// by row-level onDragOver, cleared on drop / outer dragleave.
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  /// Target directory for the next file-input dialog. Written just
+  /// before we click the shared hidden input; read from onChange so the
+  /// upload lands in the right place regardless of what triggered it
+  /// (toolbar button = "", folder-row menu = that folder's path).
+  /// A ref (not state) so the write is immediately visible to the
+  /// onChange handler without a re-render round-trip.
+  const pendingUploadDirRef = useRef("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -252,31 +264,80 @@ function FileTreeView({
   };
 
   /// Drop-target helpers, factored so every directory row + the root
-  /// scroll area share the same behaviour. We stop event propagation so
-  /// the deepest target wins (the row's onDragOver fires before the
-  /// container's bubbled handler).
+  /// scroll area share the same behaviour. Accepts both OS file drops
+  /// (external upload) and internal row drags (move). We stop event
+  /// propagation so the deepest target wins (the row's onDragOver fires
+  /// before the container's bubbled handler).
   const makeDropHandlers = (targetDir: string) => ({
     onDragOver: (e: React.DragEvent) => {
-      if (!e.dataTransfer.types.includes("Files")) return;
+      const isInternal = e.dataTransfer.types.includes(INTERNAL_DRAG_MIME);
+      const isFile = e.dataTransfer.types.includes("Files");
+      if (!isInternal && !isFile) return;
       e.preventDefault();
       e.stopPropagation();
-      e.dataTransfer.dropEffect = "copy";
+      e.dataTransfer.dropEffect = isInternal ? "move" : "copy";
       if (dragOverPath !== targetDir) setDragOverPath(targetDir);
     },
     onDrop: (e: React.DragEvent) => {
-      if (!e.dataTransfer.types.includes("Files")) return;
+      const isInternal = e.dataTransfer.types.includes(INTERNAL_DRAG_MIME);
+      const isFile = e.dataTransfer.types.includes("Files");
+      if (!isInternal && !isFile) return;
       e.preventDefault();
       e.stopPropagation();
       setDragOverPath(null);
-      void handleUpload(e.dataTransfer.files, targetDir);
+      if (isInternal) {
+        const srcPath = e.dataTransfer.getData(INTERNAL_DRAG_MIME);
+        if (srcPath) void handleInternalMove(srcPath, targetDir);
+      } else {
+        void handleUpload(e.dataTransfer.files, targetDir);
+      }
     },
   });
+
+  /// Move an item to another folder. Enforces the obvious guardrails —
+  /// can't drop onto self, into own descendant, or into the current
+  /// parent (no-op). Name collision at the destination is refused with
+  /// an error banner rather than silently overwriting.
+  const handleInternalMove = async (srcPath: string, dstDir: string) => {
+    const name = srcPath.split("/").pop() ?? srcPath;
+    const currentParent = srcPath.includes("/")
+      ? srcPath.split("/").slice(0, -1).join("/")
+      : "";
+    if (currentParent === dstDir) return; // no-op
+    if (dstDir === srcPath || dstDir.startsWith(srcPath + "/")) {
+      setError(`Can't move "${name}" into its own subtree.`);
+      return;
+    }
+    const dstPath = dstDir ? `${dstDir}/${name}` : name;
+    // Collision check against whatever listing we already have loaded.
+    // If the destination isn't expanded we skip and let the backend
+    // reject if there's a real collision.
+    const destListing = dstDir === "" ? root : expanded.get(dstDir);
+    if (destListing && destListing.entries.some((e) => e.name === name)) {
+      setError(`A file named "${name}" already exists in that folder.`);
+      return;
+    }
+    try {
+      await renamePath(kind, id, srcPath, dstPath, server);
+      setError(null);
+      // Refresh both source parent and destination so the item hops
+      // visually. Also expand the destination if it was closed.
+      if (currentParent === "") await loadRoot();
+      else if (expanded.has(currentParent)) await loadSubdir(currentParent);
+      if (dstDir === "") await loadRoot();
+      else await loadSubdir(dstDir);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   /// Outer container's leave handler — clears the highlight when the
   /// drag pointer leaves the panel entirely. Each child's dragenter
   /// will re-set it.
   const handleOuterDragLeave = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes("Files")) return;
+    const isFile = e.dataTransfer.types.includes("Files");
+    const isInternal = e.dataTransfer.types.includes(INTERNAL_DRAG_MIME);
+    if (!isFile && !isInternal) return;
     // dragleave fires when entering child elements too. Only clear if
     // we've actually left the panel (relatedTarget is outside).
     const next = e.relatedTarget as Node | null;
@@ -325,6 +386,14 @@ function FileTreeView({
     }
   };
 
+  /// Triggered from a folder row's "Upload here…" menu item. Points the
+  /// pending-upload target at that folder and opens the shared file
+  /// picker; onChange dispatches into `handleUpload` with the same path.
+  const handleUploadInto = (dir: string) => {
+    pendingUploadDirRef.current = dir;
+    fileInputRef.current?.click();
+  };
+
   const handleMkdir = async () => {
     const name = prompt("New folder name:");
     if (!name) return;
@@ -363,7 +432,10 @@ function FileTreeView({
       {/* Toolbar */}
       <div className="flex items-center gap-1 px-3 py-2 border-b border-gray-800">
         <ToolbarIcon
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            pendingUploadDirRef.current = "";
+            fileInputRef.current?.click();
+          }}
           disabled={uploading}
           title={uploading ? "Uploading…" : "Upload files"}
         >
@@ -383,7 +455,7 @@ function FileTreeView({
           type="file"
           multiple
           className="hidden"
-          onChange={(e) => handleUpload(e.target.files, "")}
+          onChange={(e) => handleUpload(e.target.files, pendingUploadDirRef.current)}
         />
       </div>
 
@@ -410,6 +482,7 @@ function FileTreeView({
             onDelete={handleDelete}
             onRename={handleRename}
             onDownload={handleDownload}
+            onUploadInto={handleUploadInto}
             dragOverPath={dragOverPath}
             makeDropHandlers={makeDropHandlers}
           />
@@ -460,7 +533,7 @@ function FileTreeView({
 
 function DirView({
   listing, path, depth, expanded, loadSubdir, collapseSubdir,
-  onOpenFile, onDelete, onRename, onDownload,
+  onOpenFile, onDelete, onRename, onDownload, onUploadInto,
   dragOverPath, makeDropHandlers,
 }: {
   listing: DirListing;
@@ -473,6 +546,7 @@ function DirView({
   onDelete: (p: string) => void;
   onRename: (p: string) => void;
   onDownload: (p: string, isDir: boolean) => void;
+  onUploadInto: (dir: string) => void;
   dragOverPath: string | null;
   makeDropHandlers: (targetDir: string) => {
     onDragOver: (e: React.DragEvent) => void;
@@ -492,6 +566,11 @@ function DirView({
           <div key={entry.name}>
             <div
               {...makeDropHandlers(dropTarget)}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(INTERNAL_DRAG_MIME, childPath);
+                e.dataTransfer.effectAllowed = "move";
+              }}
               className={`group flex items-center gap-1 px-2 py-0.5 text-xs cursor-pointer
                           text-gray-300 transition-colors
                           ${isDropActive
@@ -523,6 +602,7 @@ function DirView({
                 onRename={onRename}
                 onDownload={onDownload}
                 onDelete={onDelete}
+                onUploadInto={onUploadInto}
               />
             </div>
             {entry.is_dir && isOpen && expanded.get(childPath) && (
@@ -537,6 +617,7 @@ function DirView({
                 onDelete={onDelete}
                 onRename={onRename}
                 onDownload={onDownload}
+                onUploadInto={onUploadInto}
                 dragOverPath={dragOverPath}
                 makeDropHandlers={makeDropHandlers}
               />
@@ -552,13 +633,14 @@ function DirView({
  *  Earlier the row had a single × delete; we kept the same hover-show
  *  pattern but expanded to a dropdown with Rename / Download / Delete. */
 function RowMenu({
-  path, isDir, onRename, onDownload, onDelete,
+  path, isDir, onRename, onDownload, onDelete, onUploadInto,
 }: {
   path: string;
   isDir: boolean;
   onRename: (p: string) => void;
   onDownload: (p: string, isDir: boolean) => void;
   onDelete: (p: string) => void;
+  onUploadInto: (dir: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   // Close on any click anywhere else.
@@ -590,6 +672,14 @@ function RowMenu({
           className="absolute right-0 top-5 z-40 w-36 py-1 rounded-md
                      bg-gray-900 border border-gray-700 shadow-xl text-gray-200"
         >
+          {isDir && (
+            <button
+              onClick={() => { setOpen(false); onUploadInto(path); }}
+              className="block w-full text-left px-3 py-1 hover:bg-gray-800"
+            >
+              Upload here…
+            </button>
+          )}
           <button
             onClick={() => { setOpen(false); onRename(path); }}
             className="block w-full text-left px-3 py-1 hover:bg-gray-800"
