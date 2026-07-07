@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Agent } from "../types";
 
 interface AgentSelectorProps {
@@ -20,19 +21,6 @@ export function AgentSelector({
     .filter((a) => a.name !== "Operator")
     .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Close menu on outside click.
-  useEffect(() => {
-    if (!menuOpenId) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpenId(null);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpenId]);
 
   return (
     <div className="space-y-2">
@@ -85,61 +73,131 @@ export function AgentSelector({
                 </div>
               </button>
               {showKebab && (
-                <div
-                  ref={menuOpen ? menuRef : undefined}
-                  className="absolute right-2 top-1/2 -translate-y-1/2"
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMenuOpenId(menuOpen ? null : agent.agent_id);
-                    }}
-                    className={`p-1 rounded transition-opacity
-                                ${menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
-                                text-gray-500 hover:text-gray-200 hover:bg-gray-700`}
-                    title="Actions"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
-                      <circle cx="8" cy="3" r="1.5" />
-                      <circle cx="8" cy="8" r="1.5" />
-                      <circle cx="8" cy="13" r="1.5" />
-                    </svg>
-                  </button>
-                  {menuOpen && (
-                    <div className="absolute right-0 top-full mt-1 z-10 w-44 rounded-lg
-                                    bg-gray-900 border border-gray-800 shadow-lg py-1">
-                      {supportsCreateChat && (
-                        <button
-                          onClick={() => {
-                            setMenuOpenId(null);
-                            onCreateChat!(agent);
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-gray-200
-                                     hover:bg-gray-800"
-                        >
-                          Create chat…
-                        </button>
-                      )}
-                      {supportsEndpointCheck && (
-                        <button
-                          onClick={() => {
-                            setMenuOpenId(null);
-                            onEndpointCheck!(agent);
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-xs text-gray-200
-                                     hover:bg-gray-800"
-                        >
-                          Endpoint check
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <AgentRowKebab
+                  open={menuOpen}
+                  onToggle={() => setMenuOpenId(menuOpen ? null : agent.agent_id)}
+                  onClose={() => setMenuOpenId(null)}
+                  items={[
+                    supportsCreateChat
+                      ? { label: "Create chat…", onClick: () => onCreateChat!(agent) }
+                      : null,
+                    supportsEndpointCheck
+                      ? { label: "Endpoint check", onClick: () => onEndpointCheck!(agent) }
+                      : null,
+                  ].filter(Boolean) as MenuItem[]}
+                />
               )}
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+interface MenuItem {
+  label: string;
+  onClick: () => void;
+}
+
+/** Kebab button plus its dropdown. The dropdown is rendered into a portal
+ *  on `document.body` so it escapes the sidebar's `overflow-y-auto` clip
+ *  and the surrounding semi-transparent stacking context — previously the
+ *  menu was rendered inside the sidebar's overflow with a low z-index,
+ *  which made it look half-clipped and partially transparent. */
+function AgentRowKebab({
+  open, onToggle, onClose, items,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  items: MenuItem[];
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+
+  // Position the portaled menu under the kebab.
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    setPos({
+      top: rect.bottom + 4,
+      // Anchor by right edge so the menu's right side aligns with the
+      // kebab's — looks the same as the previous absolute layout.
+      right: window.innerWidth - rect.right,
+    });
+  }, [open]);
+
+  // Close on outside click. The menu is in a portal so it isn't a DOM
+  // descendant of the kebab — check both refs.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, onClose]);
+
+  // Close on scroll or resize — the anchored position would otherwise
+  // drift away from the kebab.
+  useEffect(() => {
+    if (!open) return;
+    const handler = () => onClose();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    return () => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    };
+  }, [open, onClose]);
+
+  return (
+    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+      <button
+        ref={buttonRef}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className={`p-1 rounded transition-opacity
+                    ${open ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
+                    text-gray-500 hover:text-gray-200 hover:bg-gray-700`}
+        title="Actions"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+          <circle cx="8" cy="3" r="1.5" />
+          <circle cx="8" cy="8" r="1.5" />
+          <circle cx="8" cy="13" r="1.5" />
+        </svg>
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-50 w-44 rounded-lg bg-gray-900 border border-gray-800
+                     shadow-xl py-1"
+          style={{ top: pos.top, right: pos.right }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              onClick={() => {
+                onClose();
+                item.onClick();
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-200
+                         hover:bg-gray-800"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
