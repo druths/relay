@@ -277,10 +277,18 @@ export function useRelay() {
         case "text_start":
           setState((s) => {
             if (s.activeSessionId) {
+              // Defensive: any prior bubble still marked streaming was
+              // orphaned (a cancelled turn that never emitted its
+              // text_done, or a race between state_update and text_start).
+              // Close them so their thinking dots go away instead of
+              // lingering behind the new turn's bubble.
+              const swept = s.sessionMessages.map((m) =>
+                m.streaming ? { ...m, streaming: false, interrupted: true } : m
+              );
               return {
                 ...s,
                 sessionMessages: [
-                  ...s.sessionMessages,
+                  ...swept,
                   {
                     role: "agent",
                     text_content: "",
@@ -588,9 +596,17 @@ export function useRelay() {
     const now = new Date().toISOString();
     setState((s) => {
       if (s.activeSessionId) {
+        // Sending a follow-up implicitly interrupts any in-flight agent
+        // turn. Close its streaming bubble locally right now so the
+        // "thinking" dots go away immediately — the backend will cancel
+        // the old task, but that takes a round-trip; meanwhile the
+        // client should reflect the interrupt visually.
+        const swept = s.sessionMessages.map((m) =>
+          m.streaming ? { ...m, streaming: false, interrupted: true } : m
+        );
         return {
           ...s,
-          sessionMessages: [...s.sessionMessages, { role: "user", text_content: text, created_at: now }],
+          sessionMessages: [...swept, { role: "user", text_content: text, created_at: now }],
         };
       }
       return {

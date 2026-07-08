@@ -213,6 +213,17 @@ final class RelayViewModel {
     func sendMessage(_ text: String) async {
         if isLiveMode { ChimeGenerator.play() }
 
+        // A follow-up user message implicitly interrupts any in-flight
+        // agent turn. Close its streaming bubble locally right now so
+        // the "thinking" dots go away immediately — the backend will
+        // cancel the old task on its side, but that's a round-trip.
+        if activeSessionId != nil {
+            for i in sessionMessages.indices where sessionMessages[i].isStreaming {
+                sessionMessages[i].isStreaming = false
+                sessionMessages[i].isInterrupted = true
+            }
+        }
+
         let message = Message(role: .user, textContent: text, createdAt: Date())
         if activeSessionId != nil {
             sessionMessages.append(message)
@@ -793,6 +804,16 @@ final class RelayViewModel {
             if suppressNextGreeting && payload.speaker == "operator" { break }
             guard isInSession else { break }
             let role: Message.MessageRole = payload.speaker == "operator" ? .operator : .agent
+            // Defensive: any prior bubble still marked streaming was
+            // orphaned (a cancelled turn that never emitted its text_done).
+            // Close it so its thinking dots go away instead of lingering
+            // behind the new turn's bubble.
+            for i in sessionMessages.indices where sessionMessages[i].isStreaming
+                && !(sessionMessages[i].textContent.isEmpty && i == sessionMessages.count - 1
+                     && sessionMessages[i].role == role) {
+                sessionMessages[i].isStreaming = false
+                sessionMessages[i].isInterrupted = true
+            }
             // Reuse the placeholder added by the processing state_update if present.
             if let last = sessionMessages.last, last.isStreaming, last.textContent.isEmpty, last.role == role {
                 break
