@@ -133,7 +133,7 @@ class ArkClientConnection:
 
         self._ws: websockets.ClientConnection | None = None
         self._consumer: asyncio.Task | None = None
-        self._turn_queues: dict[str, asyncio.Queue[dict]] = {}
+        self._turn_queues: dict[str, asyncio.Queue[tuple[int, dict]]] = {}
         self._async_callback: AsyncEventCallback | None = None
         # Called once per catch-up event so the backend can persist/broadcast.
         self._catch_up_callback: CatchUpCallback | None = None
@@ -142,6 +142,14 @@ class ArkClientConnection:
         # Per-session turn queue write lock (allow multiple concurrent turns
         # across different ark sessions on the same connection).
         self._turn_lock = asyncio.Lock()
+        # Monotonic per-session turn generation. Bumped on every
+        # send_user_message and send_stop. Dispatched events are tagged
+        # with the generation observed at put-time so iter_turn_events
+        # can drop stragglers from a previous (cancelled) turn — those
+        # arrive in the *new* turn's queue because ark keeps emitting
+        # after send_stop for a while and the session_id is reused
+        # across turns (chain continuation).
+        self._turn_generation: dict[str, int] = {}
 
     # ── Public lifecycle ────────────────────────────────────────────
 
@@ -172,16 +180,23 @@ class ArkClientConnection:
             except Exception:
                 pass
             self._ws = None
-        # Unblock any waiting turn consumer with a sentinel.
-        for q in self._turn_queues.values():
-            await q.put({"type": "done", "_closed": True})
+        # Unblock any waiting turn consumer with a sentinel. Use the sid's
+        # current generation so the sentinel isn't dropped as stale.
+        for sid, q in self._turn_queues.items():
+            gen = self._turn_generation.get(sid, 0)
+            await q.put((gen, {"type": "done", "_closed": True}))
 
     # ── Turn API ────────────────────────────────────────────────────
 
-    async def send_user_message(self, ark_session_id: str, text: str) -> None:
-        """Open a turn for `ark_session_id` and send the user message."""
+    async def send_user_message(self, ark_session_id: str, text: str) -> int:
+        """Open a turn for `ark_session_id` and send the user message. Returns
+        the turn generation the caller should use with `iter_turn_events`;
+        events tagged with an older generation (leftovers from a cancelled
+        turn on the same session_id) get filtered out."""
         await self.ensure_connected()
         async with self._turn_lock:
+            gen = self._turn_generation.get(ark_session_id, 0) + 1
+            self._turn_generation[ark_session_id] = gen
             self._turn_queues[ark_session_id] = asyncio.Queue()
         assert self._ws is not None
         await self._ws.send(json.dumps({
@@ -189,16 +204,25 @@ class ArkClientConnection:
             "session_id": ark_session_id,
             "text": text,
         }))
+        return gen
 
-    async def iter_turn_events(self, ark_session_id: str):
-        """Yield events for the named ark session until a `done` is observed.
-        Removes the queue when finished."""
+    async def iter_turn_events(self, ark_session_id: str, generation: int):
+        """Yield events for the named ark session's turn identified by
+        `generation`, until a `done` is observed. Events tagged with an
+        older generation are silently dropped — they belong to a prior
+        turn that was cancelled but whose ark-side output was still in
+        flight when this turn's queue was created. Removes the queue when
+        finished."""
         queue = self._turn_queues.get(ark_session_id)
         if queue is None:
             return
         try:
             while True:
-                event = await queue.get()
+                event_gen, event = await queue.get()
+                if event_gen != generation:
+                    # Stale event from a previous, cancelled turn on the
+                    # same session_id. Silently drop.
+                    continue
                 yield event
                 if event.get("type") == "done":
                     break
@@ -207,6 +231,13 @@ class ArkClientConnection:
                 self._turn_queues.pop(ark_session_id, None)
 
     async def send_stop(self, ark_session_id: str) -> None:
+        # Bump the generation immediately so anything ark still emits for
+        # the cancelled turn — which may keep arriving for hundreds of ms
+        # after `stop` reaches ark — is dead-on-arrival for the next turn.
+        async with self._turn_lock:
+            self._turn_generation[ark_session_id] = (
+                self._turn_generation.get(ark_session_id, 0) + 1
+            )
         if self._ws is None:
             return
         try:
@@ -306,8 +337,11 @@ class ArkClientConnection:
             except Exception:
                 logger.exception("Ark WS consumer error, reconnecting…")
             # Drop any in-flight turns — callers will surface the failure.
-            for q in list(self._turn_queues.values()):
-                await q.put({"type": "error", "message": "Ark WS dropped mid-turn"})
+            # Tag with the sid's current generation so the error reaches
+            # the waiting iterator instead of being dropped as stale.
+            for sid, q in list(self._turn_queues.items()):
+                gen = self._turn_generation.get(sid, 0)
+                await q.put((gen, {"type": "error", "message": "Ark WS dropped mid-turn"}))
             self._ws = None
             await asyncio.sleep(min(backoff, 30.0))
             try:
@@ -321,7 +355,10 @@ class ArkClientConnection:
         etype = event.get("type")
         sid = event.get("session_id")
         if etype in TURN_EVENT_TYPES and sid and sid in self._turn_queues:
-            await self._turn_queues[sid].put(event)
+            # Tag with the current generation so iter_turn_events can
+            # drop stragglers from a previous, cancelled turn.
+            gen = self._turn_generation.get(sid, 0)
+            await self._turn_queues[sid].put((gen, event))
             return
         if etype in ASYNC_EVENT_TYPES or etype in TURN_EVENT_TYPES:
             # Includes turn events that weren't claimed by an in-flight
@@ -478,14 +515,14 @@ class ArkProvider(LLMProvider):
         # Multi-segment assistant text: ark emits multiple delta streams
         # separated by `assistant_message` boundary events around tool calls.
         # Insert a paragraph break before the first delta of each new segment.
-        await conn.send_user_message(ark_session_id, user_text)
+        turn_gen = await conn.send_user_message(ark_session_id, user_text)
         saw_segment_end = False
         usage_in: int | None = None
         usage_out: int | None = None
         usage_model: str | None = None
         usage_ctx: int | None = None
         try:
-            async for event in conn.iter_turn_events(ark_session_id):
+            async for event in conn.iter_turn_events(ark_session_id, turn_gen):
                 etype = event.get("type")
                 if etype == "assistant_delta":
                     delta = event.get("text") or event.get("delta") or ""
