@@ -244,9 +244,16 @@ async def get_session_messages(
     """Return messages for a session, merged with any file attachments for
     the same session so the conversation replay includes upload pills and
     agent-shared files. Tries Redis cache first."""
+    import time as _time
+    _t0 = _time.perf_counter()
     cached = await get_cached_context(str(session_id))
     if cached is not None:
+        logger.info(
+            "[get_session_messages] sid=%s cache=HIT n=%d took=%.1fms",
+            str(session_id)[:8], len(cached), (_time.perf_counter() - _t0) * 1000,
+        )
         return cached
+    _t_miss = _time.perf_counter()
 
     # Take the MOST RECENT `limit` messages, not the oldest — ordering ASC
     # with a limit lets the user's just-persisted turn fall off the slice
@@ -313,6 +320,11 @@ async def get_session_messages(
     for m in messages:
         m.pop("_ts", None)
     await cache_session_context(str(session_id), messages)
+    logger.info(
+        "[get_session_messages] sid=%s cache=MISS n=%d msgs=%d files=%d took=%.1fms",
+        str(session_id)[:8], len(messages), len(text_entries), len(file_entries),
+        (_time.perf_counter() - _t_miss) * 1000,
+    )
     return messages
 
 
@@ -414,6 +426,88 @@ async def _generate_summary_async(session_id: uuid.UUID, db) -> None:
 
 # ── Lobby message handling (Operator) ───────────────────────────────────
 
+import re as _re
+
+# Fast-path patterns for the most common lobby intent — "please connect
+# me to <agent>". If the message matches one of these shapes AND the
+# extracted name resolves to a known agent, we skip the ~1s Operator LLM
+# round-trip and build the tool_call locally.
+#
+# Anything the patterns don't match (or that names an unknown agent, or
+# includes labels/project qualifiers) falls through to the LLM.
+_CONNECT_TRIGGER_RE = _re.compile(
+    r"^\s*(?:please\s+)?"
+    r"(?:"
+    r"connect\s+me\s+to|"
+    r"connect\s+to|"
+    r"talk\s+to|"
+    r"chat\s+with|"
+    r"switch\s+to|"
+    r"let\s+me\s+(?:talk|chat)\s+(?:to|with)|"
+    r"start\s+a?\s*(?:chat|conversation)\s+with|"
+    r"new\s+(?:chat|conversation)\s+with|"
+    r"open\s+a?\s*(?:chat|conversation)\s+with"
+    r")\s+(?P<name>.+?)\s*[.!?\s]*$",
+    _re.IGNORECASE,
+)
+
+
+def _try_fast_connect(text: str, agents_raw: list) -> "OperatorResult | None":
+    """Return an OperatorResult for `connect_to_agent` if the text is an
+    unambiguous "connect me to <agent>" request against a known agent.
+    Any hint of extra context (labels, project, "about …") falls through
+    so the LLM can pick it up."""
+    stripped = text.strip()
+
+    # Reject messages that likely carry extra routing context — the LLM
+    # is better at teasing out labels / projects from noise like
+    # "connect me to Scribe about the docs" or "under the frontend label".
+    lowered = stripped.lower()
+    for tail_word in (" about ", " under ", " labeled ", " label ",
+                      " in project ", " on project ", " re ", " re: "):
+        if tail_word in lowered:
+            return None
+
+    # Try the trigger-phrase patterns first.
+    candidate: str | None = None
+    m = _CONNECT_TRIGGER_RE.match(stripped)
+    if m:
+        candidate = m.group("name").strip().strip(".!?,")
+
+    # Bare agent name: exact match against a known agent's name (case-
+    # insensitive). This handles quick voice inputs like just "Scribe".
+    if not candidate and len(stripped.split()) <= 3:
+        candidate = stripped.strip(".!?,")
+
+    if not candidate:
+        return None
+
+    # Resolve to a known agent — exact case-insensitive, then close-fuzzy.
+    candidate_lc = candidate.lower()
+    matched: str | None = None
+    for a in agents_raw:
+        if a.name.lower() == candidate_lc and a.name.lower() != "operator":
+            matched = a.name
+            break
+    if matched is None:
+        names = [a.name for a in agents_raw if a.name.lower() != "operator"]
+        close = difflib.get_close_matches(candidate, names, n=1, cutoff=0.85)
+        if close:
+            matched = close[0]
+
+    if matched is None:
+        return None
+
+    logger.info(
+        "[lobby.fast_connect] matched %r → agent=%s (skipping Operator LLM)",
+        candidate, matched,
+    )
+    return OperatorResult(
+        tool_call="connect_to_agent",
+        tool_args={"agent_name": matched},
+    )
+
+
 async def handle_lobby_message(
     db: AsyncSession, user_id: str, text: str, lobby_history: list[dict] | None = None
 ) -> list[dict]:
@@ -431,7 +525,17 @@ async def handle_lobby_message(
     from app.services.projects import _ark_servers, list_all_projects
     from app.services.llm.ark import _server_id_for as _ark_server_id_for
 
+    import time as _time_hlm
+    _t0 = _time_hlm.perf_counter()
+
+    def _lap(label: str) -> None:
+        nonlocal _t0
+        now = _time_hlm.perf_counter()
+        logger.info("[lobby.hlm] %s: %.1fms", label, (now - _t0) * 1000)
+        _t0 = now
+
     agents_raw = await agent_manager.list_agents(db)
+    _lap(f"list_agents(n={len(agents_raw)})")
     agents_ctx = []
     for a in agents_raw:
         health = agent_health.get_status(a.agent_id)
@@ -447,7 +551,9 @@ async def handle_lobby_message(
             "status_message": health.message,
             "ark_server_id": ark_sid,
         })
+    _lap("build_agents_ctx (per-agent resolve_llm_config)")
     sessions_ctx = await list_sessions(db, user_id)
+    _lap(f"list_sessions(n={len(sessions_ctx)})")
     projects_ctx: list[dict] = []
     ark_server_ids: list[str] = []
     try:
@@ -456,8 +562,19 @@ async def handle_lobby_message(
     except Exception:
         # Operator can still function without project context — log and move on.
         logger.exception("Failed to load project context for operator")
+    _lap(f"list_all_projects+ark_servers (n_projects={len(projects_ctx)}, n_servers={len(ark_server_ids)})")
+
+    # Fast path: obvious "connect me to <agent>" phrasings skip the LLM
+    # entirely. Anything ambiguous still goes through the operator.
+    fast = _try_fast_connect(text, agents_raw)
+    if fast is not None:
+        _lap("fast_connect(HIT)")
+        r = await _handle_llm_result(db, user_id, fast, lobby_history)
+        _lap(f"_handle_llm_result(fast, n_events={len(r)})")
+        return r
 
     op_provider, op_model, op_base_url, op_api_key = await _operator_llm_config(db)
+    _lap("_operator_llm_config")
 
     try:
         result = await call_operator(
@@ -468,15 +585,20 @@ async def handle_lobby_message(
     except Exception as exc:
         logger.exception("Operator LLM call failed, falling back to keyword matching: %s", exc)
         result = OperatorResult()  # Fall back to keyword matching
+    _lap(f"call_operator (provider={op_provider}, model={op_model}, tool_call={result.tool_call})")
 
     # If LLM returned a result, process it
     if result.tool_call or result.text:
         logger.info("Using LLM operator result (tool_call=%s)", result.tool_call)
-        return await _handle_llm_result(db, user_id, result, lobby_history)
+        r = await _handle_llm_result(db, user_id, result, lobby_history)
+        _lap(f"_handle_llm_result(tool_call={result.tool_call}, n_events={len(r)})")
+        return r
 
     # Fallback: keyword-based matching
     logger.info("Using keyword fallback for: %s", text[:60])
-    return await _handle_lobby_keyword(db, user_id, text, agents_raw, sessions_ctx)
+    r = await _handle_lobby_keyword(db, user_id, text, agents_raw, sessions_ctx)
+    _lap(f"_handle_lobby_keyword(n_events={len(r)})")
+    return r
 
 
 def _append_tool_result(lobby_history: list[dict], result: OperatorResult, content: str) -> None:

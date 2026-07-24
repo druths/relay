@@ -127,7 +127,10 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                 "type": "text",
                 "payload": {"speaker": "operator", "text": greeting},
             })
-            await _tts_for_text(websocket, db, greeting, "operator")
+            # No TTS at connect time — the client hasn't declared voice
+            # mode yet (they'd need to send set_live_mode first), and we
+            # don't want to burn a synth API call for audio nobody will
+            # play. Live mode later re-invokes any needed prompts.
 
             # Concurrent message loop: races incoming WS messages against active
             # processing so that "interrupt" messages can cancel in-flight LLM/TTS turns.
@@ -192,7 +195,8 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                         active_task = asyncio.create_task(
                             _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
                                          voice_mode_instructions if is_live_mode else None,
-                                         detach_event=detach_event)
+                                         detach_event=detach_event,
+                                         is_live_mode=is_live_mode)
                         )
 
                     elif msg_type == "audio_input":
@@ -234,7 +238,8 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                         active_task = asyncio.create_task(
                             _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
                                          voice_mode_instructions if is_live_mode else None,
-                                         detach_event=detach_event)
+                                         detach_event=detach_event,
+                                         is_live_mode=is_live_mode)
                         )
 
                     elif msg_type == "leave_session":
@@ -385,6 +390,7 @@ async def _handle_text(
     lobby_history: list[dict],
     voice_mode_instructions: str | None = None,
     detach_event: asyncio.Event | None = None,
+    is_live_mode: bool = False,
 ) -> uuid.UUID | None:
     """Process user text (from typing or STT). Returns updated active_session_id."""
     # Processing indicator
@@ -400,10 +406,25 @@ async def _handle_text(
     if active_session_id is None:
         # Track user message in lobby history
         lobby_history.append({"role": "user", "content": text})
+        import time as _time_lobby
+        _lrid = str(uuid.uuid4())[:8]
+        _lt = _time_lobby.perf_counter()
+        logger.info("[lobby rid=%s] BEGIN text=%r", _lrid, text[:60])
         events = await handle_lobby_message(db, user_id, text, lobby_history)
-        return await _dispatch_events(
-            websocket, db, user_id, events, active_session_id, lobby_history
+        _lobby_ms = (_time_lobby.perf_counter() - _lt) * 1000
+        logger.info("[lobby rid=%s] handle_lobby_message: %.1fms (n_events=%d)",
+                    _lrid, _lobby_ms, len(events))
+        _dt = _time_lobby.perf_counter()
+        result = await _dispatch_events(
+            websocket, db, user_id, events, active_session_id, lobby_history,
+            is_live_mode=is_live_mode,
+            _timing_rid=_lrid,
         )
+        _dispatch_ms = (_time_lobby.perf_counter() - _dt) * 1000
+        _total_ms = (_time_lobby.perf_counter() - _lt) * 1000
+        logger.info("[lobby rid=%s] dispatch: %.1fms  TOTAL: %.1fms",
+                    _lrid, _dispatch_ms, _total_ms)
+        return result
 
     # Stream session messages with TTS
     ws_lock = asyncio.Lock()
@@ -451,12 +472,16 @@ async def _handle_text(
                 if active_session_id is None and speaker == "operator":
                     lobby_history.append({"role": "assistant", "content": event["payload"]["text"]})
                 await websocket.send_json(event)
-                await _tts_for_text(websocket, db, event["payload"]["text"], speaker)
+                if is_live_mode:
+                    await _tts_for_text(websocket, db, event["payload"]["text"], speaker)
             else:
                 await websocket.send_json(event)
 
             # ── TTS orchestration ──
-            if etype == "text_start":
+            # Only synthesise/stream audio when the client is actually in
+            # live mode. In text mode nobody listens to the bytes, and
+            # every synth call blocks the WS thread for ~500ms+ per call.
+            if etype == "text_start" and is_live_mode:
                 session = await get_session(db, active_session_id) if active_session_id else None
                 if session:
                     tts_agent = await agent_manager.get_agent_by_id(db, session.agent_id)
@@ -702,7 +727,22 @@ async def _do_resume(
     skip_pause: bool = False,
 ) -> uuid.UUID | None:
     """Resume a specific session. Returns the new active_session_id."""
+    import time as _time
+    rid = str(uuid.uuid4())[:8]
+    t0 = _time.perf_counter()
+
+    def _lap(label: str) -> None:
+        nonlocal t0
+        now = _time.perf_counter()
+        logger.info("[resume rid=%s] %s: %.1fms", rid, label, (now - t0) * 1000)
+        t0 = now
+
+    t_start = _time.perf_counter()
+    logger.info("[resume rid=%s] BEGIN target=%s active=%s skip_pause=%s",
+                rid, target_sid, active_session_id, skip_pause)
+
     session = await get_session(db, target_sid)
+    _lap("get_session")
     if not session or session.user_id != user_id:
         # Session is gone (auto-pruned, deleted elsewhere, wrong user). Tell the
         # client to clear its in-session UI so its next message doesn't get
@@ -729,21 +769,26 @@ async def _do_resume(
 
     if active_session_id and not skip_pause:
         await pause_session(db, active_session_id)
+        _lap("pause_session")
 
     was_processing = session.status == "processing"
     session.status = "active"
     if session.has_unread:
         session.has_unread = False
     await db.commit()
+    _lap("commit(status=active)")
 
     # Broadcast read state to all clients
     await _broadcast_to_user(user_id, {
         "type": "session_unread",
         "payload": {"session_id": str(session.session_id), "has_unread": False},
     })
+    _lap("broadcast(session_unread)")
 
     agent = await agent_manager.get_agent_by_id(db, session.agent_id)
+    _lap("get_agent_by_id")
     labels = await get_session_labels(db, session.session_id)
+    _lap("get_session_labels")
     await websocket.send_json({
         "type": "session_entered",
         "payload": {
@@ -752,11 +797,14 @@ async def _do_resume(
             "labels": labels,
         },
     })
+    _lap("send(session_entered)")
     messages = await get_session_messages(db, session.session_id)
+    _lap(f"get_session_messages(n={len(messages)})")
     await websocket.send_json({
         "type": "session_history",
         "payload": {"messages": messages},
     })
+    _lap("send(session_history)")
 
     # If the agent is still generating in the background, show thinking indicator
     if was_processing:
@@ -768,7 +816,10 @@ async def _do_resume(
                 "session_id": str(session.session_id),
             },
         })
+        _lap("send(state_update processing)")
 
+    total_ms = (_time.perf_counter() - t_start) * 1000
+    logger.info("[resume rid=%s] END total=%.1fms", rid, total_ms)
     return session.session_id
 
 
@@ -779,10 +830,14 @@ async def _dispatch_events(
     events: list[dict],
     active_session_id: uuid.UUID | None,
     lobby_history: list[dict],
+    is_live_mode: bool = False,
+    _timing_rid: str | None = None,
 ) -> uuid.UUID | None:
     """Send events to client, intercepting internal routing events."""
-    for event in events:
+    import time as _time_de
+    for idx, event in enumerate(events):
         etype = event["type"]
+        _et = _time_de.perf_counter()
 
         if etype == "session_entered":
             active_session_id = uuid.UUID(event["payload"]["session_id"])
@@ -818,11 +873,30 @@ async def _dispatch_events(
             speaker = event["payload"].get("speaker", "")
             if active_session_id is None and speaker == "operator":
                 lobby_history.append({"role": "assistant", "content": event["payload"]["text"]})
+            _tt = _time_de.perf_counter()
             await websocket.send_json(event)
-            await _tts_for_text(websocket, db, event["payload"]["text"], speaker)
+            _send_ms = (_time_de.perf_counter() - _tt) * 1000
+            _tts_ms = 0.0
+            if is_live_mode:
+                _tt = _time_de.perf_counter()
+                await _tts_for_text(websocket, db, event["payload"]["text"], speaker)
+                _tts_ms = (_time_de.perf_counter() - _tt) * 1000
+            if _timing_rid:
+                logger.info(
+                    "[lobby rid=%s]   evt[%d] text(speaker=%s, %d chars): send=%.1fms tts=%.1fms live=%s",
+                    _timing_rid, idx, speaker, len(event["payload"]["text"]),
+                    _send_ms, _tts_ms, is_live_mode,
+                )
+            continue
 
         else:
             await websocket.send_json(event)
+
+        if _timing_rid:
+            logger.info(
+                "[lobby rid=%s]   evt[%d] %s: %.1fms",
+                _timing_rid, idx, etype, (_time_de.perf_counter() - _et) * 1000,
+            )
 
     return active_session_id
 
