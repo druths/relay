@@ -223,6 +223,15 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   }, [relay.activeSessionId, relay.appendUserAttachment]);
 
   const handleAgentSelect = (agentName: string) => {
+    // If we're already in a session, leave it first so the connect
+    // request routes through the lobby operator instead of being
+    // delivered to the current session's agent as a literal message.
+    // The WS handler processes leave_session before text_input, so by
+    // the time the connect request is parsed, active_session_id is
+    // null and the lobby fast-path picks it up.
+    if (relay.activeSessionId) {
+      relay.leaveSession();
+    }
     relay.sendMessage(`connect me to ${agentName}`);
   };
 
