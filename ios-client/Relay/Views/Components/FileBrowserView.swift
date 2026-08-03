@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Tabbed file browser for the active session: Project (if bound) +
 /// Workspace (for ark agents). Mirrors the web `FileBrowserPanel` —
@@ -183,6 +186,9 @@ private struct FileTreeView: View {
     @State private var renameText: String = ""
     @State private var downloadShareURL: _DownloadRef? = nil
     @State private var lastSeenFileChangeTs: Date = .distantPast
+    /// Set when a probe classified the tapped file as binary; drives an
+    /// alert instead of opening a preview or tab.
+    @State private var binaryOpenAttempt: String? = nil
 
     /// Key used in `relay.fileTreeExpanded` so different projects /
     /// workspaces have independent persisted state.
@@ -317,6 +323,17 @@ private struct FileTreeView: View {
         } message: {
             Text(pathToDelete.map { "Delete \($0)?" } ?? "")
         }
+        .alert("Can't preview", isPresented: Binding(
+            get: { binaryOpenAttempt != nil },
+            set: { if !$0 { binaryOpenAttempt = nil } },
+        )) {
+            Button("OK", role: .cancel) { binaryOpenAttempt = nil }
+        } message: {
+            let filename = binaryOpenAttempt.flatMap {
+                $0.split(separator: "/").last.map(String.init)
+            } ?? binaryOpenAttempt ?? ""
+            Text("\"\(filename)\" looks like a binary file. Use the row's Download action to save it locally.")
+        }
         .alert(
             "Rename",
             isPresented: Binding(
@@ -362,7 +379,9 @@ private struct FileTreeView: View {
                 .font(theme.monoFont(size: 13))
                 .foregroundStyle(theme.textQuaternary)
                 .frame(width: 10)
-            Image(systemName: entry.isDir ? "folder.fill" : "doc")
+            Image(systemName: entry.isDir
+                              ? "folder.fill"
+                              : (isKnownBinaryExt(entry.name) ? "shippingbox" : "doc"))
                 .font(.system(size: 12))
                 .foregroundStyle(theme.textTertiary)
             Text(entry.name)
@@ -386,10 +405,8 @@ private struct FileTreeView: View {
             if entry.isDir {
                 if isOpen { expanded.removeValue(forKey: childPath) }
                 else { load(path: childPath) }
-            } else if let cb = onOpenFile {
-                cb(kind, targetId, childPath, server)
             } else {
-                selectedPath = childPath
+                Task { await tryOpenFile(path: childPath) }
             }
         }
         .contextMenu {
@@ -491,6 +508,30 @@ private struct FileTreeView: View {
             }
         }
         await loadRoot()
+    }
+
+    /// Called from a row tap. Probes the file first — if the backend
+    /// classifies it as binary, surface an alert and don't open the
+    /// preview / tab (there's nothing useful to see). Otherwise route
+    /// through the normal open path.
+    private func tryOpenFile(path: String) async {
+        do {
+            let probe = try await relay.apiClient.probeFile(kind, id: targetId, path: path, server: server)
+            if probe.kind == "binary" {
+                binaryOpenAttempt = path
+                return
+            }
+        } catch {
+            // Probe failed (network, permission, 404) — fall through
+            // to the normal open path so the surface layer reports the
+            // real error in its own UI.
+            print("[fs] probeFile failed for \(path): \(error)")
+        }
+        if let cb = onOpenFile {
+            cb(kind, targetId, path, server)
+        } else {
+            selectedPath = path
+        }
     }
 
     private func doMkdir() async {
@@ -610,6 +651,26 @@ private struct FilePreviewSheet: View {
     @State private var editing = false
     @State private var draft: String = ""
     @State private var saving = false
+    #if canImport(UIKit)
+    @State private var image: UIImage? = nil
+    @State private var pdfData: Data? = nil
+    #endif
+
+    private var isImageMode: Bool {
+        #if canImport(UIKit)
+        return image != nil
+        #else
+        return false
+        #endif
+    }
+
+    private var isPdfMode: Bool {
+        #if canImport(UIKit)
+        return pdfData != nil
+        #else
+        return false
+        #endif
+    }
 
     private var filename: String {
         path.split(separator: "/").last.map(String.init) ?? path
@@ -624,6 +685,23 @@ private struct FilePreviewSheet: View {
                         .padding()
                 } else if let err = error {
                     Text(err).font(theme.monoFont(size: 12)).foregroundStyle(.red).padding()
+                } else if isImageMode {
+                    #if canImport(UIKit)
+                    if let img = image {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(8)
+                    }
+                    #endif
+                } else if isPdfMode {
+                    #if canImport(UIKit)
+                    if let data = pdfData {
+                        PDFKitView(data: data)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    #endif
                 } else if binary {
                     Text("Binary file — use Download to save locally.")
                         .font(theme.bodyFont(size: 12))
@@ -703,14 +781,34 @@ private struct FilePreviewSheet: View {
         binary = false
         content = nil
         editing = false
+        #if canImport(UIKit)
+        image = nil
+        pdfData = nil
+        #endif
         defer { loading = false }
         do {
             let (data, response) = try await relay.apiClient.readFile(
                 kind, id: targetId, path: path, server: server,
             )
             let ct = response.value(forHTTPHeaderField: "Content-Type") ?? ""
-            if ct.hasPrefix("text/") || ct.contains("json") || ct.contains("xml") || _hasTextExt(path) {
+            let isText = ct.hasPrefix("text/") || ct.contains("json") || ct.contains("xml") || _hasTextExt(path)
+            let isImage = ct.hasPrefix("image/") || (!isText && _hasImageExt(path))
+            let isPdf = ct == "application/pdf" || (!isText && !isImage && _hasPdfExt(path))
+            if isText {
                 content = String(data: data, encoding: .utf8) ?? "(non-UTF8 text)"
+            } else if isImage {
+                #if canImport(UIKit)
+                image = UIImage(data: data)
+                if image == nil { binary = true }
+                #else
+                binary = true
+                #endif
+            } else if isPdf {
+                #if canImport(UIKit)
+                pdfData = data
+                #else
+                binary = true
+                #endif
             } else {
                 binary = true
             }
@@ -837,19 +935,11 @@ private func _changeColor(_ change: FileChangeEvent.Change) -> Color {
     }
 }
 
-private func _hasTextExt(_ path: String) -> Bool {
-    let ext = path.split(separator: ".").last.map { String($0).lowercased() } ?? ""
-    return [
-        "txt", "md", "markdown", "json", "yaml", "yml", "toml", "ini", "cfg",
-        "csv", "tsv", "log", "py", "js", "ts", "tsx", "jsx", "swift", "go",
-        "rs", "rb", "java", "c", "h", "cpp", "hpp", "cs", "sh", "bash", "zsh",
-        "css", "scss", "html", "xml", "sql", "env", "gitignore",
-    ].contains(ext)
-}
+// `_hasTextExt`, `_hasImageExt`, `_hasPdfExt`, and `isPreviewableFile`
+// live in FileEditorView.swift — shared across this file, the iPad
+// editor, and the row-icon logic.
 
 #if canImport(UIKit)
-import UIKit
-
 private func _presentShareSheet(url: URL) {
     let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
     UIApplication.shared.connectedScenes

@@ -6,9 +6,11 @@ import {
   downloadPath,
   listDir,
   mkdir,
+  probeFile,
   renamePath,
   writeFile,
 } from "../api";
+import { isKnownBinaryExt } from "./FileEditorTab";
 
 type Kind = "project" | "workspace";
 
@@ -417,6 +419,29 @@ function FileTreeView({
     onOpenFile(kind, id, cleaned, server);
   };
 
+  /// Called from a row click. Probes the file first so we can bail
+  /// early on binaries (opening a tab you can't do anything with is
+  /// just noise). Text/image/PDF fall through to the normal open.
+  const tryOpenFile = async (p: string) => {
+    try {
+      const probe = await probeFile(kind, id, p, server);
+      if (probe.kind === "binary") {
+        const filename = p.split("/").pop() ?? p;
+        alert(
+          `Can't preview "${filename}" — it looks like a binary file.\n` +
+          `Use Download from the row menu to save it locally.`,
+        );
+        return;
+      }
+    } catch (e) {
+      // Probe failed — fall through to the normal open path so the
+      // editor tab surfaces the underlying error (404, permission, etc.)
+      // in its own UI.
+      console.warn("probeFile failed, opening tab optimistically:", e);
+    }
+    onOpenFile(kind, id, p, server);
+  };
+
   // ── render ──────────────────────────────────────────────
 
   const recent = useMemo(
@@ -478,7 +503,7 @@ function FileTreeView({
             expanded={expanded}
             loadSubdir={loadSubdir}
             collapseSubdir={collapseSubdir}
-            onOpenFile={(p) => onOpenFile(kind, id, p, server)}
+            onOpenFile={(p) => void tryOpenFile(p)}
             onDelete={handleDelete}
             onRename={handleRename}
             onDownload={handleDownload}
@@ -590,7 +615,9 @@ function DirView({
                 {entry.is_dir ? (isOpen ? "▾" : "▸") : ""}
               </span>
               <span className="flex-1 truncate">
-                {entry.is_dir ? "📁 " : "📄 "}
+                {entry.is_dir
+                  ? "📁 "
+                  : isKnownBinaryExt(entry.name) ? "📦 " : "📄 "}
                 {entry.name}
               </span>
               {!entry.is_dir && (

@@ -1,6 +1,7 @@
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
+import PDFKit
 #endif
 
 /// Full-pane file editor used by the iPad central-area tab system. Loads
@@ -48,6 +49,8 @@ struct FileEditorView: View {
     /// Decoded image bytes for image-typed files.
     #if canImport(UIKit)
     @State private var image: UIImage? = nil
+    /// Raw PDF bytes; PDFKit's PDFView renders them inline.
+    @State private var pdfData: Data? = nil
     #endif
     @State private var lastSeenFileChangeTs: Date = .distantPast
 
@@ -58,6 +61,14 @@ struct FileEditorView: View {
     private var isImageMode: Bool {
         #if canImport(UIKit)
         return image != nil
+        #else
+        return false
+        #endif
+    }
+
+    private var isPdfMode: Bool {
+        #if canImport(UIKit)
+        return pdfData != nil
         #else
         return false
         #endif
@@ -102,7 +113,7 @@ struct FileEditorView: View {
     }
 
     private func openFind() {
-        guard !isBinary, !isImageMode else { return }
+        guard !isBinary, !isImageMode, !isPdfMode else { return }
         findTrigger &+= 1
     }
 
@@ -115,7 +126,7 @@ struct FileEditorView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
-            if !isBinary && !loading && !isImageMode {
+            if !isBinary && !loading && !isImageMode && !isPdfMode {
                 Button { openFind() } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 15))
@@ -215,6 +226,14 @@ struct FileEditorView: View {
                     .background(theme.surface)
             }
             #endif
+        } else if isPdfMode {
+            #if canImport(UIKit)
+            if let data = pdfData {
+                PDFKitView(data: data)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(theme.surface)
+            }
+            #endif
         } else if isBinary {
             Text("Binary file — download it from the file browser.")
                 .font(theme.bodyFont(size: 13))
@@ -251,6 +270,7 @@ struct FileEditorView: View {
         staleBanner = false
         #if canImport(UIKit)
         image = nil
+        pdfData = nil
         #endif
         defer { loading = false }
         do {
@@ -260,6 +280,7 @@ struct FileEditorView: View {
             let ct = response.value(forHTTPHeaderField: "Content-Type") ?? ""
             let isText = ct.hasPrefix("text/") || ct.contains("json") || ct.contains("xml") || _hasTextExt(path)
             let isImage = ct.hasPrefix("image/") || (!isText && _hasImageExt(path))
+            let isPdf = ct == "application/pdf" || (!isText && !isImage && _hasPdfExt(path))
             if isText {
                 let text = String(data: data, encoding: .utf8) ?? ""
                 savedContent = text
@@ -272,6 +293,13 @@ struct FileEditorView: View {
                     // Failed to decode — fall back to binary message.
                     isBinary = true
                 }
+                #else
+                isBinary = true
+                #endif
+                savedContent = nil
+            } else if isPdf {
+                #if canImport(UIKit)
+                pdfData = data
                 #else
                 isBinary = true
                 #endif
@@ -361,7 +389,7 @@ struct FileEditorView: View {
     }
 }
 
-private func _hasTextExt(_ path: String) -> Bool {
+func _hasTextExt(_ path: String) -> Bool {
     let ext = path.split(separator: ".").last.map { String($0).lowercased() } ?? ""
     return [
         "txt", "md", "markdown", "json", "yaml", "yml", "toml", "ini", "cfg",
@@ -371,10 +399,66 @@ private func _hasTextExt(_ path: String) -> Bool {
     ].contains(ext)
 }
 
-private func _hasImageExt(_ path: String) -> Bool {
+func _hasPdfExt(_ path: String) -> Bool {
+    let ext = path.split(separator: ".").last.map { String($0).lowercased() } ?? ""
+    return ext == "pdf"
+}
+
+/// True when this file type can be previewed in-app (text editor,
+/// image, or PDF). Used at file-load time to route the raw bytes.
+func isPreviewableFile(_ path: String) -> Bool {
+    return _hasTextExt(path) || _hasImageExt(path) || _hasPdfExt(path)
+}
+
+/// Extensions we're confident are binary — used for row icons only.
+/// Extensionless files like README/Dockerfile/Makefile land in the
+/// "unknown" bucket and stay neutral in the browser row; the byte-level
+/// probe on click is the real gate.
+private let _KNOWN_BINARY_EXTS: Set<String> = [
+    "exe", "dll", "so", "dylib", "class", "jar", "wasm", "o", "a", "lib",
+    "bin", "dat", "iso",
+    "zip", "tar", "tgz", "gz", "bz2", "xz", "7z", "rar",
+    "mp3", "mp4", "mov", "mkv", "avi", "webm", "wav", "flac", "ogg", "m4a",
+    "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
+    "psd", "ai", "sketch", "fig",
+    "ttf", "otf", "woff", "woff2", "eot",
+]
+
+func isKnownBinaryExt(_ path: String) -> Bool {
+    let ext = path.split(separator: ".").last.map { String($0).lowercased() } ?? ""
+    return _KNOWN_BINARY_EXTS.contains(ext)
+}
+
+func _hasImageExt(_ path: String) -> Bool {
     let ext = path.split(separator: ".").last.map { String($0).lowercased() } ?? ""
     return [
         "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff",
-        "heic", "heif", "ico",
+        "heic", "heif", "ico", "svg", "avif",
     ].contains(ext)
 }
+
+#if canImport(UIKit)
+/// Thin SwiftUI wrapper around PDFKit's `PDFView` so a PDF file's bytes
+/// can be shown inline in the editor tab. Auto-scales to fit width.
+struct PDFKitView: UIViewRepresentable {
+    let data: Data
+
+    func makeUIView(context: Context) -> PDFView {
+        let v = PDFView()
+        v.autoScales = true
+        v.displayMode = .singlePageContinuous
+        v.displayDirection = .vertical
+        v.document = PDFDocument(data: data)
+        v.backgroundColor = .clear
+        return v
+    }
+
+    func updateUIView(_ v: PDFView, context: Context) {
+        // Rebuild only if bytes change — comparing NSData identity
+        // avoids a full re-parse on unrelated re-renders.
+        if v.document?.dataRepresentation() != data {
+            v.document = PDFDocument(data: data)
+        }
+    }
+}
+#endif

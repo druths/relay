@@ -109,6 +109,30 @@ export async function readFile(
   return resp;
 }
 
+export type FileProbeKind = "text" | "image" | "pdf" | "binary";
+
+export interface FileProbe {
+  kind: FileProbeKind;
+  content_type: string;
+}
+
+/** Cheap byte-level classification. Backend sniffs the first ~8KB via a
+ *  Range request against ark, applies a git-style heuristic, and returns
+ *  the kind. Use before opening a preview so we can bail on binary files
+ *  without ever creating a tab. */
+export async function probeFile(
+  kind: "project" | "workspace", id: string, path: string, server?: string,
+): Promise<FileProbe> {
+  const t = fsTarget(kind, id, server);
+  const suffix = `/${path.replace(/^\/+/, "")}`;
+  // `op=probe` piggybacks the existing file URL; add it alongside any
+  // pre-existing query string (e.g. `?server=...`).
+  const q = t.q ? `${t.q}&op=probe` : "?op=probe";
+  const resp = await apiFetch(`${t.base}${suffix}${q}`);
+  if (!resp.ok) throw new Error(`probeFile failed: ${resp.status}`);
+  return resp.json();
+}
+
 export async function writeFile(
   kind: "project" | "workspace", id: string, path: string, body: Blob | string,
   server?: string,

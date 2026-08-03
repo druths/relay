@@ -123,6 +123,32 @@ extension APIClient {
         )
     }
 
+    struct FileProbe: Decodable {
+        let kind: String        // "text" | "image" | "pdf" | "binary"
+        let contentType: String
+
+        enum CodingKeys: String, CodingKey {
+            case kind
+            case contentType = "content_type"
+        }
+    }
+
+    /// Ask the backend to classify a file by sniffing its first ~8KB
+    /// (git-style: NULL byte / non-printable ratio → binary; magic bytes
+    /// for image/PDF; UTF-8 decode gate). Cheap enough to run on every
+    /// file open. Returned `kind` is one of "text" | "image" | "pdf" |
+    /// "binary".
+    func probeFile(
+        _ kind: FsKind, id: String, path: String, server: String? = nil,
+    ) async throws -> FileProbe {
+        let (base, q) = _fsBase(kind, id: id, server: server)
+        let sep = q.isEmpty ? "?" : "&"
+        return try await request(
+            "GET",
+            path: "\(base)/\(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))\(q)\(sep)op=probe",
+        )
+    }
+
     func writeFile(_ kind: FsKind, id: String, path: String, body: Data, server: String? = nil) async throws {
         let (base, q) = _fsBase(kind, id: id, server: server)
         let target = "\(base)/\(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))\(q)"

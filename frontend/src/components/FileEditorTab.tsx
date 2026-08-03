@@ -25,8 +25,11 @@ interface Props {
 }
 
 const IMAGE_EXT_ALLOWLIST = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "ico",
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif",
+  "ico", "svg", "avif",
 ]);
+
+const PDF_EXT_ALLOWLIST = new Set(["pdf"]);
 
 const TEXT_EXT_ALLOWLIST = new Set([
   "txt", "md", "markdown", "json", "yaml", "yml", "toml", "ini", "cfg",
@@ -35,14 +38,44 @@ const TEXT_EXT_ALLOWLIST = new Set([
   "css", "scss", "html", "xml", "sql", "env", "gitignore",
 ]);
 
+function _extOf(path: string): string {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
+
 function _hasTextExt(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  return TEXT_EXT_ALLOWLIST.has(ext);
+  return TEXT_EXT_ALLOWLIST.has(_extOf(path));
 }
 
 function _hasImageExt(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  return IMAGE_EXT_ALLOWLIST.has(ext);
+  return IMAGE_EXT_ALLOWLIST.has(_extOf(path));
+}
+
+function _hasPdfExt(path: string): boolean {
+  return PDF_EXT_ALLOWLIST.has(_extOf(path));
+}
+
+/** True when the file browser can preview this file in-app — used by the
+ *  file browser to pick between "openable" and "binary" row icons. */
+export function isPreviewableFile(path: string): boolean {
+  return _hasTextExt(path) || _hasImageExt(path) || _hasPdfExt(path);
+}
+
+/** Extensions we're confident are binary — used for row icons so we don't
+ *  falsely mark extensionless text like README/Dockerfile/Makefile as
+ *  binary. Anything not on this list stays neutral in the browser row;
+ *  the byte-level probe on click is what really decides. */
+const KNOWN_BINARY_EXT = new Set([
+  "exe", "dll", "so", "dylib", "class", "jar", "wasm", "o", "a", "lib",
+  "bin", "dat", "iso",
+  "zip", "tar", "tgz", "gz", "bz2", "xz", "7z", "rar",
+  "mp3", "mp4", "mov", "mkv", "avi", "webm", "wav", "flac", "ogg", "m4a",
+  "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
+  "psd", "ai", "sketch", "fig",
+  "ttf", "otf", "woff", "woff2", "eot",
+]);
+
+export function isKnownBinaryExt(path: string): boolean {
+  return KNOWN_BINARY_EXT.has(_extOf(path));
 }
 
 export function FileEditorTab({
@@ -53,6 +86,8 @@ export function FileEditorTab({
   const [isBinary, setIsBinary] = useState(false);
   /** Object URL for an image preview. Revoked on path/type change. */
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  /** Object URL for an inline PDF preview (rendered in an iframe). */
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -92,13 +127,15 @@ export function FileEditorTab({
     setLoading(true);
     setError(null);
     setStaleBanner(false);
-    // Revoke any stale image url before swapping in a new one.
+    // Revoke any stale blob urls before swapping in new ones.
     setImageUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setPdfUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
     try {
       const resp = await readFile(kind, targetId, path, server);
       const ct = resp.headers.get("content-type") ?? "";
       const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml") || _hasTextExt(path);
       const isImage = ct.startsWith("image/") || (!isText && _hasImageExt(path));
+      const isPdf = ct === "application/pdf" || (!isText && !isImage && _hasPdfExt(path));
       if (isText) {
         const text = await resp.text();
         setSavedContent(text);
@@ -108,6 +145,18 @@ export function FileEditorTab({
       } else if (isImage) {
         const blob = await resp.blob();
         setImageUrl(URL.createObjectURL(blob));
+        setIsBinary(false);
+        setSavedContent(null);
+        setNotOnDisk(false);
+      } else if (isPdf) {
+        // Force the blob's MIME to application/pdf so the browser routes
+        // it to its built-in PDF renderer inside the iframe. Some ark
+        // paths serve PDFs as `application/octet-stream`.
+        const raw = await resp.blob();
+        const blob = raw.type === "application/pdf"
+          ? raw
+          : new Blob([raw], { type: "application/pdf" });
+        setPdfUrl(URL.createObjectURL(blob));
         setIsBinary(false);
         setSavedContent(null);
         setNotOnDisk(false);
@@ -131,10 +180,13 @@ export function FileEditorTab({
     }
   }, [kind, targetId, path, server]);
 
-  // Clean up the blob url when the component unmounts so we don't leak.
+  // Clean up blob urls when the component unmounts so we don't leak.
   useEffect(() => () => {
     if (imageUrl) URL.revokeObjectURL(imageUrl);
   }, [imageUrl]);
+  useEffect(() => () => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+  }, [pdfUrl]);
 
   useEffect(() => {
     load();
@@ -204,7 +256,7 @@ export function FileEditorTab({
     <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-gray-950 relative">
       <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-800 text-xs">
         <span className="font-mono text-gray-400 truncate flex-1" title={path}>{path}</span>
-        {!isBinary && !imageUrl && !loading && (
+        {!isBinary && !imageUrl && !pdfUrl && !loading && (
           <button
             onClick={openFind}
             title="Find (⌘F)"
@@ -213,7 +265,7 @@ export function FileEditorTab({
             <SearchIcon />
           </button>
         )}
-        {!isBinary && !imageUrl && !loading && (
+        {!isBinary && !imageUrl && !pdfUrl && !loading && (
           <button
             onClick={() => setWrap((v) => !v)}
             title={wrap ? "Disable word wrap" : "Enable word wrap"}
@@ -225,7 +277,7 @@ export function FileEditorTab({
             <WrapIcon />
           </button>
         )}
-        {!isBinary && !imageUrl && !loading && (
+        {!isBinary && !imageUrl && !pdfUrl && !loading && (
           <button
             onClick={save}
             disabled={!isDirty || saving}
@@ -294,12 +346,19 @@ export function FileEditorTab({
             />
           </div>
         )}
+        {!loading && pdfUrl && (
+          <iframe
+            src={pdfUrl}
+            title={path}
+            className="w-full h-full border-0 bg-white"
+          />
+        )}
         {!loading && isBinary && (
           <div className="p-6 text-sm text-gray-500 italic">
             Binary file — open in the file browser to download.
           </div>
         )}
-        {!loading && !isBinary && !imageUrl && savedContent !== null && (
+        {!loading && !isBinary && !imageUrl && !pdfUrl && savedContent !== null && (
           <CodeMirror
             ref={cmRef}
             value={draft}

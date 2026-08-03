@@ -222,6 +222,94 @@ async def delete_project(
 # ── Filesystem passthroughs ────────────────────────────────────────────
 
 
+# ── File-type probe ────────────────────────────────────────────────
+
+# Bytes to sniff before classifying. 8KB is what `git` uses for its own
+# binary-vs-text check — enough to catch NULL bytes in a header, not so
+# much that we punish files hosted on slow storage.
+_PROBE_BYTES = 8192
+
+# Anything above this share of non-printable ASCII in the probe window
+# gets called "binary." Matches git's default heuristic.
+_NON_TEXT_RATIO_CUTOFF = 0.30
+
+
+def _classify_probe_bytes(data: bytes, content_type: str | None) -> str:
+    """Return one of "text", "image", "pdf", "binary" based on the first
+    few bytes of a file. Prefers Content-Type when it's authoritative
+    (image/*, application/pdf); otherwise falls back to a git-style
+    byte scan — a NULL byte or a high non-printable ratio → binary."""
+    ct = (content_type or "").lower().split(";")[0].strip()
+    if ct.startswith("image/"):
+        return "image"
+    if ct == "application/pdf":
+        return "pdf"
+    if not data:
+        # Empty file — treat as text (empty README, .gitkeep, etc.).
+        return "text"
+    # PDF magic — some servers serve as octet-stream but the bytes start
+    # with %PDF- regardless.
+    if data[:5] == b"%PDF-":
+        return "pdf"
+    # Image magics — quick check for the common ones so a .png served
+    # with the wrong Content-Type is still identified.
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image"
+    if data[:4] == b"RIFF" and len(data) > 12 and data[8:12] == b"WEBP":
+        return "image"
+    # NULL byte in the probe window → definitely binary.
+    if b"\x00" in data:
+        return "binary"
+    # Non-printable ratio — allow common whitespace (\t \n \r \f), reject
+    # other control bytes.
+    printable = 0
+    for b in data:
+        if b == 0x09 or b == 0x0A or b == 0x0C or b == 0x0D:
+            printable += 1
+        elif 0x20 <= b < 0x7F:
+            printable += 1
+        elif b >= 0x80:
+            # UTF-8 continuation / high-bit bytes — count as printable,
+            # the strict decode below will reject genuine garbage.
+            printable += 1
+    if (len(data) - printable) / len(data) > _NON_TEXT_RATIO_CUTOFF:
+        return "binary"
+    # Final gate: does it decode as UTF-8? Reject if not.
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        # Might be another text encoding but we don't want to guess —
+        # anything not UTF-8 gets treated as binary for preview purposes.
+        return "binary"
+    return "text"
+
+
+async def _probe_via_ark(
+    base: str, api_key: str | None, *, suffix: str,
+) -> dict[str, str]:
+    """Fetch the first `_PROBE_BYTES` bytes of a file through ark and
+    classify them. Uses HTTP Range so we don't pull the whole file just
+    to decide."""
+    url = f"{base}{suffix}"
+    headers = _auth_headers(api_key)
+    headers["Range"] = f"bytes=0-{_PROBE_BYTES - 1}"
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            resp = await client.get(url, headers=headers)
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Ark unreachable: {exc}")
+    if resp.status_code >= 400 and resp.status_code != 416:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    data = resp.content or b""
+    ct = resp.headers.get("content-type", "")
+    kind = _classify_probe_bytes(data, ct)
+    return {"kind": kind, "content_type": ct}
+
+
 async def _proxy_fs_get(base: str, api_key: str | None, *, suffix: str) -> Response:
     """Pass through a filesystem GET to ark. Streams bytes for files; returns
     JSON for directory listings (ark sets the right Content-Type for us)."""
@@ -425,6 +513,10 @@ async def project_file_or_listing(
             media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{archive_name}"'},
         )
+    if op == "probe":
+        return await _probe_via_ark(
+            base, api_key, suffix=f"/projects/{project_id}/files/{path}",
+        )
     return await _proxy_fs_get(
         base, api_key, suffix=f"/projects/{project_id}/files/{path}",
     )
@@ -527,6 +619,10 @@ async def workspace_file_or_listing(
             content=data,
             media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{archive_name}"'},
+        )
+    if op == "probe":
+        return await _probe_via_ark(
+            base, api_key, suffix=f"/agents/{name}/files/{path}",
         )
     return await _proxy_fs_get(base, api_key, suffix=f"/agents/{name}/files/{path}")
 
