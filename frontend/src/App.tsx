@@ -476,8 +476,11 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        {/* Session list */}
-        {relay.connected && relay.sessions.length > 0 && (
+        {/* Session list. Show the header + search whenever there's at
+            least one session OR the user has an active search / label
+            filter — otherwise a search that returns zero results would
+            hide the search box itself, leaving no way to clear it. */}
+        {relay.connected && (relay.sessions.length > 0 || sessionSearch || labelFilter) && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 px-1">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider section-label">
@@ -509,6 +512,11 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                 )}
               </div>
             </div>
+            {filteredSessions.length === 0 && (
+              <div className="px-3 py-2 text-xs text-gray-500 italic">
+                No sessions match.
+              </div>
+            )}
             <div className="space-y-1" ref={menuRef}>
               {filteredSessions.map((s) => (
                 <div key={s.session_id} className="group relative">
