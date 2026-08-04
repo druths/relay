@@ -62,6 +62,24 @@ final class RelayViewModel {
         let contextWindow: Int?
     }
     var compacting: [String: CompactingState] = [:]
+
+    /// Ark mid-turn activity — thinking traces, tool calls, tool
+    /// results. Accumulated for the currently-viewed turn; cleared on
+    /// text_done, sendMessage, or session change.
+    enum AgentActivity: Identifiable, Equatable {
+        case thinking(id: UUID, text: String)
+        case toolCall(id: UUID, callId: String, name: String, input: JSONValue)
+        case toolResult(id: UUID, callId: String, output: JSONValue, isError: Bool)
+
+        var id: UUID {
+            switch self {
+            case .thinking(let id, _): return id
+            case .toolCall(let id, _, _, _): return id
+            case .toolResult(let id, _, _, _): return id
+            }
+        }
+    }
+    var activities: [AgentActivity] = []
     var sttAvailable = false
     var sttSettings: PlatformSettings?
     var outputMode: OutputMode = .speaker
@@ -233,6 +251,8 @@ final class RelayViewModel {
                 sessionMessages[i].isStreaming = false
                 sessionMessages[i].isInterrupted = true
             }
+            // Any activity from the interrupted turn is stale.
+            activities.removeAll()
         }
 
         let message = Message(role: .user, textContent: text, createdAt: Date())
@@ -675,6 +695,7 @@ final class RelayViewModel {
                 pendingAgentName = payload.agentName
                 activeSessionLabels = payload.labels
                 sessionMessages = []
+                activities.removeAll()
                 Task {
                     await audio.player.waitUntilFinished()
                     guard pendingSessionId != nil else { return }  // session was cancelled
@@ -705,6 +726,7 @@ final class RelayViewModel {
                 activeAgentName = payload.agentName
                 activeSessionLabels = payload.labels
                 sessionMessages = []
+                activities.removeAll()
                 audio.handleSessionChange(newSessionId: payload.sessionId)
                 Task { await fetchSessions() }
             }
@@ -757,6 +779,7 @@ final class RelayViewModel {
             activeAgentName = nil
             activeSessionLabels = []
             sessionMessages = []
+            activities.removeAll()
             audio.handleSessionChange(newSessionId: nil)
             if isLiveMode { updateLiveActivity() }
             if oldSessionId != nil {
@@ -845,6 +868,13 @@ final class RelayViewModel {
             if sessionMessages[lastIdx].isStreaming {
                 sessionMessages[lastIdx].textContent += payload.delta
             }
+            // Once visible text starts flowing, hide the activity strip
+            // — the bubble itself is now the progress indicator. Any
+            // mid-response tool call re-populates it. Guard on isEmpty
+            // so we don't fire an observation on every delta.
+            if !activities.isEmpty {
+                activities.removeAll()
+            }
 
         case .textDone(let payload):
             guard isInSession, !sessionMessages.isEmpty else { break }
@@ -859,6 +889,9 @@ final class RelayViewModel {
                     sessionMessages[lastIdx].createdAt = Date()
                 }
             }
+            // Turn's over — clear the "current activity" strip. The
+            // bubble now shows the response itself.
+            activities.removeAll()
 
         case .audioStart(let payload):
             guard isLiveMode else { break }
@@ -975,6 +1008,40 @@ final class RelayViewModel {
                 path: payload.path,
                 change: FileChangeEvent.Change(rawValue: payload.change) ?? .modified,
             ))
+
+        case .agentActivity(let payload):
+            // Only track activity for the currently-viewed session — the
+            // strip reflects "what is THIS session doing right now."
+            guard payload.sessionId == activeSessionId else { break }
+            switch payload.kind {
+            case "thinking":
+                let delta = payload.detail.stringForKey("delta") ?? ""
+                // Fold consecutive thinking deltas into the last entry
+                // so the strip shows one growing "thinking" item rather
+                // than a new row per token.
+                if let last = activities.last,
+                   case .thinking(let id, let existing) = last {
+                    activities[activities.count - 1] = .thinking(id: id, text: existing + delta)
+                } else {
+                    activities.append(.thinking(id: UUID(), text: delta))
+                }
+            case "tool_call":
+                let callId = payload.detail.stringForKey("id") ?? ""
+                let name = payload.detail.stringForKey("name") ?? "tool"
+                let input = payload.detail.valueForKey("input") ?? .null
+                activities.append(.toolCall(
+                    id: UUID(), callId: callId, name: name, input: input,
+                ))
+            case "tool_result":
+                let callId = payload.detail.stringForKey("id") ?? ""
+                let output = payload.detail.valueForKey("output") ?? .null
+                let isError = payload.detail.boolForKey("error") ?? false
+                activities.append(.toolResult(
+                    id: UUID(), callId: callId, output: output, isError: isError,
+                ))
+            default:
+                break
+            }
 
         case .compactionStarted(let payload):
             compacting[payload.sessionId] = CompactingState(

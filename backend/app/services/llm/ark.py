@@ -557,7 +557,12 @@ class ArkProvider(LLMProvider):
                     logger.warning("Ark error event: %s", event.get("message"))
                 elif etype == "done":
                     break
-                # tool_call / tool_result / thinking filtered.
+                elif etype in ("thinking", "tool_call", "tool_result"):
+                    # Surface as an opaque dict so downstream (agent_manager
+                    # → conversation_manager) can translate it into a
+                    # user-visible `agent_activity` WS event. Distinguished
+                    # from str deltas by isinstance(chunk, dict).
+                    yield {"__activity__": etype, "payload": event}
         except asyncio.CancelledError:
             await conn.send_stop(ark_session_id)
             raise

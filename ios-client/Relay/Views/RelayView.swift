@@ -311,6 +311,9 @@ struct RelayView: View {
             )
             .frame(maxHeight: .infinity)
 
+            if activeSessionIsArk {
+                AgentActivityStrip(relay: relay)
+            }
             CompactingChip(relay: relay)
             InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
         }
@@ -791,7 +794,10 @@ struct RelayView: View {
                 )
                 .frame(maxHeight: .infinity)
 
-                CompactingChip(relay: relay)
+                if activeSessionIsArk {
+                AgentActivityStrip(relay: relay)
+            }
+            CompactingChip(relay: relay)
             InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

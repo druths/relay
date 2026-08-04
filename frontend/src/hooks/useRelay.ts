@@ -26,6 +26,14 @@ export interface CompactingState {
   contextWindow: number | null;
 }
 
+/** Ark's mid-turn activity: thinking traces, tool calls, tool results.
+ *  Client accumulates these into a per-turn list for the "what is the
+ *  agent doing right now" strip. Cleared on text_done / user send. */
+export type AgentActivity =
+  | { kind: "thinking"; text: string; ts: number }
+  | { kind: "tool_call"; id: string; name: string; input: unknown; ts: number }
+  | { kind: "tool_result"; id: string; output: unknown; error: boolean; ts: number };
+
 export interface RelayState {
   connected: boolean;
   activeSessionId: string | null;
@@ -43,6 +51,9 @@ export interface RelayState {
   fileChanges: FileChangeEvent[];
   /** Map of Relay session_id → in-flight compaction snapshot. */
   compacting: Record<string, CompactingState>;
+  /** Ark activity events for the currently-running agent turn. Cleared
+   *  when the turn ends (text_done) or the user sends a new message. */
+  activities: AgentActivity[];
 }
 
 export function useRelay() {
@@ -67,6 +78,7 @@ export function useRelay() {
     projects: [],
     fileChanges: [],
     compacting: {},
+    activities: [],
   });
 
   // Fetch agent list
@@ -264,6 +276,7 @@ export function useRelay() {
             activeAgentName: event.payload.agent_name,
             activeSessionLabels: event.payload.labels || [],
             sessionMessages: [],
+            activities: [],
           }));
           fetchSessions();
           break;
@@ -276,6 +289,7 @@ export function useRelay() {
             activeAgentName: null,
             activeSessionLabels: [],
             sessionMessages: [],
+            activities: [],
           }));
           fetchSessions();
           break;
@@ -326,7 +340,13 @@ export function useRelay() {
                 text_content: last.text_content + event.payload.delta,
               };
             }
-            return { ...s, sessionMessages: msgs };
+            // Once visible text starts flowing, hide the activity strip
+            // — the bubble itself is now the progress indicator. Any
+            // mid-response tool call re-populates it. Preserve
+            // reference-identity when already empty so we don't churn
+            // a re-render on every delta.
+            const activities = s.activities.length === 0 ? s.activities : [];
+            return { ...s, sessionMessages: msgs, activities };
           });
           break;
 
@@ -347,7 +367,10 @@ export function useRelay() {
                 created_at: last.created_at ?? new Date().toISOString(),
               };
             }
-            return { ...s, sessionMessages: msgs };
+            // Turn's over — clear the "current activity" strip. The
+            // activities were only relevant while the agent was still
+            // working; the bubble now shows the response itself.
+            return { ...s, sessionMessages: msgs, activities: [] };
           });
           break;
 
@@ -548,6 +571,52 @@ export function useRelay() {
           break;
         }
 
+        case "agent_activity":
+          setState((s) => {
+            // Ignore activity for a non-active session — the strip
+            // only reflects what the currently-viewed session is doing.
+            if (event.payload.session_id !== s.activeSessionId) return s;
+            const detail = event.payload.detail as Record<string, unknown>;
+            const now = Date.now();
+            if (event.payload.kind === "thinking") {
+              const delta = String(detail.delta ?? "");
+              // Accumulate consecutive thinking deltas into a single
+              // activity entry — otherwise we'd get a new row per token.
+              const last = s.activities[s.activities.length - 1];
+              if (last && last.kind === "thinking") {
+                const updated: AgentActivity = { ...last, text: last.text + delta, ts: now };
+                return { ...s, activities: [...s.activities.slice(0, -1), updated] };
+              }
+              return { ...s, activities: [...s.activities, { kind: "thinking", text: delta, ts: now }] };
+            }
+            if (event.payload.kind === "tool_call") {
+              return {
+                ...s,
+                activities: [...s.activities, {
+                  kind: "tool_call",
+                  id: String(detail.id ?? ""),
+                  name: String(detail.name ?? "tool"),
+                  input: detail.input,
+                  ts: now,
+                }],
+              };
+            }
+            if (event.payload.kind === "tool_result") {
+              return {
+                ...s,
+                activities: [...s.activities, {
+                  kind: "tool_result",
+                  id: String(detail.id ?? ""),
+                  output: detail.output,
+                  error: Boolean(detail.error),
+                  ts: now,
+                }],
+              };
+            }
+            return s;
+          });
+          break;
+
         case "compaction_started":
           setState((s) => ({
             ...s,
@@ -673,6 +742,9 @@ export function useRelay() {
         return {
           ...s,
           sessionMessages: [...swept, { role: "user", text_content: text, created_at: now }],
+          // Wipe any leftover activity from the interrupted turn so the
+          // strip doesn't stale-render into the new turn.
+          activities: [],
         };
       }
       return {

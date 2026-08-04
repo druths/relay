@@ -24,6 +24,7 @@
 		283437E21EA7160F42795ECB /* AudioPlayerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A54EAB298182DB707F0D36A /* AudioPlayerService.swift */; };
 		2973FB0270D7410A3122FA14 /* live_end_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69AE7D992CD3BE725117CEB7 /* live_end_1.wav */; };
 		2ADD40A2159E60D16579813F /* WebSocketEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 071718BDCBB8F15D92597F38 /* WebSocketEvent.swift */; };
+		2BADAC4FEA45ACE7D4FCEF77 /* AgentActivityStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 990911AEA0E3DD0DF5C3C264 /* AgentActivityStrip.swift */; };
 		2E2D6803F353C124CFB03BAE /* PlatformSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61FD94630C73BA584916A9DB /* PlatformSettings.swift */; };
 		3030079E872051F3413460F7 /* AgentManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */; };
 		31BDFBA3E636C62A6CA73390 /* CreateChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D58D290F2871D77D97152DF /* CreateChatSheet.swift */; };
@@ -161,6 +162,7 @@
 		948EF6B3DA85FF1BA8CFC6EE /* RelayApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayApp.swift; sourceTree = "<group>"; };
 		95916EC95C1B32173720A5D2 /* Project.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Project.swift; sourceTree = "<group>"; };
 		9692A36756E86694D6DCF64F /* SessionsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsAPI.swift; sourceTree = "<group>"; };
+		990911AEA0E3DD0DF5C3C264 /* AgentActivityStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentActivityStrip.swift; sourceTree = "<group>"; };
 		99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserView.swift; sourceTree = "<group>"; };
 		9C16E77EE957B8D8F2CB9659 /* RelayColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayColors.swift; sourceTree = "<group>"; };
 		A2C16BE961C550509F0634F5 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
@@ -203,6 +205,7 @@
 		107B34D8180D73B0E645BFA8 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				990911AEA0E3DD0DF5C3C264 /* AgentActivityStrip.swift */,
 				C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */,
 				E587D02A8BB568FC7933144B /* AgentSelector.swift */,
 				54D179EE498262D338A18559 /* ChatMessageField.swift */,
@@ -522,6 +525,7 @@
 				7EC37AC7819388842E7E974D /* ActivityLog.swift in Sources */,
 				77EDE977F3525B381A8C675D /* ActivityLogView.swift in Sources */,
 				3EC69077C140DED12C6E435F /* Agent.swift in Sources */,
+				2BADAC4FEA45ACE7D4FCEF77 /* AgentActivityStrip.swift in Sources */,
 				3030079E872051F3413460F7 /* AgentManagementView.swift in Sources */,
 				901CFC9A32A9F29842303390 /* AgentManagementViewModel.swift in Sources */,
 				029C2B8AB2DA8C802D01577D /* AgentSelector.swift in Sources */,

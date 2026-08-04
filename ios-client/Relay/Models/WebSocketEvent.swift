@@ -29,6 +29,7 @@ enum WebSocketEvent {
     case compactionCompleted(CompactionCompletedPayload)
     case compactionFailed(CompactionFailedPayload)
     case compactionSkipped(CompactionSkippedPayload)
+    case agentActivity(AgentActivityPayload)
     case error(ErrorPayload)
 }
 
@@ -358,6 +359,22 @@ struct CompactionSkippedPayload: Codable {
     }
 }
 
+/// Streamed mid-turn from ark: `thinking` deltas, `tool_call`
+/// invocations, and `tool_result` outputs. The `detail` blob is ark's
+/// raw event body — clients read it as opaque JSON so we don't need
+/// to keep this in lockstep with ark's schema as it evolves.
+struct AgentActivityPayload: Codable {
+    let sessionId: String
+    let speaker: String
+    let kind: String        // "thinking" | "tool_call" | "tool_result"
+    let detail: JSONValue
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case speaker, kind, detail
+    }
+}
+
 // MARK: - Decoding
 
 extension WebSocketEvent {
@@ -446,6 +463,8 @@ extension WebSocketEvent {
                 return .compactionFailed(try decoder.decode(CompactionFailedPayload.self, from: payloadData))
             case "compaction_skipped":
                 return .compactionSkipped(try decoder.decode(CompactionSkippedPayload.self, from: payloadData))
+            case "agent_activity":
+                return .agentActivity(try decoder.decode(AgentActivityPayload.self, from: payloadData))
             case "error":
                 return .error(try decoder.decode(ErrorPayload.self, from: payloadData))
             default:
@@ -482,7 +501,7 @@ struct AnyCodablePayload: Codable {
 /// round-tripping raw payload JSON, and by `SessionLeftPayload.detail`
 /// (and any future payload that needs to carry an open-shaped object
 /// without losing fidelity for diagnostics).
-enum JSONValue: Codable, Sendable {
+enum JSONValue: Codable, Sendable, Equatable {
     case string(String)
     case number(Double)
     case bool(Bool)
@@ -532,6 +551,26 @@ enum JSONValue: Codable, Sendable {
         case .array(let v): return v.map(\.anyValue)
         case .null: return NSNull()
         }
+    }
+
+    // ── Convenience lookups for object values ────────────────────────
+    // Used by handlers that receive open-shaped payloads (e.g.
+    // AgentActivityPayload.detail) and want to pluck named fields
+    // without unwrapping the whole enum by hand.
+
+    func valueForKey(_ key: String) -> JSONValue? {
+        if case .object(let dict) = self { return dict[key] }
+        return nil
+    }
+
+    func stringForKey(_ key: String) -> String? {
+        if case .string(let s) = valueForKey(key) ?? .null { return s }
+        return nil
+    }
+
+    func boolForKey(_ key: String) -> Bool? {
+        if case .bool(let b) = valueForKey(key) ?? .null { return b }
+        return nil
     }
 }
 

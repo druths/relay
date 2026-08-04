@@ -931,6 +931,21 @@ async def handle_session_message_stream(
         if isinstance(chunk, agent_manager.ResponseMeta):
             response_meta = chunk.metadata
             continue
+        # Activity dicts flow from the ark provider when it observes
+        # thinking / tool_call / tool_result events during a turn.
+        # Forward as a dedicated `agent_activity` event so the client
+        # can render its "current activity" strip; not persisted.
+        if isinstance(chunk, dict) and "__activity__" in chunk:
+            yield {
+                "type": "agent_activity",
+                "payload": {
+                    "session_id": str(session_id),
+                    "speaker": agent.name,
+                    "kind": chunk["__activity__"],
+                    "detail": chunk.get("payload") or {},
+                },
+            }
+            continue
         full_response += chunk
         yield {"type": "text_delta", "payload": {"speaker": agent.name, "delta": chunk}}
 

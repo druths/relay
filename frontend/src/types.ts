@@ -359,6 +359,31 @@ export interface WsCompactionSkipped {
   };
 }
 
+// ── Agent activity ────────────────────────────────────────────────
+// Streamed mid-turn from ark: "thinking" (streaming deltas of the
+// model's internal reasoning), "tool_call" (structured invocation),
+// and "tool_result" (the invocation's output). Each event carries
+// the raw ark payload verbatim so clients can render as much detail
+// as they want. Clients accumulate into a per-turn activity list
+// that clears on text_done / new user send.
+
+export type AgentActivityKind = "thinking" | "tool_call" | "tool_result";
+
+export interface WsAgentActivity {
+  type: "agent_activity";
+  payload: {
+    session_id: string;
+    speaker: string;
+    kind: AgentActivityKind;
+    /** Raw ark event body. Shapes:
+     *  - thinking: `{ type: "thinking", delta: string }`
+     *  - tool_call: `{ type: "tool_call", id, name, input }`
+     *  - tool_result: `{ type: "tool_result", id, output, error }`
+     */
+    detail: Record<string, unknown>;
+  };
+}
+
 export type WsEvent =
   | WsStateUpdate
   | WsTextEvent
@@ -386,4 +411,5 @@ export type WsEvent =
   | WsCompactionCompleted
   | WsCompactionFailed
   | WsCompactionSkipped
+  | WsAgentActivity
   | WsError;

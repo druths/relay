@@ -5,6 +5,7 @@ import { useRelay } from "./hooks/useRelay";
 import { StatusOrb } from "./components/StatusOrb";
 import { ConversationLog } from "./components/ConversationLog";
 import { TextInput } from "./components/TextInput";
+import { AgentActivityStrip } from "./components/AgentActivityStrip";
 import { AgentSelector } from "./components/AgentSelector";
 import { AgentManagement } from "./components/AgentManagement";
 import { ProjectManager } from "./components/ProjectManager";
@@ -980,6 +981,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             activeAgentName={relay.activeAgentName}
             diagnostics={diagnostics}
           />
+          {isArkAgent && <AgentActivityStrip activities={relay.activities} />}
           {relay.activeSessionId && relay.compacting[relay.activeSessionId] && (
             <div className="px-4 py-1.5 border-t border-amber-900/40 bg-amber-950/40">
               <span className="inline-flex items-center gap-2 text-[11px] font-mono text-amber-200">
