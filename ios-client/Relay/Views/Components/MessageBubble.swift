@@ -61,6 +61,10 @@ struct MessageBubble: View {
         case .operator: "Operator"
         case .agent: "Agent"
         case .system: ""
+        // compaction rows are rendered by CompactionDivider in
+        // ConversationLog and never reach MessageBubble; kept here so
+        // the switch is exhaustive.
+        case .compaction: ""
         }
     }
 
@@ -70,6 +74,7 @@ struct MessageBubble: View {
         case .operator: theme.operatorBubble
         case .agent: theme.agentBubble
         case .system: .clear
+        case .compaction: .clear
         }
     }
 

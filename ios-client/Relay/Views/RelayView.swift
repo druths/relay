@@ -39,6 +39,12 @@ struct RelayView: View {
     @State private var createChatAgent: Agent? = nil
     /// When set, present the Endpoint-check sheet for this agent.
     @State private var endpointCheckAgent: Agent? = nil
+    /// When non-nil, present the "Compact this session?" confirm dialog
+    /// against this session id. Cleared on confirm / cancel.
+    @State private var compactConfirmSessionId: String? = nil
+    /// Server-side error text from the last compaction trigger, surfaced
+    /// as an alert when non-nil.
+    @State private var compactError: String? = nil
 
     /// Per-session file tabs for the iPad central pane. Ephemeral —
     /// cleared whenever the active session changes. The conversation is
@@ -170,6 +176,16 @@ struct RelayView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .modifier(CompactSessionAlerts(
+            compactConfirmSessionId: $compactConfirmSessionId,
+            compactError: $compactError,
+            onConfirm: { sid in
+                Task {
+                    do { try await relay.compactSession(sid) }
+                    catch { compactError = String(describing: error) }
+                }
+            },
+        ))
         .modifier(DirtyCloseAlert(
             pendingCloseTabId: $pendingCloseTabId,
             tabPath: { tid in openFileTabs.first(where: { $0.tabId == tid })?.path },
@@ -295,6 +311,7 @@ struct RelayView: View {
             )
             .frame(maxHeight: .infinity)
 
+            CompactingChip(relay: relay)
             InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
         }
     }
@@ -542,6 +559,22 @@ struct RelayView: View {
         return relay.agents.first(where: { $0.agentId == s.agentId })?.llmProvider == "ark"
     }
 
+    /// True when the active session is backed by an ark agent — the
+    /// only case where compaction is meaningful (other providers don't
+    /// expose the endpoint).
+    private var activeSessionIsArk: Bool {
+        guard let s = activeSession else { return false }
+        return relay.agents.first(where: { $0.agentId == s.agentId })?.llmProvider == "ark"
+    }
+
+    /// True while ark is compacting the active session — used to disable
+    /// the menu item so the user can't kick off a second compaction
+    /// while one is running.
+    private var activeSessionIsCompacting: Bool {
+        guard let sid = relay.activeSessionId else { return false }
+        return relay.compacting[sid] != nil
+    }
+
     /// Look up the project name for a session's `projectId` against the
     /// view-model's cached projects list. Returns nil if the session isn't
     /// bound or the project hasn't loaded yet.
@@ -758,7 +791,8 @@ struct RelayView: View {
                 )
                 .frame(maxHeight: .infinity)
 
-                InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
+                CompactingChip(relay: relay)
+            InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -981,6 +1015,16 @@ struct RelayView: View {
                     "Diagnostics",
                     systemImage: diagnostics ? "checkmark.circle.fill" : "info.circle"
                 )
+            }
+
+            if activeSessionIsArk {
+                Button {
+                    compactError = nil
+                    compactConfirmSessionId = relay.activeSessionId
+                } label: {
+                    Label("Compact Session", systemImage: "text.append")
+                }
+                .disabled(activeSessionIsCompacting)
             }
         } label: {
             ThemedIcon(systemName: "ellipsis")
@@ -1375,6 +1419,51 @@ struct RelayView: View {
         let newLabels = relay.activeSessionLabels + [trimmed]
         Task { await relay.updateSessionLabels(sessionId, labels: newLabels) }
         labelInputText = ""
+    }
+}
+
+/// Confirm + error alerts for the "Compact session" action. Extracted
+/// into a `ViewModifier` for the same reason as `DirtyCloseAlert` —
+/// chaining two more `.alert(...)` calls onto RelayView's body tips
+/// the SwiftUI type-checker over.
+private struct CompactSessionAlerts: ViewModifier {
+    @Binding var compactConfirmSessionId: String?
+    @Binding var compactError: String?
+    let onConfirm: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .alert(
+                "Compact this session?",
+                isPresented: Binding(
+                    get: { compactConfirmSessionId != nil },
+                    set: { if !$0 { compactConfirmSessionId = nil } },
+                ),
+            ) {
+                Button("Compact") {
+                    // Dismiss right away — the visible UI update (chip,
+                    // then divider) arrives via the WS event stream, and
+                    // any POST error is surfaced by the sibling alert.
+                    if let sid = compactConfirmSessionId {
+                        compactConfirmSessionId = nil
+                        onConfirm(sid)
+                    }
+                }
+                Button("Cancel", role: .cancel) { compactConfirmSessionId = nil }
+            } message: {
+                Text("The agent will summarize the conversation so far. Older turns stay visible, but the agent will only see the summary from the next message on.")
+            }
+            .alert(
+                "Compaction failed",
+                isPresented: Binding(
+                    get: { compactError != nil },
+                    set: { if !$0 { compactError = nil } },
+                ),
+            ) {
+                Button("OK", role: .cancel) { compactError = nil }
+            } message: {
+                Text(compactError ?? "")
+            }
     }
 }
 

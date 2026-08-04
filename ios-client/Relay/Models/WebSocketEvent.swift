@@ -25,6 +25,10 @@ enum WebSocketEvent {
     case agentFile(AgentFilePayload)
     case projectFileChanged(ProjectFileChangedPayload)
     case workspaceFileChanged(WorkspaceFileChangedPayload)
+    case compactionStarted(CompactionStartedPayload)
+    case compactionCompleted(CompactionCompletedPayload)
+    case compactionFailed(CompactionFailedPayload)
+    case compactionSkipped(CompactionSkippedPayload)
     case error(ErrorPayload)
 }
 
@@ -287,6 +291,73 @@ struct WorkspaceFileChangedPayload: Codable {
     }
 }
 
+// MARK: - Compaction events
+
+/// Fires when ark starts compacting a session (automatic threshold cross,
+/// reactive `context_too_long`, or a client-invoked POST). Between this
+/// and the matching completed / failed / skipped event, clients should
+/// show a "compacting…" indicator and refuse to send new messages.
+struct CompactionStartedPayload: Codable {
+    let sessionId: String
+    let agentName: String
+    let reason: String
+    let inputTokens: Int?
+    let contextWindow: Int?
+    let model: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case agentName = "agent_name"
+        case reason
+        case inputTokens = "input_tokens"
+        case contextWindow = "context_window"
+        case model
+    }
+}
+
+struct CompactionCompletedPayload: Codable {
+    let sessionId: String
+    let agentName: String
+    let reason: String
+    let summary: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case agentName = "agent_name"
+        case reason, summary
+    }
+}
+
+struct CompactionFailedPayload: Codable {
+    let sessionId: String
+    let agentName: String
+    let reason: String
+    let code: String
+    let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case agentName = "agent_name"
+        case reason, code, message
+    }
+}
+
+struct CompactionSkippedPayload: Codable {
+    let sessionId: String
+    let agentName: String
+    let reason: String
+    let inputTokens: Int?
+    let contextWindow: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case agentName = "agent_name"
+        case reason
+        case inputTokens = "input_tokens"
+        case contextWindow = "context_window"
+    }
+}
+
 // MARK: - Decoding
 
 extension WebSocketEvent {
@@ -367,6 +438,14 @@ extension WebSocketEvent {
                 return .projectFileChanged(try decoder.decode(ProjectFileChangedPayload.self, from: payloadData))
             case "workspace_file_changed":
                 return .workspaceFileChanged(try decoder.decode(WorkspaceFileChangedPayload.self, from: payloadData))
+            case "compaction_started":
+                return .compactionStarted(try decoder.decode(CompactionStartedPayload.self, from: payloadData))
+            case "compaction_completed":
+                return .compactionCompleted(try decoder.decode(CompactionCompletedPayload.self, from: payloadData))
+            case "compaction_failed":
+                return .compactionFailed(try decoder.decode(CompactionFailedPayload.self, from: payloadData))
+            case "compaction_skipped":
+                return .compactionSkipped(try decoder.decode(CompactionSkippedPayload.self, from: payloadData))
             case "error":
                 return .error(try decoder.decode(ErrorPayload.self, from: payloadData))
             default:

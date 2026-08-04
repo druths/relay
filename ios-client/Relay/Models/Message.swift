@@ -27,6 +27,10 @@ struct TokenUsage: Equatable, Codable {
 
 struct MessageMetadata: Equatable, Codable {
     var usage: TokenUsage?
+    /// Set on `role: .compaction` marker rows. Values mirror ark's:
+    /// `auto:proactive`, `auto:reactive`, `client-invoked`,
+    /// `client-supplied`, or a `disabled:*` variant.
+    var reason: String?
 }
 
 struct Message: Identifiable, Equatable {
@@ -44,6 +48,7 @@ struct Message: Identifiable, Equatable {
         case `operator`
         case agent
         case system  // client-side markers (e.g., "Session ended")
+        case compaction  // ark session summary — rendered as a divider
     }
 
     init(
@@ -121,6 +126,7 @@ struct ServerMessage: Codable {
         switch role {
         case "user": messageRole = .user
         case "agent": messageRole = .agent
+        case "compaction": messageRole = .compaction
         default: messageRole = .operator
         }
         let mapped = (attachments ?? []).map {

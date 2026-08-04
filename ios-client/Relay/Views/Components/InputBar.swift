@@ -33,7 +33,13 @@ struct InputBar: View {
     }
 
     private var disabled: Bool {
-        !relay.connected
+        if !relay.connected { return true }
+        // Refuse input while ark is compacting the active session — sending
+        // a message mid-compaction would race the summarizer.
+        if let sid = relay.activeSessionId, relay.compacting[sid] != nil {
+            return true
+        }
+        return false
     }
 
     var body: some View {

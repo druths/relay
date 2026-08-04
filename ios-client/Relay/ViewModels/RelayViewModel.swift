@@ -51,6 +51,17 @@ final class RelayViewModel {
     /// Client-side system markers keyed by sessionId — appended to sessionMessages
     /// on resume so the user can see when a session ended within the app's lifetime.
     private var sessionMarkers: [String: [Message]] = [:]
+
+    /// In-flight ark session compaction, keyed by Relay session_id. Set
+    /// on `compaction_started`, cleared on any of `_completed`/`_failed`/
+    /// `_skipped`. Presence for the active session drives the chip and
+    /// disables the input.
+    struct CompactingState: Equatable {
+        let reason: String
+        let inputTokens: Int?
+        let contextWindow: Int?
+    }
+    var compacting: [String: CompactingState] = [:]
     var sttAvailable = false
     var sttSettings: PlatformSettings?
     var outputMode: OutputMode = .speaker
@@ -368,6 +379,14 @@ final class RelayViewModel {
         } catch {
             print("[Relay] Failed to delete session: \(error)")
         }
+    }
+
+    /// Trigger ark session compaction. The visible UI update (chip on,
+    /// then divider added on completion) arrives via the WS event
+    /// stream, not this call's return. Throws on HTTP error so callers
+    /// can surface the message to the user.
+    func compactSession(_ sessionId: String) async throws {
+        _ = try await apiClient.compactSession(sessionId)
     }
 
     func refreshAgents() async {
@@ -956,6 +975,37 @@ final class RelayViewModel {
                 path: payload.path,
                 change: FileChangeEvent.Change(rawValue: payload.change) ?? .modified,
             ))
+
+        case .compactionStarted(let payload):
+            compacting[payload.sessionId] = CompactingState(
+                reason: payload.reason,
+                inputTokens: payload.inputTokens,
+                contextWindow: payload.contextWindow,
+            )
+
+        case .compactionCompleted(let payload):
+            compacting.removeValue(forKey: payload.sessionId)
+            // Append the summary marker inline only if it's for the
+            // session we're currently viewing. Non-active sessions pick
+            // up the marker next time they're resumed via session_history.
+            if payload.sessionId == activeSessionId {
+                var meta = MessageMetadata()
+                meta.reason = payload.reason
+                sessionMessages.append(Message(
+                    role: .compaction,
+                    textContent: payload.summary,
+                    createdAt: Date(),
+                    metadata: meta,
+                ))
+            }
+
+        case .compactionFailed(let payload):
+            compacting.removeValue(forKey: payload.sessionId)
+            print("[Relay] compaction failed [\(payload.code)]: \(payload.message)")
+
+        case .compactionSkipped(let payload):
+            compacting.removeValue(forKey: payload.sessionId)
+            _ = payload  // no visible UI — the chip just goes away
 
         case .error(let payload):
             print("[Relay] Server error: \(payload.message)")
