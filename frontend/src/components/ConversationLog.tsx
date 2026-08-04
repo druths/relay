@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import type { Message, FileAttachment } from "../types";
@@ -138,6 +138,9 @@ export function ConversationLog({
   return (
     <div className="flex-1 overflow-y-auto space-y-3 p-4">
       {messages.map((msg, i) => {
+        if (msg.role === "compaction") {
+          return <CompactionDivider key={i} msg={msg} />;
+        }
         const usage = msg.metadata?.usage;
         const totalTokens =
           (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
@@ -236,4 +239,53 @@ export function ConversationLog({
       <div ref={endRef} />
     </div>
   );
+}
+
+// ── Compaction divider ───────────────────────────────────────────────
+
+/** Renders the "Session compacted" marker inline in the transcript.
+ *  A full-width divider with a chip label; the summary body is
+ *  collapsed by default and revealed on click. Older messages above
+ *  are NOT collapsed — the user can still scroll back through them. */
+function CompactionDivider({ msg }: { msg: Message }) {
+  const [expanded, setExpanded] = useState(false);
+  const reason = msg.metadata?.reason ?? "";
+  const label = _compactionReasonLabel(reason);
+  return (
+    <div className="my-4 flex items-center gap-3 px-1">
+      <div className="flex-1 border-t border-amber-800/50" />
+      <div className="flex flex-col items-center gap-1 max-w-[80%]">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full
+                     bg-amber-950/60 border border-amber-800/60 text-[11px]
+                     font-mono text-amber-200 hover:bg-amber-900/60 transition-colors"
+          title="Toggle summary"
+        >
+          <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden>
+            <path d="M2 4h12v1H2zM2 8h12v1H2zM2 12h8v1H2z"/>
+          </svg>
+          <span>Session compacted{label ? ` — ${label}` : ""}</span>
+          <span className="text-amber-500">{expanded ? "▾" : "▸"}</span>
+        </button>
+        {expanded && msg.text_content && (
+          <div className="text-[11px] text-amber-100/80 bg-amber-950/40 border border-amber-900/40
+                          rounded-md px-3 py-2 max-h-64 overflow-y-auto whitespace-pre-wrap">
+            {msg.text_content}
+          </div>
+        )}
+      </div>
+      <div className="flex-1 border-t border-amber-800/50" />
+    </div>
+  );
+}
+
+function _compactionReasonLabel(reason: string): string {
+  if (!reason) return "";
+  if (reason === "client-invoked") return "manual";
+  if (reason === "client-supplied") return "manual (supplied summary)";
+  if (reason.startsWith("auto:")) return `auto (${reason.slice("auto:".length)})`;
+  if (reason.startsWith("disabled:")) return `skipped: ${reason.slice("disabled:".length)}`;
+  return reason;
 }

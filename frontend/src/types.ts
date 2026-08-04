@@ -91,6 +91,10 @@ export interface MessageMetadata {
     context_window?: number;
     model?: string;
   };
+  /** Set on `role: "compaction"` marker rows. Reason strings match
+   * ark's: `auto:proactive`, `auto:reactive`, `client-invoked`,
+   * `client-supplied`, or a `disabled:*` variant. */
+  reason?: string;
 }
 
 export interface Message {
@@ -305,6 +309,56 @@ export interface WsWorkspaceFileChanged {
   };
 }
 
+// ── Session compaction ─────────────────────────────────────────────
+// Relay forwards ark's four compaction events verbatim (plus session_id
+// and agent_name for routing). Clients render a "compacting…" chip
+// between `_started` and `_completed`/`_failed`/`_skipped`, and a
+// divider in the transcript when a `compaction`-role marker arrives.
+
+export interface WsCompactionStarted {
+  type: "compaction_started";
+  payload: {
+    session_id: string;
+    agent_name: string;
+    reason: string;
+    input_tokens: number | null;
+    context_window: number | null;
+    model: string | null;
+  };
+}
+
+export interface WsCompactionCompleted {
+  type: "compaction_completed";
+  payload: {
+    session_id: string;
+    agent_name: string;
+    reason: string;
+    summary: string;
+  };
+}
+
+export interface WsCompactionFailed {
+  type: "compaction_failed";
+  payload: {
+    session_id: string;
+    agent_name: string;
+    reason: string;
+    code: string;
+    message: string;
+  };
+}
+
+export interface WsCompactionSkipped {
+  type: "compaction_skipped";
+  payload: {
+    session_id: string;
+    agent_name: string;
+    reason: string;
+    input_tokens: number | null;
+    context_window: number | null;
+  };
+}
+
 export type WsEvent =
   | WsStateUpdate
   | WsTextEvent
@@ -328,4 +382,8 @@ export type WsEvent =
   | WsAgentFile
   | WsProjectFileChanged
   | WsWorkspaceFileChanged
+  | WsCompactionStarted
+  | WsCompactionCompleted
+  | WsCompactionFailed
+  | WsCompactionSkipped
   | WsError;

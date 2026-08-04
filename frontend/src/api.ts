@@ -109,6 +109,32 @@ export async function readFile(
   return resp;
 }
 
+/** Trigger ark session compaction. Fires ark's `compaction_started` +
+ *  `compaction_completed` events on the WS; visible UI changes arrive
+ *  via those events, not this response. Only valid for ark-backed
+ *  sessions (400 otherwise) that have sent at least one message (409
+ *  otherwise — no ark session exists yet). */
+export async function compactSession(sessionId: string): Promise<{ ok: boolean; summary?: string; reason?: string }> {
+  const resp = await apiFetch(`/v1/sessions/${sessionId}/compact`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!resp.ok) {
+    let detail: string;
+    try {
+      const j = await resp.json();
+      detail = typeof j.detail === "string" ? j.detail
+        : typeof j.detail?.message === "string" ? j.detail.message
+        : JSON.stringify(j.detail ?? j);
+    } catch {
+      detail = await resp.text();
+    }
+    throw new Error(detail || `compactSession failed: ${resp.status}`);
+  }
+  return resp.json();
+}
+
 export type FileProbeKind = "text" | "image" | "pdf" | "binary";
 
 export interface FileProbe {

@@ -560,6 +560,48 @@ async def _handle_ark_event(
             await _maybe_mark_unread(user_id, relay_session_id)
         return
 
+    # ── Session compaction ─────────────────────────────────────────
+    # `compaction_started` and `_completed` are the two events we care
+    # about visually. `_failed` and `_skipped` are surfaced too so the
+    # client's "compacting…" chip can dismiss cleanly. `_completed` also
+    # persists a marker message so future history renders show where
+    # compaction landed in the transcript.
+    if etype in ("compaction_started", "compaction_completed",
+                 "compaction_failed", "compaction_skipped"):
+        if etype == "compaction_completed":
+            summary = event.get("summary") or ""
+            reason = event.get("reason") or ""
+            # Dedupe against catch-up replay via the summary body.
+            if summary and not await _message_already_persisted(
+                relay_session_id, summary, role="compaction",
+            ):
+                await _persist_compaction_marker(
+                    session_id_str=relay_session_id,
+                    summary=summary, reason=reason,
+                )
+        if not is_catch_up:
+            # Forward the event verbatim (minus ark-internal fields) so
+            # the client sees the same shape ark publishes on /events.
+            payload = {
+                "session_id": relay_session_id,
+                "agent_name": agent_name,
+                "reason": event.get("reason"),
+            }
+            if etype == "compaction_started":
+                payload["input_tokens"] = event.get("input_tokens")
+                payload["context_window"] = event.get("context_window")
+                payload["model"] = event.get("model")
+            elif etype == "compaction_completed":
+                payload["summary"] = event.get("summary")
+            elif etype == "compaction_failed":
+                payload["code"] = event.get("code")
+                payload["message"] = event.get("message")
+            elif etype == "compaction_skipped":
+                payload["input_tokens"] = event.get("input_tokens")
+                payload["context_window"] = event.get("context_window")
+            await _broadcast_to_user(user_id, {"type": etype, "payload": payload})
+        return
+
 
 async def _file_already_persisted(session_id_str: str, path: str) -> str | None:
     """Return the file_id of an existing File row for this session+path, or
@@ -677,6 +719,34 @@ async def _persist_injected_message(*, session_id_str: str, text: str) -> None:
             await invalidate_session_cache(session_id_str)
     except Exception:
         logger.exception("Failed to persist injected_message")
+
+
+async def _persist_compaction_marker(
+    *, session_id_str: str, summary: str, reason: str,
+) -> None:
+    """Persist an ark compaction summary as a marker row in Relay's
+    messages table. Uses a dedicated `role="compaction"` so clients can
+    render the row as a divider rather than a chat bubble, and stores
+    the trigger reason in metadata so the UI can label it (`auto:proactive`,
+    `client-invoked`, etc.)."""
+    from app.db.database import async_session
+    from app.db.redis import invalidate_session_cache
+    from app.models.message import Message as MessageModel
+    import uuid as _uuid
+
+    try:
+        async with async_session() as db:
+            db_msg = MessageModel(
+                session_id=_uuid.UUID(session_id_str),
+                role="compaction",
+                text_content=summary,
+                metadata_={"reason": reason} if reason else {},
+            )
+            db.add(db_msg)
+            await db.commit()
+            await invalidate_session_cache(session_id_str)
+    except Exception:
+        logger.exception("Failed to persist compaction marker")
 
 
 async def _persist_agent_shared_file(

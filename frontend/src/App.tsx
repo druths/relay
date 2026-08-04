@@ -39,6 +39,9 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  // Session ID awaiting a compaction confirm. Null when no modal open.
+  const [confirmingCompactId, setConfirmingCompactId] = useState<string | null>(null);
+  const [compactError, setCompactError] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [sessionSearch, setSessionSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -782,6 +785,23 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                       {diagnostics ? "✓" : ""}
                     </span>
                   </button>
+                  {isArkAgent && (
+                    <button
+                      onClick={() => {
+                        setShowSessionMenu(false);
+                        if (relay.activeSessionId) {
+                          setCompactError(null);
+                          setConfirmingCompactId(relay.activeSessionId);
+                        }
+                      }}
+                      disabled={!!(relay.activeSessionId && relay.compacting[relay.activeSessionId])}
+                      className="w-full text-left px-3 py-1.5 text-sm text-gray-300
+                                 hover:bg-gray-700 transition-colors disabled:opacity-50
+                                 disabled:cursor-not-allowed"
+                    >
+                      Compact session
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -960,14 +980,101 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             activeAgentName={relay.activeAgentName}
             diagnostics={diagnostics}
           />
+          {relay.activeSessionId && relay.compacting[relay.activeSessionId] && (
+            <div className="px-4 py-1.5 border-t border-amber-900/40 bg-amber-950/40">
+              <span className="inline-flex items-center gap-2 text-[11px] font-mono text-amber-200">
+                <span className="inline-flex items-end gap-0.5">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="block w-1 h-1 rounded-full bg-amber-400"
+                      style={{
+                        animation: "dotPulse 0.9s ease-in-out infinite",
+                        animationDelay: `${i * 0.15}s`,
+                      }}
+                    />
+                  ))}
+                </span>
+                Compacting session
+                {(() => {
+                  const c = relay.compacting[relay.activeSessionId!];
+                  if (c?.inputTokens && c?.contextWindow) {
+                    const pct = Math.round((c.inputTokens / c.contextWindow) * 100);
+                    return <> · context was {pct}% full</>;
+                  }
+                  return null;
+                })()}
+              </span>
+            </div>
+          )}
           <TextInput
             onSend={relay.sendMessage}
-            disabled={!relay.connected}
+            disabled={
+              !relay.connected
+              || !!(relay.activeSessionId && relay.compacting[relay.activeSessionId])
+            }
             sessionId={relay.activeSessionId}
             onAttachment={relay.appendUserAttachment}
           />
         </div>
       </main>
+
+      {/* Compact-session confirm modal */}
+      {confirmingCompactId && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setConfirmingCompactId(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-gray-800">
+              <h3 className="text-sm font-semibold text-gray-100">Compact this session?</h3>
+            </div>
+            <div className="px-5 py-4 text-xs text-gray-300 leading-relaxed space-y-2">
+              <p>
+                The agent will summarize the conversation so far. Older
+                turns stay visible in the transcript, but the agent will
+                only see the summary from the next message on.
+              </p>
+              {compactError && (
+                <p className="text-red-400">{compactError}</p>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-800 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmingCompactId(null)}
+                className="px-3 py-1.5 text-xs text-gray-300 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const sid = confirmingCompactId;
+                  if (!sid) return;
+                  // Close the modal immediately — the ark POST runs the
+                  // whole compaction synchronously and doesn't return
+                  // until it's done, but the visible UI update we care
+                  // about ("compacting…" chip) arrives via the WS event
+                  // stream well before that. Fire and forget; if the
+                  // POST errors, re-open the modal with the message.
+                  setCompactError(null);
+                  setConfirmingCompactId(null);
+                  relay.compactSession(sid).catch((e) => {
+                    setCompactError(String(e instanceof Error ? e.message : e));
+                    setConfirmingCompactId(sid);
+                  });
+                }}
+                className="px-3 py-1.5 text-xs bg-amber-700 hover:bg-amber-600
+                           text-white rounded transition-colors"
+              >
+                Compact
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* File browser side panel */}
       {showFileBrowser && showFileBrowserAvailable && activeSession && (

@@ -47,6 +47,12 @@ TURN_EVENT_TYPES = {
 ASYNC_EVENT_TYPES = {
     "file_available", "injected_message",
     "project_file_changed", "workspace_file_changed",
+    # Compaction events fire on ark's /events stream any time the runtime
+    # decides (or is asked) to summarise a session — they're conceptually
+    # out-of-band from any given turn's assistant stream, so we route them
+    # via the async callback rather than the per-turn queue.
+    "compaction_started", "compaction_completed",
+    "compaction_failed", "compaction_skipped",
 }
 
 

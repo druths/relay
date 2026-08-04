@@ -16,6 +16,16 @@ export interface FileChangeEvent {
 
 const FILE_CHANGE_BUFFER_SIZE = 200;
 
+/** Compaction-in-flight snapshot per session. Set on `compaction_started`,
+ *  cleared on `_completed`/`_failed`/`_skipped`. Keyed by Relay
+ *  session_id so a background compaction on a non-active session doesn't
+ *  bleed into the current session's UI. */
+export interface CompactingState {
+  reason: string;
+  inputTokens: number | null;
+  contextWindow: number | null;
+}
+
 export interface RelayState {
   connected: boolean;
   activeSessionId: string | null;
@@ -31,6 +41,8 @@ export interface RelayState {
   sttAvailable: boolean;
   projects: Project[];
   fileChanges: FileChangeEvent[];
+  /** Map of Relay session_id → in-flight compaction snapshot. */
+  compacting: Record<string, CompactingState>;
 }
 
 export function useRelay() {
@@ -54,6 +66,7 @@ export function useRelay() {
     sttAvailable: false,
     projects: [],
     fileChanges: [],
+    compacting: {},
   });
 
   // Fetch agent list
@@ -535,6 +548,59 @@ export function useRelay() {
           break;
         }
 
+        case "compaction_started":
+          setState((s) => ({
+            ...s,
+            compacting: {
+              ...s.compacting,
+              [event.payload.session_id]: {
+                reason: event.payload.reason,
+                inputTokens: event.payload.input_tokens,
+                contextWindow: event.payload.context_window,
+              },
+            },
+          }));
+          break;
+
+        case "compaction_completed":
+          setState((s) => {
+            const nextCompacting = { ...s.compacting };
+            delete nextCompacting[event.payload.session_id];
+            // Append the summary marker to sessionMessages only if this
+            // event is for the currently-active session; other sessions'
+            // markers will be picked up next time they're resumed
+            // (session_history includes persisted `compaction`-role rows).
+            const isActive = s.activeSessionId === event.payload.session_id;
+            const nextMessages = isActive
+              ? [...s.sessionMessages, {
+                  role: "compaction",
+                  text_content: event.payload.summary,
+                  created_at: new Date().toISOString(),
+                  metadata: { reason: event.payload.reason },
+                }]
+              : s.sessionMessages;
+            return {
+              ...s,
+              compacting: nextCompacting,
+              sessionMessages: nextMessages,
+            };
+          });
+          break;
+
+        case "compaction_failed":
+        case "compaction_skipped":
+          setState((s) => {
+            const nextCompacting = { ...s.compacting };
+            delete nextCompacting[event.payload.session_id];
+            return { ...s, compacting: nextCompacting };
+          });
+          if (event.type === "compaction_failed") {
+            console.error(
+              "[compaction] failed:", event.payload.code, event.payload.message,
+            );
+          }
+          break;
+
         case "error":
           console.error("Relay error:", event.payload.message);
           break;
@@ -714,6 +780,14 @@ export function useRelay() {
     audioPlayerRef.current.stop();
   }, []);
 
+  /// Trigger ark session compaction. The visible UI update (chip on,
+  /// divider added after) arrives via the WS event stream, not this
+  /// call's return.
+  const compactSession = useCallback(async (sessionId: string) => {
+    const { compactSession: doCompact } = await import("../api");
+    return doCompact(sessionId);
+  }, []);
+
   const toggleMute = useCallback(() => {
     audioPlayerRef.current.setMuted(!audioPlayerRef.current.muted);
   }, []);
@@ -738,6 +812,7 @@ export function useRelay() {
     stopAudio,
     muted: audioPlayer.muted,
     toggleMute,
+    compactSession,
   };
 }
 

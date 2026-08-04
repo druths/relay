@@ -222,6 +222,79 @@ async def get_messages(
     return [MessageOut(**m) for m in messages]
 
 
+@router.post("/{session_id}/compact")
+async def compact_session(
+    session_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+):
+    """Ask ark to compact this session's history down to a summary.
+    Only valid for ark-backed sessions — non-ark providers have no
+    compaction concept and return 400.
+
+    Proxies to ark's POST /agents/{name}/sessions/{ark_sid}/compact.
+    Ark fires compaction_started + _completed events over its /events
+    stream; Relay picks them up in the ark client callback, persists
+    the completed summary as a `compaction`-role message, and forwards
+    each event to WS clients. So on success this endpoint just returns
+    the immediate ark response; the visible session UI updates arrive
+    via the WS event stream.
+    """
+    import httpx
+    from app.db.redis import get_provider_state
+    from app.services import agent_manager
+
+    session = await get_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    agent = await agent_manager.get_agent_by_id(db, session.agent_id)
+    if agent is None or agent.llm_provider != "ark":
+        raise HTTPException(
+            status_code=400,
+            detail="Compaction is only supported for ark-backed sessions.",
+        )
+
+    ark_sid = await get_provider_state(str(session_id), "ark")
+    if not ark_sid:
+        raise HTTPException(
+            status_code=409,
+            detail="Session has no ark session yet — send at least one message first.",
+        )
+
+    base_url, api_key = await agent_manager.resolve_llm_config(agent)
+    if not base_url:
+        raise HTTPException(
+            status_code=502,
+            detail="Ark server not configured for this agent.",
+        )
+
+    # ark agent name is the `llm_model` with any `ark:` prefix stripped.
+    ark_agent = agent.llm_model
+    if ark_agent.startswith("ark:"):
+        ark_agent = ark_agent[len("ark:"):]
+
+    url = f"{base_url.rstrip('/')}/agents/{ark_agent}/sessions/{ark_sid}/compact"
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(url, json={}, headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Ark unreachable: {exc}")
+
+    if resp.status_code >= 400:
+        # Surface ark's error payload (which includes {ok, code, message})
+        # verbatim so the client can render it usefully.
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    return resp.json()
+
+
 # ── Labels endpoints ──────────────────────────────────────────────────
 
 
