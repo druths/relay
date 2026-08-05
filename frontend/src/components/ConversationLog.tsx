@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { Message, FileAttachment } from "../types";
 import { apiFetch } from "../api";
+
+/// GitHub-flavoured markdown plugin list. Adds table support (the
+/// motivating feature — agent output often includes tables), plus
+/// strikethrough and task lists for free. Kept as a module-level
+/// constant so react-markdown doesn't rebuild its pipeline on each
+/// render.
+const REMARK_PLUGINS = [remarkGfm];
 
 // Element overrides keep markdown output sized for chat bubbles: heading
 // levels collapse to slightly-bigger weights, code blocks pick up the dark
@@ -45,6 +53,38 @@ const MARKDOWN_COMPONENTS: Components = {
     );
   },
   pre: ({ children }) => <>{children}</>,
+  // GFM tables — dark-theme styled and horizontally scrollable so a
+  // wide table doesn't blow out the chat bubble width.
+  table: ({ children }) => (
+    <div className="my-2 -mx-1 overflow-x-auto">
+      <table className="min-w-full border-collapse border border-gray-700 text-[12px]">
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children }) => (
+    <thead className="bg-gray-900/70">{children}</thead>
+  ),
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  tr: ({ children }) => (
+    <tr className="border-t border-gray-800 first:border-t-0">{children}</tr>
+  ),
+  th: ({ children, style }) => (
+    <th
+      className="border border-gray-700 px-2 py-1 text-left font-semibold text-gray-200"
+      style={style}
+    >
+      {children}
+    </th>
+  ),
+  td: ({ children, style }) => (
+    <td
+      className="border border-gray-800 px-2 py-1 text-gray-300 align-top"
+      style={style}
+    >
+      {children}
+    </td>
+  ),
 };
 
 function _formatSize(bytes: number): string {
@@ -164,7 +204,7 @@ export function ConversationLog({
             {msg.role === "user" || msg.streaming ? (
               msg.text_content
             ) : (
-              <ReactMarkdown components={MARKDOWN_COMPONENTS}>
+              <ReactMarkdown components={MARKDOWN_COMPONENTS} remarkPlugins={REMARK_PLUGINS}>
                 {msg.text_content}
               </ReactMarkdown>
             )}

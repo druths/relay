@@ -1,346 +1,172 @@
 import SwiftUI
-import UIKit
+import MarkdownUI
 
-/// Renders message text with markdown support (headers, fenced code blocks,
-/// bold, italic, inline code) using non-editable UITextViews for proper
-/// range-based text selection. Each block is rendered as its own view so
-/// that no single UITextView handles an excessively long attributed string.
+/// Renders message text as GitHub-flavoured Markdown via `MarkdownUI`.
+///
+/// Replaces a hand-rolled parser that only supported headers, code, and
+/// inline bold/italic/code — losing tables, task lists, blockquote
+/// styling, and correct list handling. MarkdownUI gives us all of the
+/// above (via cmark-gfm) with theme knobs that adapt to `RelayTheme`.
+///
+/// The public `MarkdownText(text:)` shape is unchanged so existing call
+/// sites don't move.
 struct MarkdownText: View {
     let text: String
 
     @Environment(\.relayTheme) private var theme
     @Environment(\.relayChatFontSize) private var chatFontSize
 
-    private var styling: MarkdownStyling {
-        MarkdownStyling(theme: theme, chatFontSize: chatFontSize)
-    }
-
     var body: some View {
-        let blocks = MarkdownParser.parseBlocks(text)
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                blockView(for: block)
-            }
-        }
+        Markdown(text)
+            .markdownTheme(_markdownTheme(theme: theme, chatFontSize: chatFontSize))
+            .textSelection(.enabled)
     }
+}
 
-    @ViewBuilder
-    private func blockView(for block: MarkdownParser.Block) -> some View {
-        switch block {
-        case .paragraph(let t):
-            SelectableText(source: t, style: .paragraph, styling: styling)
-        case .header(let level, let t):
-            SelectableText(source: t, style: .header(level), styling: styling)
-        case .codeBlock(let code):
-            SelectableText(source: code, style: .code, styling: styling)
-                .padding(.horizontal, 6)
+// MARK: - Theme mapping
+
+/// Builds a MarkdownUI `Theme` from `RelayTheme`, so palette / font
+/// changes flow through consistently (agent bubbles, operator bubbles,
+/// TVA vs. default, chat-font-size preference). Kept as a free function
+/// rather than an extension so we don't leak MarkdownUI types into the
+/// theme module.
+///
+/// `@MainActor` because the block-style closures capture SwiftUI view
+/// modifiers (`markdownMargin`, `markdownTextStyle`, etc.) whose View-
+/// receiver context is main-actor-isolated under Swift 6 strict
+/// concurrency. The theme object still gets consumed by MarkdownUI at
+/// render time — also on MainActor — so this doesn't restrict usage.
+@MainActor
+private func _markdownTheme(theme: RelayTheme, chatFontSize: CGFloat) -> MarkdownUI.Theme {
+    // Font family used for prose. Falls back to system when the theme
+    // doesn't specify a custom body font (e.g. Default theme).
+    let bodyFontFamily: FontProperties.Family = theme.bodyFontName.map { .custom($0) } ?? .system(.default)
+    let monoFontFamily: FontProperties.Family = theme.monoFontName.map { .custom($0) } ?? .system(.monospaced)
+
+    // Colours derived from the RelayTheme palette so light/dark and
+    // theme-specific variants stay in sync.
+    let primary = theme.textPrimary
+    let secondary = theme.textSecondary
+    let tertiary = theme.textTertiary
+    let border = theme.border
+    let elevated = theme.elevated
+    let surface = theme.surface
+
+    return MarkdownUI.Theme()
+        // ── Inline text ────────────────────────────────────────────
+        .text {
+            ForegroundColor(secondary)
+            FontFamily(bodyFontFamily)
+            FontSize(chatFontSize)
+        }
+        .strong {
+            FontWeight(.semibold)
+        }
+        .emphasis {
+            FontStyle(.italic)
+        }
+        .strikethrough {
+            StrikethroughStyle(.single)
+        }
+        .link {
+            ForegroundColor(theme.primary)
+            UnderlineStyle(.single)
+        }
+        .code {
+            FontFamily(monoFontFamily)
+            FontSize(.em(0.92))
+            BackgroundColor(elevated)
+        }
+
+        // ── Block-level styling ────────────────────────────────────
+        .paragraph { configuration in
+            configuration.label
+                .fixedSize(horizontal: false, vertical: true)
+                .relativeLineSpacing(.em(0.18))
+                .markdownMargin(top: .em(0.25), bottom: .em(0.25))
+        }
+        .heading1 { configuration in
+            configuration.label
+                .markdownMargin(top: .em(0.6), bottom: .em(0.25))
+                .markdownTextStyle {
+                    FontSize(chatFontSize + 5)
+                    FontWeight(.semibold)
+                    ForegroundColor(primary)
+                }
+        }
+        .heading2 { configuration in
+            configuration.label
+                .markdownMargin(top: .em(0.5), bottom: .em(0.2))
+                .markdownTextStyle {
+                    FontSize(chatFontSize + 3)
+                    FontWeight(.semibold)
+                    ForegroundColor(primary)
+                }
+        }
+        .heading3 { configuration in
+            configuration.label
+                .markdownMargin(top: .em(0.4), bottom: .em(0.2))
+                .markdownTextStyle {
+                    FontSize(chatFontSize + 1)
+                    FontWeight(.semibold)
+                    ForegroundColor(primary)
+                }
+        }
+        .blockquote { configuration in
+            configuration.label
+                .padding(.vertical, 2)
+                .padding(.leading, 8)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(border)
+                        .frame(width: 2)
+                }
+                .markdownTextStyle {
+                    ForegroundColor(tertiary)
+                    FontStyle(.italic)
+                }
+        }
+        .codeBlock { configuration in
+            ScrollView(.horizontal, showsIndicators: false) {
+                configuration.label
+                    .relativeLineSpacing(.em(0.18))
+                    .markdownTextStyle {
+                        FontFamily(monoFontFamily)
+                        FontSize(chatFontSize - 1)
+                        ForegroundColor(secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            }
+            .background(surface)
+            .clipShape(RoundedRectangle(cornerRadius: max(theme.cornerRadius * 0.6, 4)))
+            .markdownMargin(top: .em(0.3), bottom: .em(0.3))
+        }
+        // ── Lists ──────────────────────────────────────────────────
+        // Chat bubbles are narrow; tight bullet indents keep long list
+        // items from wrapping too aggressively.
+        .listItem { configuration in
+            configuration.label
+                .markdownMargin(top: .em(0.1))
+        }
+
+        // ── Tables (the reason we're here) ─────────────────────────
+        .table { configuration in
+            configuration.label
+                .fixedSize(horizontal: false, vertical: true)
+                .markdownTableBorderStyle(.init(color: border))
+                .markdownTableBackgroundStyle(
+                    .alternatingRows(surface, elevated),
+                )
+                .markdownMargin(top: .em(0.3), bottom: .em(0.3))
+        }
+        .tableCell { configuration in
+            configuration.label
+                .markdownTextStyle {
+                    FontSize(chatFontSize - 1)
+                }
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(uiColor: styling.codeBg))
-                .clipShape(RoundedRectangle(cornerRadius: max(theme.cornerRadius * 0.6, 4)))
+                .padding(.horizontal, 8)
         }
-    }
-}
-
-// MARK: - Theme-derived styling for UIKit rendering
-
-struct MarkdownStyling: Equatable {
-    let textSecondary: UIColor
-    let textPrimary: UIColor
-    let codeBg: UIColor
-    let inlineCodeBg: UIColor
-
-    let bodyFont: UIFont
-    let boldFont: UIFont
-    let italicFont: UIFont
-    let inlineCodeFont: UIFont
-    let codeBlockFont: UIFont
-
-    let headingFontName: String?
-
-    init(theme: RelayTheme, chatFontSize: CGFloat = 16) {
-        self.textSecondary = UIColor(theme.textSecondary)
-        self.textPrimary = UIColor(theme.textPrimary)
-        self.codeBg = UIColor(theme.surface)
-        self.inlineCodeBg = UIColor(theme.elevated)
-
-        let size = chatFontSize
-
-        if let fontName = theme.bodyFontName {
-            let body = UIFont(name: fontName, size: size) ?? UIFont.systemFont(ofSize: size)
-            self.bodyFont = body
-            self.boldFont = body  // Custom pixel fonts don't have bold variants
-            self.italicFont = body
-            let mono = UIFont(name: theme.monoFontName ?? fontName, size: size - 1) ?? UIFont.monospacedSystemFont(ofSize: size - 1, weight: .regular)
-            self.inlineCodeFont = mono
-            self.codeBlockFont = UIFont(name: theme.monoFontName ?? fontName, size: size - 2) ?? UIFont.monospacedSystemFont(ofSize: size - 2, weight: .regular)
-        } else {
-            self.bodyFont = UIFont.systemFont(ofSize: size)
-            self.boldFont = UIFont.boldSystemFont(ofSize: size)
-            self.italicFont = UIFont.italicSystemFont(ofSize: size)
-            self.inlineCodeFont = UIFont.monospacedSystemFont(ofSize: size - 1, weight: .regular)
-            self.codeBlockFont = UIFont.monospacedSystemFont(ofSize: size - 2, weight: .regular)
-        }
-
-        self.headingFontName = theme.headingFontName
-    }
-
-    func headerFont(_ level: Int) -> UIFont {
-        let size: CGFloat = level == 1 ? 20 : level == 2 ? 17 : 15
-        if let name = headingFontName {
-            // Pixel heading font — use smaller size to fit
-            let pixelSize: CGFloat = level == 1 ? 12 : level == 2 ? 10 : 9
-            return UIFont(name: name, size: pixelSize) ?? UIFont.systemFont(ofSize: size, weight: .semibold)
-        }
-        return UIFont.systemFont(ofSize: size, weight: .semibold)
-    }
-}
-
-// MARK: - Block rendering style
-
-private enum BlockStyle: Equatable {
-    case paragraph
-    case header(Int)
-    case code
-}
-
-// MARK: - UITextView wrapper
-
-private struct SelectableText: UIViewRepresentable {
-    let source: String
-    let style: BlockStyle
-    let styling: MarkdownStyling
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
-        view.isEditable = false
-        view.isSelectable = true
-        view.isScrollEnabled = false
-        view.backgroundColor = .clear
-        view.textContainerInset = .zero
-        view.textContainer.lineFragmentPadding = 0
-        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return view
-    }
-
-    func updateUIView(_ view: UITextView, context: Context) {
-        let coord = context.coordinator
-        guard source != coord.lastSource || style != coord.lastStyle || styling != coord.lastStyling else { return }
-        coord.lastSource = source
-        coord.lastStyle = style
-        coord.lastStyling = styling
-        coord.cachedSize = nil
-        view.attributedText = MarkdownParser.renderBlock(source, style: style, styling: styling)
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
-        let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
-        let coord = context.coordinator
-        if let cached = coord.cachedSize, coord.cachedWidth == width {
-            return cached
-        }
-        let size = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        coord.cachedWidth = width
-        coord.cachedSize = size
-        return size
-    }
-
-    final class Coordinator {
-        var lastSource: String?
-        var lastStyle: BlockStyle?
-        var lastStyling: MarkdownStyling?
-        var cachedSize: CGSize?
-        var cachedWidth: CGFloat?
-    }
-}
-
-// MARK: - Markdown parser
-
-private enum MarkdownParser {
-    // MARK: Block types
-
-    enum Block {
-        case paragraph(String)
-        case header(level: Int, text: String)
-        case codeBlock(code: String)
-    }
-
-    // MARK: Render a single block
-
-    static func renderBlock(_ text: String, style: BlockStyle, styling: MarkdownStyling) -> NSAttributedString {
-        switch style {
-        case .paragraph:
-            return renderInlineMarkdown(text, font: styling.bodyFont, color: styling.textSecondary, styling: styling)
-        case .header(let level):
-            return renderInlineMarkdown(text, font: styling.headerFont(level), color: styling.textPrimary, styling: styling)
-        case .code:
-            return NSAttributedString(string: text, attributes: [
-                .font: styling.codeBlockFont,
-                .foregroundColor: styling.textSecondary,
-            ])
-        }
-    }
-
-    // MARK: Block parser
-
-    static func parseBlocks(_ raw: String) -> [Block] {
-        var blocks: [Block] = []
-        let lines = raw.components(separatedBy: "\n")
-        var i = 0
-
-        while i < lines.count {
-            let line = lines[i]
-
-            // Fenced code block
-            if line.hasPrefix("```") {
-                var codeLines: [String] = []
-                i += 1
-                while i < lines.count {
-                    if lines[i].hasPrefix("```") {
-                        i += 1
-                        break
-                    }
-                    codeLines.append(lines[i])
-                    i += 1
-                }
-                let code = codeLines.joined(separator: "\n")
-                if !code.isEmpty {
-                    blocks.append(.codeBlock(code: code))
-                }
-                continue
-            }
-
-            // Header
-            if let header = parseHeader(line) {
-                blocks.append(header)
-                i += 1
-                continue
-            }
-
-            // Paragraph — collect lines, splitting on blank lines
-            var paraLines: [String] = []
-            while i < lines.count
-                    && !lines[i].hasPrefix("```")
-                    && parseHeader(lines[i]) == nil {
-                let currentLine = lines[i]
-                if currentLine.trimmingCharacters(in: .whitespaces).isEmpty {
-                    if !paraLines.isEmpty {
-                        let para = paraLines.joined(separator: "\n")
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !para.isEmpty {
-                            blocks.append(.paragraph(para))
-                        }
-                        paraLines = []
-                    }
-                } else {
-                    paraLines.append(currentLine)
-                }
-                i += 1
-            }
-            let para = paraLines.joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !para.isEmpty {
-                blocks.append(.paragraph(para))
-            }
-        }
-
-        return blocks
-    }
-
-    static func parseHeader(_ line: String) -> Block? {
-        var level = 0
-        for ch in line {
-            if ch == "#" { level += 1 } else { break }
-        }
-        guard (1...3).contains(level),
-              line.count > level,
-              line[line.index(line.startIndex, offsetBy: level)] == " " else {
-            return nil
-        }
-        return .header(level: level, text: String(line.dropFirst(level + 1)))
-    }
-
-    // MARK: Inline markdown
-
-    /// Parses **bold**, *italic*, and `code` within a line of text.
-    static func renderInlineMarkdown(_ text: String, font: UIFont, color: UIColor, styling: MarkdownStyling) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        let baseAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-
-        var remaining = text[text.startIndex...]
-
-        while !remaining.isEmpty {
-            var earliest: (range: Range<String.Index>, type: InlineType)?
-
-            for delim in InlineType.allCases {
-                if let r = remaining.range(of: delim.opening) {
-                    if earliest == nil || r.lowerBound < earliest!.range.lowerBound {
-                        earliest = (r, delim)
-                    }
-                }
-            }
-
-            guard let match = earliest else {
-                result.append(NSAttributedString(string: String(remaining), attributes: baseAttrs))
-                break
-            }
-
-            if match.range.lowerBound > remaining.startIndex {
-                let before = String(remaining[remaining.startIndex..<match.range.lowerBound])
-                result.append(NSAttributedString(string: before, attributes: baseAttrs))
-            }
-
-            let afterOpening = match.range.upperBound
-            if afterOpening < remaining.endIndex,
-               let closeRange = remaining[afterOpening...].range(of: match.type.closing) {
-                let inner = String(remaining[afterOpening..<closeRange.lowerBound])
-                var attrs = baseAttrs
-                switch match.type {
-                case .bold:
-                    attrs[.font] = styling.boldFont
-                case .italic:
-                    attrs[.font] = styling.italicFont
-                case .code:
-                    attrs[.font] = styling.inlineCodeFont
-                    attrs[.backgroundColor] = styling.inlineCodeBg
-                }
-                result.append(NSAttributedString(string: inner, attributes: attrs))
-                remaining = remaining[closeRange.upperBound...]
-            } else {
-                result.append(NSAttributedString(string: String(remaining[match.range]), attributes: baseAttrs))
-                remaining = remaining[match.range.upperBound...]
-            }
-        }
-
-        return result
-    }
-
-    enum InlineType: CaseIterable {
-        case bold, code, italic
-
-        var opening: String {
-            switch self {
-            case .bold: "**"
-            case .code: "`"
-            case .italic: "*"
-            }
-        }
-        var closing: String { opening }
-    }
-}
-
-// MARK: - UIFont helpers
-
-private extension UIFont {
-    var bold: UIFont {
-        guard let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) else { return self }
-        return UIFont(descriptor: descriptor, size: pointSize)
-    }
-
-    var italic: UIFont {
-        guard let descriptor = fontDescriptor.withSymbolicTraits(.traitItalic) else { return self }
-        return UIFont(descriptor: descriptor, size: pointSize)
-    }
 }

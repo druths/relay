@@ -10,6 +10,9 @@ packages:
   Runestone:
     url: https://github.com/simonbs/Runestone
     from: "0.4.0"
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: "2.4.0"
 
 targets:
   Relay:
@@ -59,6 +62,7 @@ targets:
     dependencies:
       - target: RelayWidgetExtension
       - package: Runestone
+      - package: MarkdownUI
 
   RelayWidgetExtension:
     type: app-extension
