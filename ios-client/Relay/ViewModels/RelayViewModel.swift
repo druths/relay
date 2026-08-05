@@ -17,6 +17,17 @@ final class RelayViewModel {
     var agents: [Agent] = []
     var sessions: [Session] = []
     var allLabels: [String] = []
+
+    /// Distinct labels + project_ids in use across ALL of the user's
+    /// sessions (not just the loaded 20-most-recent slice). Powers the
+    /// sidebar filter dropdowns so values that live only on older
+    /// sessions remain selectable. Refreshed on connect, on
+    /// session_labels_updated, session_deleted, and session_entered.
+    struct SessionFacets: Equatable {
+        var labels: [String] = []
+        var projectIds: [String] = []
+    }
+    var sessionFacets: SessionFacets = .init()
     /// ark projects, aggregated across every configured ark backend by the
     /// Relay aggregator. Each entry carries `serverId` so the UI can route
     /// single-project ops back to the right ark.
@@ -189,6 +200,7 @@ final class RelayViewModel {
         await refreshAgents()
         await fetchSessions()
         await fetchLabels()
+        await fetchSessionFacets()
         await fetchProjects()
         await checkSttStatus()
         await fetchPlatformSettings()
@@ -231,6 +243,7 @@ final class RelayViewModel {
     /// session if there is one to pull down the latest history.
     func resync() async {
         await fetchSessions()
+        await fetchSessionFacets()
         if let sessionId = activeSessionId {
             suppressNextGreeting = true
             await resumeSession(sessionId)
@@ -428,7 +441,11 @@ final class RelayViewModel {
         }
     }
 
-    func fetchSessions(search: String? = nil, label: String? = nil) async {
+    func fetchSessions(
+        search: String? = nil,
+        label: String? = nil,
+        project: String? = nil,
+    ) async {
         do {
             var path = "/v1/sessions"
             var params: [String] = []
@@ -440,11 +457,37 @@ final class RelayViewModel {
                let encoded = l.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
                 params.append("label=\(encoded)")
             }
+            if let p = project, !p.isEmpty,
+               let encoded = p.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                params.append("project=\(encoded)")
+            }
             if !params.isEmpty { path += "?" + params.joined(separator: "&") }
             let fetched: [Session] = try await apiClient.request("GET", path: path)
             sessions = fetched
         } catch {
             print("[Relay] Failed to fetch sessions: \(error)")
+        }
+    }
+
+    /// Fetch distinct labels + project_ids across the user's full
+    /// session history. Values here populate the sidebar's filter
+    /// dropdowns so options on older sessions (past the 20-most-recent
+    /// cap in `fetchSessions`) still show up.
+    func fetchSessionFacets() async {
+        struct FacetsDTO: Decodable {
+            let labels: [String]
+            let project_ids: [String]
+        }
+        do {
+            let fetched: FacetsDTO = try await apiClient.request(
+                "GET", path: "/v1/sessions/facets",
+            )
+            sessionFacets = SessionFacets(
+                labels: fetched.labels,
+                projectIds: fetched.project_ids,
+            )
+        } catch {
+            print("[Relay] Failed to fetch session facets: \(error)")
         }
     }
 
@@ -720,6 +763,7 @@ final class RelayViewModel {
                         pendingAudioHasDone = false
                     }
                     await fetchSessions()
+                    await fetchSessionFacets()
                 }
             } else {
                 activeSessionId = payload.sessionId
@@ -729,6 +773,9 @@ final class RelayViewModel {
                 activities.removeAll()
                 audio.handleSessionChange(newSessionId: payload.sessionId)
                 Task { await fetchSessions() }
+                // A freshly-created session may introduce a new
+                // project_id the facets endpoint didn't know about.
+                Task { await fetchSessionFacets() }
             }
 
         case .sessionLeft(let payload):
@@ -812,6 +859,7 @@ final class RelayViewModel {
                 activeSessionLabels = payload.labels
             }
             Task { await fetchLabels() }
+            Task { await fetchSessionFacets() }
 
         case .sessionStatus(let payload):
             if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
@@ -841,6 +889,10 @@ final class RelayViewModel {
                 sessionMessages = []
                 audio.handleSessionChange(newSessionId: nil)
             }
+            // Delete may have removed the last session under a given
+            // label / project — refresh the facets so those drop out
+            // of the filter dropdowns.
+            Task { await fetchSessionFacets() }
 
         case .textStart(let payload):
             if suppressNextGreeting && payload.speaker == "operator" { break }

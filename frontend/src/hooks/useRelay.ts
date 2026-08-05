@@ -54,6 +54,11 @@ export interface RelayState {
   /** Ark activity events for the currently-running agent turn. Cleared
    *  when the turn ends (text_done) or the user sends a new message. */
   activities: AgentActivity[];
+  /** Distinct labels + project_ids in use across ALL of the user's
+   *  sessions, not just the loaded 20-most-recent slice. Powers the
+   *  sidebar filter dropdowns so values on older sessions remain
+   *  filter-selectable. */
+  sessionFacets: { labels: string[]; projectIds: string[] };
 }
 
 export function useRelay() {
@@ -79,6 +84,7 @@ export function useRelay() {
     fileChanges: [],
     compacting: {},
     activities: [],
+    sessionFacets: { labels: [], projectIds: [] },
   });
 
   // Fetch agent list
@@ -120,17 +126,35 @@ export function useRelay() {
     }
   }, []);
 
-  // Fetch sessions list. When `search` or `label` is non-empty, the server
-  // returns matches beyond the default 20 most-recent.
-  const fetchSessions = useCallback(async (opts?: { search?: string; label?: string }) => {
+  // Fetch sessions list. When any of `search` / `label` / `project` is
+  // non-empty, the server returns matches beyond the default 20-most-
+  // recent so older filtered sessions remain reachable.
+  const fetchSessions = useCallback(async (opts?: { search?: string; label?: string; project?: string }) => {
     try {
       const params = new URLSearchParams();
       if (opts?.search) params.set("search", opts.search);
       if (opts?.label) params.set("label", opts.label);
+      if (opts?.project) params.set("project", opts.project);
       const qs = params.toString();
       const res = await apiFetch(`/v1/sessions${qs ? `?${qs}` : ""}`);
       const sessions: Session[] = await res.json();
       setState((s) => ({ ...s, sessions }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Fetch distinct labels + project_ids across the user's full session
+  // history — powers the sidebar filter dropdowns so values on older
+  // sessions (past the 20-most-recent cap) are still selectable.
+  const fetchSessionFacets = useCallback(async () => {
+    try {
+      const res = await apiFetch("/v1/sessions/facets");
+      const facets: { labels: string[]; project_ids: string[] } = await res.json();
+      setState((s) => ({
+        ...s,
+        sessionFacets: { labels: facets.labels, projectIds: facets.project_ids },
+      }));
     } catch {
       // ignore
     }
@@ -173,6 +197,7 @@ export function useRelay() {
       setState((s) => ({ ...s, connected: true }));
       fetchSessions();
       fetchLabels();
+      fetchSessionFacets();
       refreshAgents();
       apiFetch("/v1/agents/stt/status")
         .then((r) => r.json())
@@ -279,6 +304,9 @@ export function useRelay() {
             activities: [],
           }));
           fetchSessions();
+          // A freshly-created session can introduce a new project_id
+          // the facets endpoint didn't know about.
+          fetchSessionFacets();
           break;
 
         case "session_left":
@@ -410,6 +438,7 @@ export function useRelay() {
                 : s.activeSessionLabels,
           }));
           fetchLabels();
+          fetchSessionFacets();
           break;
 
         case "session_status":
@@ -458,6 +487,10 @@ export function useRelay() {
                 ? []
                 : s.sessionMessages,
           }));
+          // Delete may have removed the last session with a given
+          // label or project — refresh so those drop out of the filter
+          // dropdowns.
+          fetchSessionFacets();
           break;
 
         case "agent_file": {

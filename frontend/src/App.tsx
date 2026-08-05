@@ -6,6 +6,7 @@ import { StatusOrb } from "./components/StatusOrb";
 import { ConversationLog } from "./components/ConversationLog";
 import { TextInput } from "./components/TextInput";
 import { AgentActivityStrip } from "./components/AgentActivityStrip";
+import { FilterMenu } from "./components/FilterMenu";
 import { AgentSelector } from "./components/AgentSelector";
 import { AgentManagement } from "./components/AgentManagement";
 import { ProjectManager } from "./components/ProjectManager";
@@ -44,6 +45,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const [confirmingCompactId, setConfirmingCompactId] = useState<string | null>(null);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [sessionSearch, setSessionSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -258,11 +260,13 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const projectNameOf = (sessionProjectId?: string | null) =>
     sessionProjectId ? projectsById.get(sessionProjectId)?.name ?? null : null;
 
-  // Filter sessions by label and search. Search matches the session name,
-  // agent name, label names, AND project name — chips and labels live in
-  // the same conceptual space, so the search bar finds either.
+  // Filter sessions by label, project, and search. Search matches the
+  // session name, agent name, label names, AND project name — chips and
+  // labels live in the same conceptual space, so the search bar finds
+  // either. Project + label filters compose with AND semantics.
   const filteredSessions = relay.sessions.filter((s) => {
     if (labelFilter && !s.labels?.includes(labelFilter)) return false;
+    if (projectFilter && s.project_id !== projectFilter) return false;
     if (sessionSearch) {
       const q = sessionSearch.toLowerCase();
       const haystack = [
@@ -278,14 +282,38 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
     return true;
   });
 
+  // Filter-dropdown option lists come from the server-computed facets
+  // endpoint — distinct labels + project_ids across ALL of the user's
+  // sessions, not just the 20-most-recent slice we've loaded. Without
+  // this, rare labels/projects that live on older sessions would drop
+  // out of the picker and become effectively unreachable. The current
+  // filter value is force-added even if it isn't in the returned set,
+  // so the user can always dismiss it.
+  const labelsInUse = (() => {
+    const seen = new Set<string>(relay.sessionFacets.labels);
+    if (labelFilter) seen.add(labelFilter);
+    return Array.from(seen).sort();
+  })();
+  const projectsInUse = (() => {
+    const seen = new Set<string>(relay.sessionFacets.projectIds);
+    if (projectFilter) seen.add(projectFilter);
+    return Array.from(seen)
+      .map((id) => ({ value: id, label: projectNameOf(id) ?? id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  })();
+
   // Debounced server-side refetch so sessions outside the 20-most-recent
-  // cap remain findable when searching or filtering by label.
+  // cap remain findable when searching or filtering.
   useEffect(() => {
     const timer = setTimeout(() => {
-      relay.fetchSessions({ search: sessionSearch, label: labelFilter ?? undefined });
+      relay.fetchSessions({
+        search: sessionSearch,
+        label: labelFilter ?? undefined,
+        project: projectFilter ?? undefined,
+      });
     }, 250);
     return () => clearTimeout(timer);
-  }, [sessionSearch, labelFilter, relay.fetchSessions]);
+  }, [sessionSearch, labelFilter, projectFilter, relay.fetchSessions]);
 
   // Global keyboard shortcuts: "/" focuses search, "m" focuses message input,
   // Escape blurs the current text field.
@@ -456,27 +484,28 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           />
         )}
 
-        {/* Label filter bar */}
-        {relay.connected && allLabels.length > 0 && (
-          <div className="space-y-1">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1 section-label">
-              Labels
-            </h3>
-            <div className="flex flex-wrap gap-1 px-1">
-              {allLabels.map((label) => (
-                <button
-                  key={label}
-                  onClick={() => setLabelFilter(labelFilter === label ? null : label)}
-                  className="text-xs px-2 py-0.5 rounded-full transition-colors label-chip"
-                  style={labelFilter === label
-                    ? { backgroundColor: "var(--primary)", color: "var(--bg)" }
-                    : { backgroundColor: "var(--elevated)", color: "var(--text-tertiary)" }
-                  }
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+        {/* Session filters. Two compact dropdowns — Project + Label —
+            each pulling from the set of values actually in use across
+            the loaded session list. Only rendered when there's
+            something to filter on. Filters compose with AND semantics. */}
+        {relay.connected && (projectsInUse.length > 0 || labelsInUse.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5 px-1">
+            {projectsInUse.length > 0 && (
+              <FilterMenu
+                title="Project"
+                options={projectsInUse}
+                value={projectFilter}
+                onChange={setProjectFilter}
+              />
+            )}
+            {labelsInUse.length > 0 && (
+              <FilterMenu
+                title="Label"
+                options={labelsInUse.map((l) => ({ value: l, label: l }))}
+                value={labelFilter}
+                onChange={setLabelFilter}
+              />
+            )}
           </div>
         )}
 
@@ -484,11 +513,11 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             least one session OR the user has an active search / label
             filter — otherwise a search that returns zero results would
             hide the search box itself, leaving no way to clear it. */}
-        {relay.connected && (relay.sessions.length > 0 || sessionSearch || labelFilter) && (
+        {relay.connected && (relay.sessions.length > 0 || sessionSearch || labelFilter || projectFilter) && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 px-1">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider section-label">
-                {labelFilter ? `Sessions: ${labelFilter}` : "Sessions"}
+                Sessions
               </h3>
               <div className="flex-1 flex items-center min-w-0">
                 <input

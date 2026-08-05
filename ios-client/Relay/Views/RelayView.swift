@@ -22,6 +22,8 @@ struct RelayView: View {
     @State private var labelInputText = ""
     @State private var menuLabelFilter: String?
     @State private var sidebarLabelFilter: String?
+    @State private var menuProjectFilter: String?
+    @State private var sidebarProjectFilter: String?
     @State private var sidebarSessionSearch = ""
     @State private var sidebarSearchQuery = ""
     @State private var menuSessionSearch = ""
@@ -212,18 +214,15 @@ struct RelayView: View {
                 Task { await relay.reconnect() }
             }
         }
-        .onChange(of: sidebarSearchQuery) { _, q in
-            Task { await relay.fetchSessions(search: q, label: sidebarLabelFilter) }
-        }
-        .onChange(of: sidebarLabelFilter) { _, l in
-            Task { await relay.fetchSessions(search: sidebarSearchQuery, label: l) }
-        }
-        .onChange(of: menuSearchQuery) { _, q in
-            Task { await relay.fetchSessions(search: q, label: menuLabelFilter) }
-        }
-        .onChange(of: menuLabelFilter) { _, l in
-            Task { await relay.fetchSessions(search: menuSearchQuery, label: l) }
-        }
+        .modifier(SessionFilterRefetch(
+            relay: relay,
+            sidebarSearch: sidebarSearchQuery,
+            sidebarLabel: sidebarLabelFilter,
+            sidebarProject: sidebarProjectFilter,
+            menuSearch: menuSearchQuery,
+            menuLabel: menuLabelFilter,
+            menuProject: menuProjectFilter,
+        ))
         .onReceive(NotificationCenter.default.publisher(for: .relayToggleMute)) { _ in
             relay.toggleMute()
         }
@@ -435,36 +434,45 @@ struct RelayView: View {
                         sidebarAgentsSection
                     }
 
-                    // Label filter
-                    let allLabels = relay.allLabels
-                    if !allLabels.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("LABELS")
-                                .font(theme.labelFont(size: 12))
-                                .tracking(1.5)
-                                .foregroundStyle(theme.textQuaternary)
-                                .padding(.horizontal, 16)
-
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    ForEach(allLabels, id: \.self) { label in
-                                        Button {
-                                            sidebarLabelFilter = sidebarLabelFilter == label ? nil : label
-                                        } label: {
-                                            Text(label)
-                                                .font(theme.bodyFont(size: 20, weight: .medium))
-                                                .foregroundStyle(sidebarLabelFilter == label ? .white : theme.primary)
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(sidebarLabelFilter == label ? theme.primary : theme.primary.opacity(0.15))
-                                                .clipShape(Capsule())
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .padding(.horizontal, 16)
+                    // Session filters (Project + Label). Options come
+                    // from the server-computed facets endpoint so
+                    // values on older sessions past the 20-most-recent
+                    // cap remain selectable. Row hides entirely when
+                    // neither facet has values.
+                    if !relay.sessionFacets.projectIds.isEmpty
+                        || !relay.sessionFacets.labels.isEmpty
+                    {
+                        // Plain HStack rather than a horizontal
+                        // ScrollView — SwiftUI's Menu popover gets
+                        // clipped/reflowed for several seconds when
+                        // its label lives inside a scrollable that
+                        // isn't the root. Two compact chips fit the
+                        // sidebar width comfortably; the value label
+                        // caps at 120pt to keep them bounded.
+                        HStack(spacing: 6) {
+                            if !relay.sessionFacets.projectIds.isEmpty
+                                || sidebarProjectFilter != nil
+                            {
+                                SessionFilterMenu(
+                                    title: "Project",
+                                    options: projectFilterOptions(active: sidebarProjectFilter),
+                                    value: sidebarProjectFilter,
+                                    onChange: { sidebarProjectFilter = $0 },
+                                )
                             }
+                            if !relay.sessionFacets.labels.isEmpty
+                                || sidebarLabelFilter != nil
+                            {
+                                SessionFilterMenu(
+                                    title: "Label",
+                                    options: labelFilterOptions(active: sidebarLabelFilter),
+                                    value: sidebarLabelFilter,
+                                    onChange: { sidebarLabelFilter = $0 },
+                                )
+                            }
+                            Spacer(minLength: 0)
                         }
+                        .padding(.horizontal, 16)
                     }
 
                     // Sessions section
@@ -586,9 +594,36 @@ struct RelayView: View {
         return relay.projects.first(where: { $0.id == pid })?.name
     }
 
+    /// Options list for the project filter dropdown. Includes every
+    /// project_id the facets endpoint returned, plus the currently-
+    /// selected value if it's not in that set (so a stuck filter can
+    /// always be cleared). Labels resolve to project names when known.
+    private func projectFilterOptions(active: String?) -> [SessionFilterMenu.Option] {
+        var ids = Set(relay.sessionFacets.projectIds)
+        if let a = active { ids.insert(a) }
+        return ids
+            .map { pid in
+                let name = relay.projects.first(where: { $0.id == pid })?.name ?? pid
+                return SessionFilterMenu.Option(value: pid, label: name)
+            }
+            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+    }
+
+    /// Options list for the label filter dropdown. Same semantics as
+    /// the project version — server-supplied facets + currently-
+    /// selected value.
+    private func labelFilterOptions(active: String?) -> [SessionFilterMenu.Option] {
+        var labels = Set(relay.sessionFacets.labels)
+        if let a = active { labels.insert(a) }
+        return labels
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { SessionFilterMenu.Option(value: $0, label: $0) }
+    }
+
     private var sidebarSessionsSection: some View {
         let filtered = relay.sessions.filter { session in
             if let filter = sidebarLabelFilter, !session.labels.contains(filter) { return false }
+            if let pfilter = sidebarProjectFilter, session.projectId != pfilter { return false }
             if !sidebarSearchQuery.isEmpty {
                 let q = sidebarSearchQuery.lowercased()
                 // Search hits name / agent / labels / project name — chips and
@@ -604,7 +639,7 @@ struct RelayView: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(sidebarLabelFilter.map { "SESSIONS: \($0.uppercased())" } ?? "SESSIONS")
+                Text("SESSIONS")
                     .font(theme.labelFont(size: 12))
                     .tracking(1.5)
                     .foregroundStyle(theme.textQuaternary)
@@ -1124,27 +1159,38 @@ struct RelayView: View {
                 }
 
                 if !relay.sessions.isEmpty {
-                    // Label filter chips
-                    let allLabels = relay.allLabels
-                    if !allLabels.isEmpty {
-                        Section(header: Text("Labels").font(theme.labelFont(size: 12)).tracking(1).foregroundStyle(theme.primary)) {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    ForEach(allLabels, id: \.self) { label in
-                                        Button {
-                                            menuLabelFilter = menuLabelFilter == label ? nil : label
-                                        } label: {
-                                            Text(label)
-                                                .font(theme.bodyFont(size: 18, weight: .medium))
-                                                .foregroundStyle(menuLabelFilter == label ? .white : theme.primary)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                                .background(menuLabelFilter == label ? theme.primary : theme.primary.opacity(0.15))
-                                                .clipShape(Capsule())
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
+                    // Session filters (Project + Label) — same
+                    // dropdowns as the iPad sidebar. Row hides when
+                    // neither facet has values.
+                    if !relay.sessionFacets.projectIds.isEmpty
+                        || !relay.sessionFacets.labels.isEmpty
+                    {
+                        Section(header: Text("Filter").font(theme.labelFont(size: 12)).tracking(1).foregroundStyle(theme.primary)) {
+                            // Plain HStack — same rationale as the
+                            // iPad sidebar. Menu popovers clip weirdly
+                            // when nested inside a non-root scrollable.
+                            HStack(spacing: 6) {
+                                if !relay.sessionFacets.projectIds.isEmpty
+                                    || menuProjectFilter != nil
+                                {
+                                    SessionFilterMenu(
+                                        title: "Project",
+                                        options: projectFilterOptions(active: menuProjectFilter),
+                                        value: menuProjectFilter,
+                                        onChange: { menuProjectFilter = $0 },
+                                    )
                                 }
+                                if !relay.sessionFacets.labels.isEmpty
+                                    || menuLabelFilter != nil
+                                {
+                                    SessionFilterMenu(
+                                        title: "Label",
+                                        options: labelFilterOptions(active: menuLabelFilter),
+                                        value: menuLabelFilter,
+                                        onChange: { menuLabelFilter = $0 },
+                                    )
+                                }
+                                Spacer(minLength: 0)
                             }
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .listRowBackground(Color.clear)
@@ -1153,6 +1199,7 @@ struct RelayView: View {
 
                     let filteredSessions = relay.sessions.filter { session in
                         if let filter = menuLabelFilter, !session.labels.contains(filter) { return false }
+                        if let pfilter = menuProjectFilter, session.projectId != pfilter { return false }
                         if !menuSearchQuery.isEmpty {
                             let q = menuSearchQuery.lowercased()
                             var haystack = (session.name ?? "").lowercased()
@@ -1166,7 +1213,7 @@ struct RelayView: View {
 
                     Section(header:
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(menuLabelFilter.map { "Sessions: \($0)" } ?? "Recent Sessions")
+                            Text("Recent Sessions")
                                 .font(theme.labelFont(size: 12))
                                 .tracking(1)
                                 .foregroundStyle(theme.primary)
@@ -1432,6 +1479,42 @@ struct RelayView: View {
 /// into a `ViewModifier` for the same reason as `DirtyCloseAlert` —
 /// chaining two more `.alert(...)` calls onto RelayView's body tips
 /// the SwiftUI type-checker over.
+/// Consolidates the six `.onChange(of:)` handlers that used to be
+/// attached inline in `RelayView.body` — three for the iPad sidebar
+/// filters (search / label / project) and three for the iPhone menu.
+/// Broken out for the same reason as `DirtyCloseAlert`: chaining that
+/// many closures into an already-large `body` tips the Swift
+/// type-checker over its budget.
+private struct SessionFilterRefetch: ViewModifier {
+    let relay: RelayViewModel
+    let sidebarSearch: String
+    let sidebarLabel: String?
+    let sidebarProject: String?
+    let menuSearch: String
+    let menuLabel: String?
+    let menuProject: String?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: sidebarSearch) { _, _ in refetchSidebar() }
+            .onChange(of: sidebarLabel) { _, _ in refetchSidebar() }
+            .onChange(of: sidebarProject) { _, _ in refetchSidebar() }
+            .onChange(of: menuSearch) { _, _ in refetchMenu() }
+            .onChange(of: menuLabel) { _, _ in refetchMenu() }
+            .onChange(of: menuProject) { _, _ in refetchMenu() }
+    }
+
+    private func refetchSidebar() {
+        let s = sidebarSearch, l = sidebarLabel, p = sidebarProject
+        Task { await relay.fetchSessions(search: s, label: l, project: p) }
+    }
+
+    private func refetchMenu() {
+        let s = menuSearch, l = menuLabel, p = menuProject
+        Task { await relay.fetchSessions(search: s, label: l, project: p) }
+    }
+}
+
 private struct CompactSessionAlerts: ViewModifier {
     @Binding var compactConfirmSessionId: String?
     @Binding var compactError: String?

@@ -14,6 +14,7 @@ from app.services.conversation_manager import (
     get_session,
     get_session_labels,
     get_session_messages,
+    list_session_facets,
     list_sessions,
     list_user_labels,
     rename_session,
@@ -77,14 +78,34 @@ class LabelOut(BaseModel):
     name: str
 
 
+class SessionFacetsOut(BaseModel):
+    """Distinct labels + project_ids actually in use across the user's
+    sessions. Powers the sidebar's Project + Label filter dropdowns so
+    they surface every value in use, not just what's in the loaded
+    20-most-recent slice."""
+    labels: list[str]
+    project_ids: list[str]
+
+
+@router.get("/facets", response_model=SessionFacetsOut)
+async def get_session_facets(
+    user_id: str = "default", db: AsyncSession = Depends(get_db),
+):
+    facets = await list_session_facets(db, user_id)
+    return SessionFacetsOut(**facets)
+
+
 @router.get("", response_model=list[SessionOut])
 async def get_sessions(
     user_id: str = "default",
     label: str | None = Query(None, description="Filter sessions by label name"),
+    project: str | None = Query(None, description="Filter sessions by ark project_id"),
     search: str | None = Query(None, description="Search by session name, summary, or agent name"),
     db: AsyncSession = Depends(get_db),
 ):
-    sessions = await list_sessions(db, user_id, label_filter=label, search=search)
+    sessions = await list_sessions(
+        db, user_id, label_filter=label, project_filter=project, search=search,
+    )
     return [SessionOut(**s) for s in sessions]
 
 

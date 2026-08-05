@@ -162,6 +162,40 @@ async def list_user_labels(db: AsyncSession, user_id: str = "default") -> list[d
     ]
 
 
+async def list_session_facets(
+    db: AsyncSession, user_id: str = "default",
+) -> dict[str, list[str]]:
+    """Return distinct labels and project_ids actually in use across the
+    user's non-deleted sessions. Used to populate the filter dropdowns
+    with values that appear on at least one existing session — no dead
+    options — even when the sidebar's 20-most-recent cap hides the
+    session where a rare label/project lives.
+    """
+    # Distinct label names attached to any of this user's sessions.
+    label_rows = await db.execute(
+        select(Label.name)
+        .join(SessionLabel, Label.label_id == SessionLabel.label_id)
+        .join(Session, SessionLabel.session_id == Session.session_id)
+        .where(Session.user_id == user_id, Session.deleted_at.is_(None))
+        .distinct()
+    )
+    labels = sorted([r[0] for r in label_rows.all() if r[0]])
+
+    # Distinct project_ids used by this user's sessions.
+    project_rows = await db.execute(
+        select(Session.project_id)
+        .where(
+            Session.user_id == user_id,
+            Session.deleted_at.is_(None),
+            Session.project_id.is_not(None),
+        )
+        .distinct()
+    )
+    project_ids = sorted([str(r[0]) for r in project_rows.all() if r[0]])
+
+    return {"labels": labels, "project_ids": project_ids}
+
+
 async def has_user_messages(db: AsyncSession, session_id: uuid.UUID) -> bool:
     """Check whether a session has any user-sent messages."""
     result = await db.execute(
@@ -176,12 +210,14 @@ async def list_sessions(
     db: AsyncSession,
     user_id: str = "default",
     label_filter: str | None = None,
+    project_filter: str | None = None,
     search: str | None = None,
 ) -> list[dict]:
     """Return sessions with agent names and labels for display.
 
-    Default caps at 20 most-recent sessions. When `search` or `label_filter`
-    is set, the cap is raised to 500 so older sessions remain reachable.
+    Default caps at 20 most-recent sessions. When any of `search`,
+    `label_filter`, or `project_filter` is set, the cap is raised to
+    500 so older sessions remain reachable.
     """
     query = (
         select(Session, Agent.name)
@@ -197,6 +233,9 @@ async def list_sessions(
             .where(Label.name == label_filter)
         )
 
+    if project_filter:
+        query = query.where(Session.project_id == project_filter)
+
     if search:
         pattern = f"%{search.lower()}%"
         query = query.where(
@@ -207,7 +246,7 @@ async def list_sessions(
             )
         )
 
-    limit = 500 if (search or label_filter) else 20
+    limit = 500 if (search or label_filter or project_filter) else 20
     query = query.order_by(Session.last_active.desc()).limit(limit)
     result = await db.execute(query)
 
