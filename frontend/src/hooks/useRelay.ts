@@ -199,6 +199,7 @@ export function useRelay() {
       fetchLabels();
       fetchSessionFacets();
       refreshAgents();
+      refreshProjects();
       apiFetch("/v1/agents/stt/status")
         .then((r) => r.json())
         .then((data: { available: boolean }) =>

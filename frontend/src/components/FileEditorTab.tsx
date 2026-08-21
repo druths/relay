@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
@@ -20,8 +20,14 @@ interface Props {
   /** The scope value we should match against `fileChanges[*].scope`
    * (`project_id` for projects, ark `agent_name` for workspaces). */
   scope: string;
-  /** Lifted up so the tab bar can show the dirty dot. */
-  onDirtyChange: (dirty: boolean) => void;
+  /** Identifier of the parent's tab entry — passed through to the
+   * dirty-change callback so the parent can update the right row without
+   * needing a per-tab arrow (which would break referential stability and
+   * trigger a re-render loop through the effect below). */
+  tabId: string;
+  /** Lifted up so the tab bar can show the dirty dot. Signature takes
+   * the tabId so a single stable useCallback can serve every open tab. */
+  onDirtyChange: (tabId: string, dirty: boolean) => void;
 }
 
 const IMAGE_EXT_ALLOWLIST = new Set([
@@ -79,7 +85,7 @@ export function isKnownBinaryExt(path: string): boolean {
 }
 
 export function FileEditorTab({
-  kind, targetId, path, server, fileChanges, scope, onDirtyChange,
+  kind, targetId, path, server, fileChanges, scope, tabId, onDirtyChange,
 }: Props) {
   const [savedContent, setSavedContent] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -120,8 +126,8 @@ export function FileEditorTab({
   const isDirty = savedContent !== null && draft !== savedContent;
 
   useEffect(() => {
-    onDirtyChange(isDirty);
-  }, [isDirty, onDirtyChange]);
+    onDirtyChange(tabId, isDirty);
+  }, [isDirty, tabId, onDirtyChange]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -246,11 +252,26 @@ export function FileEditorTab({
     if (view) openSearchPanel(view);
   };
 
-  // Extensions list rebuilds when `wrap` changes so CodeMirror reconfigures
-  // line wrapping. `oneDark` ships with the line-number gutter styled.
-  const extensions = wrap
-    ? [oneDark, EditorView.lineWrapping]
-    : [oneDark];
+  // Extensions list rebuilds only when `wrap` changes so CodeMirror
+  // reconfigures line wrapping. Memoized so an unrelated parent re-render
+  // (e.g. a WS event) doesn't hand CodeMirror a fresh array reference
+  // every time and trigger a needless reconfigure. `oneDark` ships with
+  // the line-number gutter styled.
+  const extensions = useMemo(
+    () => (wrap ? [oneDark, EditorView.lineWrapping] : [oneDark]),
+    [wrap],
+  );
+  // Same reasoning — a stable object reference for `basicSetup` keeps
+  // CodeMirror from re-processing its config on every parent re-render.
+  const basicSetup = useMemo(
+    () => ({
+      lineNumbers: true,
+      foldGutter: false,
+      highlightActiveLine: false,
+      highlightActiveLineGutter: false,
+    }),
+    [],
+  );
 
   return (
     <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-gray-950 relative">
@@ -367,12 +388,7 @@ export function FileEditorTab({
             height="100%"
             width="100%"
             theme={oneDark}
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: false,
-              highlightActiveLine: false,
-              highlightActiveLineGutter: false,
-            }}
+            basicSetup={basicSetup}
             className="h-full w-full text-[13px]"
           />
         )}

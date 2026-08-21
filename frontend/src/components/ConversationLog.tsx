@@ -127,9 +127,9 @@ interface ConversationLogProps {
 }
 
 const ROLE_STYLES: Record<string, string> = {
-  user: "bg-gray-800 ml-12 text-right msg-user",
-  operator: "bg-blue-900/40 mr-12 msg-operator",
-  agent: "bg-emerald-900/40 mr-12 msg-agent",
+  user: "bg-gray-800 ml-auto w-fit max-w-[calc(100%-3rem)] msg-user",
+  operator: "bg-blue-900/40 w-fit max-w-[calc(100%-3rem)] msg-operator",
+  agent: "bg-emerald-900/40 w-fit max-w-[calc(100%-3rem)] msg-agent",
 };
 
 function _formatTime(iso: string): string {

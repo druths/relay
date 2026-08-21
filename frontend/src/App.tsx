@@ -144,9 +144,17 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   };
 
   const setTabDirty = useCallback((tabId: string, dirty: boolean) => {
-    setOpenTabs((tabs) =>
-      tabs.map((t) => (t.tabId === tabId ? { ...t, dirty } : t)),
-    );
+    setOpenTabs((tabs) => {
+      const idx = tabs.findIndex((t) => t.tabId === tabId);
+      // Bail out to the previous reference when nothing actually changed —
+      // returning a new array here forces React to re-render App, which
+      // in a large tree (chat history + editor) adds up fast when the
+      // dirty state is being reported on every parent re-render.
+      if (idx === -1 || tabs[idx].dirty === dirty) return tabs;
+      const next = tabs.slice();
+      next[idx] = { ...next[idx], dirty };
+      return next;
+    });
   }, []);
 
   // Diagnostics is a global UI preference: when on, every conversation bubble
@@ -972,7 +980,8 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                     server={t.server}
                     scope={t.scope}
                     fileChanges={relay.fileChanges}
-                    onDirtyChange={(dirty) => setTabDirty(t.tabId, dirty)}
+                    tabId={t.tabId}
+                    onDirtyChange={setTabDirty}
                   />
                 )
               ))}
