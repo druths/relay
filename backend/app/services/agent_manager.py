@@ -602,6 +602,61 @@ async def _handle_ark_event(
             await _broadcast_to_user(user_id, {"type": etype, "payload": payload})
         return
 
+    # ── Session project reassignment ───────────────────────────────
+    # Ark fires `session_project_changed` on any real binding change
+    # (skips no-ops). We (1) mirror the change into `sessions.project_id`
+    # so the row matches what ark sees, (2) persist a marker so history
+    # renders a divider at the transition point, and (3) forward the
+    # event so open clients can update chips/filters without a refetch.
+    if etype == "session_project_changed":
+        from_id = event.get("from_project_id")
+        to_id = event.get("to_project_id")
+        from_name = event.get("from_project_name")
+        to_name = event.get("to_project_name")
+        # Compose a stable marker text that both the persistence
+        # dedupe check and the client divider can use directly. The
+        # names are already the human-facing labels ark resolved at
+        # change-time, so they stay correct even if a project is
+        # later renamed.
+        if from_id and to_id:
+            marker_text = f"Project changed: {from_name or from_id} → {to_name or to_id}"
+        elif to_id:
+            marker_text = f"Project set: {to_name or to_id}"
+        else:
+            marker_text = f"Project cleared (was {from_name or from_id})"
+        if not await _message_already_persisted(
+            relay_session_id, marker_text, role="project_change",
+        ):
+            await _persist_project_change_marker(
+                session_id_str=relay_session_id,
+                text=marker_text,
+                from_id=from_id, to_id=to_id,
+                from_name=from_name, to_name=to_name,
+            )
+        # Keep the mirror row in sync so the session list, filter
+        # dropdowns, and chip renderer reflect the new binding even
+        # when the change originated outside Relay (CLI, another
+        # client). The PATCH handler already updates in-band on its
+        # own success path; this covers external-origin changes.
+        await _mirror_session_project(
+            relay_session_id=relay_session_id, to_id=to_id,
+        )
+        if not is_catch_up:
+            await _broadcast_to_user(user_id, {
+                "type": "session_project_changed",
+                "payload": {
+                    "session_id": relay_session_id,
+                    "agent_name": agent_name,
+                    "from_project_id": from_id,
+                    "from_project_name": from_name,
+                    "to_project_id": to_id,
+                    "to_project_name": to_name,
+                    "marker_text": marker_text,
+                    "changed_at": event.get("changed_at"),
+                },
+            })
+        return
+
 
 async def _file_already_persisted(session_id_str: str, path: str) -> str | None:
     """Return the file_id of an existing File row for this session+path, or
@@ -747,6 +802,76 @@ async def _persist_compaction_marker(
             await invalidate_session_cache(session_id_str)
     except Exception:
         logger.exception("Failed to persist compaction marker")
+
+
+async def _persist_project_change_marker(
+    *, session_id_str: str, text: str,
+    from_id: str | None, to_id: str | None,
+    from_name: str | None, to_name: str | None,
+) -> None:
+    """Persist an ark session-project change as a marker row. Uses a
+    dedicated `role="project_change"` so clients can render it as a
+    timeline divider rather than a chat bubble. The id/name pairs are
+    kept in metadata so the divider can render the transition without
+    parsing `text_content`."""
+    from app.db.database import async_session
+    from app.db.redis import invalidate_session_cache
+    from app.models.message import Message as MessageModel
+    import uuid as _uuid
+
+    try:
+        async with async_session() as db:
+            db_msg = MessageModel(
+                session_id=_uuid.UUID(session_id_str),
+                role="project_change",
+                text_content=text,
+                metadata_={
+                    "from_project_id": from_id,
+                    "to_project_id": to_id,
+                    "from_project_name": from_name,
+                    "to_project_name": to_name,
+                },
+            )
+            db.add(db_msg)
+            await db.commit()
+            await invalidate_session_cache(session_id_str)
+    except Exception:
+        logger.exception("Failed to persist project_change marker")
+
+
+async def _mirror_session_project(
+    *, relay_session_id: str, to_id: str | None,
+) -> None:
+    """Update `sessions.project_id`/`project_server_id` on the Relay row
+    so the session list matches ark after an external-origin change.
+    `project_server_id` is left untouched when clearing (`to_id=None`) so
+    a follow-up reassign has the right server hint; the PATCH endpoint
+    handles the assign-side write path itself, so this only runs in
+    external-change scenarios where the ark server is the same one that
+    owns the session anyway."""
+    from app.db.database import async_session
+    from app.db.redis import invalidate_session_cache
+    from app.models.session import Session
+    from sqlalchemy import select
+    import uuid as _uuid
+
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(Session).where(
+                    Session.session_id == _uuid.UUID(relay_session_id),
+                )
+            )
+            sess = result.scalar_one_or_none()
+            if sess is None or sess.project_id == to_id:
+                return
+            sess.project_id = to_id
+            if to_id is None:
+                sess.project_server_id = None
+            await db.commit()
+            await invalidate_session_cache(relay_session_id)
+    except Exception:
+        logger.exception("Failed to mirror session project change")
 
 
 async def _persist_agent_shared_file(

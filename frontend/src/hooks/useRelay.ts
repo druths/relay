@@ -704,6 +704,37 @@ export function useRelay() {
           }
           break;
 
+        case "session_project_changed":
+          setState((s) => {
+            // Mirror the new binding into the session list so the chip
+            // and filter dropdowns update without a refetch. Only
+            // append the divider message to the active session — other
+            // sessions will pick it up on their next resume via
+            // session_history.
+            const nextSessions = s.sessions.map((sess) =>
+              sess.session_id === event.payload.session_id
+                ? { ...sess, project_id: event.payload.to_project_id }
+                : sess,
+            );
+            const isActive = s.activeSessionId === event.payload.session_id;
+            const nextMessages = isActive
+              ? [...s.sessionMessages, {
+                  role: "project_change",
+                  text_content: event.payload.marker_text,
+                  created_at: new Date().toISOString(),
+                  metadata: {
+                    from_project_id: event.payload.from_project_id,
+                    to_project_id: event.payload.to_project_id,
+                    from_project_name: event.payload.from_project_name,
+                    to_project_name: event.payload.to_project_name,
+                  },
+                }]
+              : s.sessionMessages;
+            return { ...s, sessions: nextSessions, sessionMessages: nextMessages };
+          });
+          fetchSessionFacets();
+          break;
+
         case "error":
           console.error("Relay error:", event.payload.message);
           break;
@@ -894,6 +925,34 @@ export function useRelay() {
     return doCompact(sessionId);
   }, []);
 
+  /// Reassign / detach a session's ark project binding. Ark echoes the
+  /// change over the WS (`session_project_changed`), which drives the
+  /// session-list chip refresh + transcript divider. We return the
+  /// updated session so the caller can await + close its dialog once
+  /// the write is durable.
+  const setSessionProject = useCallback(async (
+    sessionId: string, projectId: string | null,
+  ) => {
+    const { setSessionProject: doSet } = await import("../api");
+    const updated = await doSet(sessionId, projectId);
+    // Update the row immediately so callers don't have to wait for the
+    // WS event to reflect the change in the sidebar.
+    setState((s) => ({
+      ...s,
+      sessions: s.sessions.map((sess) =>
+        sess.session_id === sessionId
+          ? { ...sess, project_id: updated.project_id ?? null,
+                       project_server_id: updated.project_server_id ?? null }
+          : sess,
+      ),
+    }));
+    // The project the session used to be bound to may have just lost
+    // its last session; the new one may just have gained its first.
+    // Refresh so filter dropdowns don't lag behind.
+    fetchSessionFacets();
+    return updated;
+  }, [fetchSessionFacets]);
+
   const toggleMute = useCallback(() => {
     audioPlayerRef.current.setMuted(!audioPlayerRef.current.muted);
   }, []);
@@ -919,6 +978,7 @@ export function useRelay() {
     muted: audioPlayer.muted,
     toggleMute,
     compactSession,
+    setSessionProject,
   };
 }
 

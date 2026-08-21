@@ -53,6 +53,10 @@ ASYNC_EVENT_TYPES = {
     # via the async callback rather than the per-turn queue.
     "compaction_started", "compaction_completed",
     "compaction_failed", "compaction_skipped",
+    # Fired when a session's project binding changes (assign / reassign /
+    # detach). Routed async because it happens outside any given turn — a
+    # manual PATCH from a client, a CLI `ark session set-project`, etc.
+    "session_project_changed",
 }
 
 

@@ -20,6 +20,9 @@ struct ConversationLog: View {
                             if message.role == .compaction {
                                 CompactionDivider(message: message)
                                     .id(message.id)
+                            } else if message.role == .projectChange {
+                                ProjectChangeDivider(message: message)
+                                    .id(message.id)
                             } else {
                                 MessageBubble(message: message, diagnostics: diagnostics)
                                     .id(message.id)
@@ -68,6 +71,43 @@ struct ConversationLog: View {
                 .foregroundStyle(theme.textTertiary)
             Rectangle()
                 .fill(theme.border)
+                .frame(height: theme.borderWidth)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Renders a `role: .projectChange` marker as a full-width divider with
+/// a chip carrying the server-composed label ("Project changed: A → B",
+/// "Project set: X", "Project cleared…"). Tinted blue so it reads as
+/// distinct from the amber compaction divider even at a glance.
+private struct ProjectChangeDivider: View {
+    let message: Message
+    @Environment(\.relayTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(theme.primary.opacity(0.4))
+                .frame(height: theme.borderWidth)
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.system(size: 9))
+                Text(message.textContent)
+                    .font(theme.monoFont(size: 11))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .foregroundStyle(theme.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(theme.primary.opacity(0.12))
+            .overlay(
+                Capsule().stroke(theme.primary.opacity(0.35), lineWidth: theme.borderWidth),
+            )
+            .clipShape(Capsule())
+            Rectangle()
+                .fill(theme.primary.opacity(0.4))
                 .frame(height: theme.borderWidth)
         }
         .padding(.vertical, 4)

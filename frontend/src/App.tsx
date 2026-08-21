@@ -13,6 +13,7 @@ import { ProjectManager } from "./components/ProjectManager";
 import { FileBrowserPanel } from "./components/FileBrowserPanel";
 import { CreateChatDialog } from "./components/CreateChatDialog";
 import { EndpointCheckDialog } from "./components/EndpointCheckDialog";
+import { SetProjectDialog } from "./components/SetProjectDialog";
 import type { Agent } from "./types";
 import { FileEditorTab } from "./components/FileEditorTab";
 import { uploadFiles } from "./api";
@@ -44,6 +45,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   // Session ID awaiting a compaction confirm. Null when no modal open.
   const [confirmingCompactId, setConfirmingCompactId] = useState<string | null>(null);
   const [compactError, setCompactError] = useState<string | null>(null);
+  const [settingProjectSessionId, setSettingProjectSessionId] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [sessionSearch, setSessionSearch] = useState("");
@@ -678,6 +680,23 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                           >
                             Copy Session ID
                           </button>
+                          {/* Only ark sessions have a project concept —
+                              hide the item entirely for non-ark rows so
+                              users aren't left wondering why it's
+                              disabled. */}
+                          {relay.agents.find((a) => a.agent_id === s.agent_id)?.llm_provider === "ark" && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSettingProjectSessionId(s.session_id);
+                                setMenuOpenId(null);
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-sm text-gray-300
+                                         hover:bg-gray-700 transition-colors"
+                            >
+                              Set project…
+                            </button>
+                          )}
                           {confirmingDeleteId === s.session_id ? (
                             <div className="px-3 py-1.5 flex items-center gap-2">
                               <button
@@ -1115,6 +1134,24 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
       )}
+
+      {settingProjectSessionId && (() => {
+        const sess = relay.sessions.find((s) => s.session_id === settingProjectSessionId);
+        if (!sess) return null;
+        const agentForSess = relay.agents.find((a) => a.agent_id === sess.agent_id) ?? null;
+        return (
+          <SetProjectDialog
+            session={sess}
+            agent={agentForSess}
+            projects={relay.projects}
+            onCancel={() => setSettingProjectSessionId(null)}
+            onSubmit={async (projectId) => {
+              await relay.setSessionProject(sess.session_id, projectId);
+              setSettingProjectSessionId(null);
+            }}
+          />
+        );
+      })()}
 
       {/* File browser side panel */}
       {showFileBrowser && showFileBrowserAvailable && activeSession && (

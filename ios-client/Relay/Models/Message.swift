@@ -31,6 +31,23 @@ struct MessageMetadata: Equatable, Codable {
     /// `auto:proactive`, `auto:reactive`, `client-invoked`,
     /// `client-supplied`, or a `disabled:*` variant.
     var reason: String?
+    /// Set on `role: .projectChange` marker rows. Both endpoints may be
+    /// nil (first-time-assign / detach). Names are the human labels ark
+    /// resolved at change-time — they stay correct even if the project
+    /// is later renamed.
+    var fromProjectId: String?
+    var toProjectId: String?
+    var fromProjectName: String?
+    var toProjectName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case usage
+        case reason
+        case fromProjectId = "from_project_id"
+        case toProjectId = "to_project_id"
+        case fromProjectName = "from_project_name"
+        case toProjectName = "to_project_name"
+    }
 }
 
 struct Message: Identifiable, Equatable {
@@ -49,6 +66,7 @@ struct Message: Identifiable, Equatable {
         case agent
         case system  // client-side markers (e.g., "Session ended")
         case compaction  // ark session summary — rendered as a divider
+        case projectChange = "project_change"  // ark project (re)assign — divider
     }
 
     init(
@@ -127,6 +145,7 @@ struct ServerMessage: Codable {
         case "user": messageRole = .user
         case "agent": messageRole = .agent
         case "compaction": messageRole = .compaction
+        case "project_change": messageRole = .projectChange
         default: messageRole = .operator
         }
         let mapped = (attachments ?? []).map {

@@ -30,6 +30,7 @@ enum WebSocketEvent {
     case compactionFailed(CompactionFailedPayload)
     case compactionSkipped(CompactionSkippedPayload)
     case agentActivity(AgentActivityPayload)
+    case sessionProjectChanged(SessionProjectChangedPayload)
     case error(ErrorPayload)
 }
 
@@ -359,6 +360,33 @@ struct CompactionSkippedPayload: Codable {
     }
 }
 
+/// Fired when a session's ark project binding changes (assign / reassign
+/// / detach). Only real changes emit — no-op PATCHes are silent. Clients
+/// update the session's `projectId` in place and drop a divider into the
+/// transcript at the marker's arrival point.
+struct SessionProjectChangedPayload: Codable {
+    let sessionId: String
+    let agentName: String
+    let fromProjectId: String?
+    let fromProjectName: String?
+    let toProjectId: String?
+    let toProjectName: String?
+    /// Server-composed label so all clients render the same divider text.
+    let markerText: String
+    let changedAt: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case agentName = "agent_name"
+        case fromProjectId = "from_project_id"
+        case fromProjectName = "from_project_name"
+        case toProjectId = "to_project_id"
+        case toProjectName = "to_project_name"
+        case markerText = "marker_text"
+        case changedAt = "changed_at"
+    }
+}
+
 /// Streamed mid-turn from ark: `thinking` deltas, `tool_call`
 /// invocations, and `tool_result` outputs. The `detail` blob is ark's
 /// raw event body — clients read it as opaque JSON so we don't need
@@ -465,6 +493,8 @@ extension WebSocketEvent {
                 return .compactionSkipped(try decoder.decode(CompactionSkippedPayload.self, from: payloadData))
             case "agent_activity":
                 return .agentActivity(try decoder.decode(AgentActivityPayload.self, from: payloadData))
+            case "session_project_changed":
+                return .sessionProjectChanged(try decoder.decode(SessionProjectChangedPayload.self, from: payloadData))
             case "error":
                 return .error(try decoder.decode(ErrorPayload.self, from: payloadData))
             default:

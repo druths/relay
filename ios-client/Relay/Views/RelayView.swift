@@ -44,6 +44,9 @@ struct RelayView: View {
     /// When non-nil, present the "Compact this session?" confirm dialog
     /// against this session id. Cleared on confirm / cancel.
     @State private var compactConfirmSessionId: String? = nil
+    // Session whose "Set project" dialog is currently open. Set from
+    // the sidebar/menu context menu → cleared when the sheet dismisses.
+    @State private var setProjectSessionId: String? = nil
     /// Server-side error text from the last compaction trigger, surfaced
     /// as an alert when non-nil.
     @State private var compactError: String? = nil
@@ -138,6 +141,23 @@ struct RelayView: View {
         }
         .sheet(item: $endpointCheckAgent) { agent in
             EndpointCheckSheet(relay: relay, agent: agent)
+                .environment(\.relayTheme, themeManager.current)
+        }
+        .sheet(
+            // Look up the Session by id at present-time so the sheet's
+            // Picker is initialised with the current binding. Dismissing
+            // clears the id state, closing the sheet.
+            item: Binding<Session?>(
+                get: {
+                    guard let sid = setProjectSessionId else { return nil }
+                    return relay.sessions.first(where: { $0.sessionId == sid })
+                },
+                set: { newValue in
+                    if newValue == nil { setProjectSessionId = nil }
+                },
+            ),
+        ) { session in
+            SetProjectSheet(relay: relay, session: session)
                 .environment(\.relayTheme, themeManager.current)
         }
         .sheet(isPresented: $showFileBrowser) {
@@ -771,6 +791,14 @@ struct RelayView: View {
                             Label("Copy Session ID", systemImage: "doc.on.doc")
                         }
 
+                        if _sessionIsArk(session) {
+                            Button {
+                                setProjectSessionId = session.sessionId
+                            } label: {
+                                Label("Set Project…", systemImage: "folder")
+                            }
+                        }
+
                         Button(role: .destructive) {
                             Task { await relay.deleteSession(session.sessionId) }
                         } label: {
@@ -780,6 +808,13 @@ struct RelayView: View {
                 }
             }
         }
+    }
+
+    /// True when this session's agent is ark-backed. Sessions without a
+    /// resolved agent (deleted mid-view, etc.) default to false so the
+    /// UI never surfaces project ops on something ark can't handle.
+    private func _sessionIsArk(_ session: Session) -> Bool {
+        relay.agents.first(where: { $0.agentId == session.agentId })?.llmProvider == "ark"
     }
 
     private var iPadMainContent: some View {
@@ -1332,6 +1367,17 @@ struct RelayView: View {
                                     UIPasteboard.general.string = id
                                 } label: {
                                     Label("Copy Session ID", systemImage: "doc.on.doc")
+                                }
+                                if _sessionIsArk(session) {
+                                    Button {
+                                        setProjectSessionId = session.sessionId
+                                        // Dismiss the sheet so the dialog
+                                        // presented from the main view isn't
+                                        // hidden behind it.
+                                        showMenu = false
+                                    } label: {
+                                        Label("Set Project…", systemImage: "folder")
+                                    }
                                 }
                             }
                         }

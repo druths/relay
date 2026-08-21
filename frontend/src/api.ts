@@ -36,7 +36,7 @@ export function getWsUrl(path: string): string {
 
 // ── ark projects + filesystem passthrough helpers ─────────────────────
 
-import type { Project, DirListing } from "./types";
+import type { Project, DirListing, Session } from "./types";
 
 export async function listProjects(): Promise<Project[]> {
   const resp = await apiFetch("/v1/projects");
@@ -131,6 +131,32 @@ export async function compactSession(sessionId: string): Promise<{ ok: boolean; 
       detail = await resp.text();
     }
     throw new Error(detail || `compactSession failed: ${resp.status}`);
+  }
+  return resp.json();
+}
+
+/** Assign, reassign, or detach a session's ark project binding. Pass
+ *  `projectId=null` to detach. Fires a `session_project_changed` WS
+ *  event on real changes (no-ops are silent). Only valid for ark-backed
+ *  sessions that have sent at least one message (409 otherwise). */
+export async function setSessionProject(
+  sessionId: string, projectId: string | null,
+): Promise<Session> {
+  const resp = await apiFetch(`/v1/sessions/${sessionId}/project`, {
+    method: "PATCH",
+    body: JSON.stringify({ project_id: projectId }),
+  });
+  if (!resp.ok) {
+    let detail: string;
+    try {
+      const j = await resp.json();
+      detail = typeof j.detail === "string" ? j.detail
+        : typeof j.detail?.message === "string" ? j.detail.message
+        : JSON.stringify(j.detail ?? j);
+    } catch {
+      detail = await resp.text();
+    }
+    throw new Error(detail || `setSessionProject failed: ${resp.status}`);
   }
   return resp.json();
 }

@@ -95,6 +95,13 @@ export interface MessageMetadata {
    * ark's: `auto:proactive`, `auto:reactive`, `client-invoked`,
    * `client-supplied`, or a `disabled:*` variant. */
   reason?: string;
+  /** Set on `role: "project_change"` marker rows. Both endpoints may
+   *  be null (detach / first-time-assign). Names are the human labels
+   *  ark resolved at change-time so they stay correct across renames. */
+  from_project_id?: string | null;
+  to_project_id?: string | null;
+  from_project_name?: string | null;
+  to_project_name?: string | null;
 }
 
 export interface Message {
@@ -367,6 +374,26 @@ export interface WsCompactionSkipped {
 // as they want. Clients accumulate into a per-turn activity list
 // that clears on text_done / new user send.
 
+/** Fires when a session's ark project binding is (re)assigned or
+ *  detached. Only real changes emit — no-op PATCHes are silent. Clients
+ *  should update the session's `project_id` in place and drop a
+ *  divider into the transcript at the marker's arrival point. */
+export interface WsSessionProjectChanged {
+  type: "session_project_changed";
+  payload: {
+    session_id: string;
+    agent_name: string;
+    from_project_id: string | null;
+    from_project_name: string | null;
+    to_project_id: string | null;
+    to_project_name: string | null;
+    /** Server-pre-composed label so all clients render the same text
+     *  ("Project changed: A → B", "Project set: X", "Project cleared…"). */
+    marker_text: string;
+    changed_at: number | null;
+  };
+}
+
 export type AgentActivityKind = "thinking" | "tool_call" | "tool_result";
 
 export interface WsAgentActivity {
@@ -412,4 +439,5 @@ export type WsEvent =
   | WsCompactionFailed
   | WsCompactionSkipped
   | WsAgentActivity
+  | WsSessionProjectChanged
   | WsError;

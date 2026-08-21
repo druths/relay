@@ -181,6 +181,9 @@ export function ConversationLog({
         if (msg.role === "compaction") {
           return <CompactionDivider key={i} msg={msg} />;
         }
+        if (msg.role === "project_change") {
+          return <ProjectChangeDivider key={i} msg={msg} />;
+        }
         const usage = msg.metadata?.usage;
         const totalTokens =
           (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
@@ -317,6 +320,34 @@ function CompactionDivider({ msg }: { msg: Message }) {
         )}
       </div>
       <div className="flex-1 border-t border-amber-800/50" />
+    </div>
+  );
+}
+
+// ── Project-change divider ──────────────────────────────────────────
+
+/** Renders the "Project changed / set / cleared" marker inline in the
+ *  transcript. Reuses the compaction divider's visual language (chip on
+ *  a hairline rule) but tinted blue so the two are visually distinct at
+ *  a glance. Body text is server-composed (`msg.text_content`) so all
+ *  clients render the same label. */
+function ProjectChangeDivider({ msg }: { msg: Message }) {
+  return (
+    <div className="my-4 flex items-center gap-3 px-1">
+      <div className="flex-1 border-t border-blue-800/50" />
+      <div className="max-w-[80%]">
+        <span
+          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full
+                     bg-blue-950/60 border border-blue-800/60 text-[11px]
+                     font-mono text-blue-200"
+        >
+          <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden>
+            <path d="M1.5 2h4l1 1h8v10H1.5V2zm1 1v9h11V4h-7.5l-1-1H2.5z"/>
+          </svg>
+          <span>{msg.text_content}</span>
+        </span>
+      </div>
+      <div className="flex-1 border-t border-blue-800/50" />
     </div>
   );
 }

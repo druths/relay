@@ -422,6 +422,23 @@ final class RelayViewModel {
         _ = try await apiClient.compactSession(sessionId)
     }
 
+    /// Reassign / detach a session's ark project binding. On success
+    /// mirrors the updated `projectId`/`projectServerId` into local state
+    /// immediately so the sidebar chip flips without waiting for the WS
+    /// echo. The transcript divider still comes via the WS event stream.
+    func setSessionProject(
+        _ sessionId: String, projectId: String?,
+    ) async throws {
+        let updated = try await apiClient.setSessionProject(sessionId, projectId: projectId)
+        if let idx = sessions.firstIndex(where: { $0.sessionId == sessionId }) {
+            sessions[idx].projectId = updated.projectId
+            sessions[idx].projectServerId = updated.projectServerId
+        }
+        // Update filter dropdown facets — the reassignment may have
+        // just made a project unused or newly-used.
+        await fetchSessionFacets()
+    }
+
     func refreshAgents() async {
         do {
             let fetched: [Agent] = try await apiClient.request("GET", path: "/v1/agents?include_operator=true")
@@ -1125,6 +1142,29 @@ final class RelayViewModel {
         case .compactionSkipped(let payload):
             compacting.removeValue(forKey: payload.sessionId)
             _ = payload  // no visible UI — the chip just goes away
+
+        case .sessionProjectChanged(let payload):
+            // Mirror the new binding into the session list so the chip
+            // + filter dropdowns refresh. Only append the divider inline
+            // if this is the currently-open session — other sessions
+            // pick it up via session_history on next resume.
+            if let idx = sessions.firstIndex(where: { $0.sessionId == payload.sessionId }) {
+                sessions[idx].projectId = payload.toProjectId
+            }
+            if payload.sessionId == activeSessionId {
+                var meta = MessageMetadata()
+                meta.fromProjectId = payload.fromProjectId
+                meta.toProjectId = payload.toProjectId
+                meta.fromProjectName = payload.fromProjectName
+                meta.toProjectName = payload.toProjectName
+                sessionMessages.append(Message(
+                    role: .projectChange,
+                    textContent: payload.markerText,
+                    createdAt: Date(),
+                    metadata: meta,
+                ))
+            }
+            Task { await fetchSessionFacets() }
 
         case .error(let payload):
             print("[Relay] Server error: \(payload.message)")

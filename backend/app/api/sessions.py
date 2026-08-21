@@ -73,6 +73,16 @@ class SessionLabelsIn(BaseModel):
     labels: list[str]
 
 
+class SessionProjectIn(BaseModel):
+    """Body for `PATCH /v1/sessions/{id}/project`. `project_id: null`
+    detaches the session from any project; a uuid reassigns (or first-time
+    assigns) to that project on the same ark server the session's agent
+    is bound to. `project_server_id` is derived from the session's agent —
+    ark rejects cross-server binds with 404, so accepting it from the
+    client would just give us a worse error message."""
+    project_id: str | None = None
+
+
 class LabelOut(BaseModel):
     label_id: str
     name: str
@@ -314,6 +324,112 @@ async def compact_session(
         raise HTTPException(status_code=resp.status_code, detail=detail)
 
     return resp.json()
+
+
+@router.patch("/{session_id}/project", response_model=SessionOut)
+async def set_session_project(
+    session_id: uuid.UUID,
+    body: SessionProjectIn,
+    user_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Reassign, first-time-assign, or detach the ark project bound to
+    this session.
+
+    Proxies to ark's PATCH /agents/{name}/sessions/{ark_sid}/project. Ark
+    validates that `project_id` (if given) belongs to the same server as
+    the session and returns 404 otherwise; we surface that verbatim.
+
+    On a real change ark fires `session_project_changed` on /events and
+    persists a `ProjectAssignmentChanged` marker in its own history — the
+    Relay ark client callback picks up the WS event, persists a
+    `role="project_change"` marker locally, and broadcasts to clients.
+    This handler just updates Relay's mirror columns
+    (`project_id`/`project_server_id`) so the session list reflects the
+    new binding immediately without waiting for the WS round-trip.
+    """
+    import httpx
+    from app.db.redis import get_provider_state, invalidate_session_cache
+    from app.services import agent_manager
+    from app.services.llm.ark import _server_id_for
+
+    session = await get_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    agent = await agent_manager.get_agent_by_id(db, session.agent_id)
+    if agent is None or agent.llm_provider != "ark":
+        raise HTTPException(
+            status_code=400,
+            detail="Project assignment is only supported for ark-backed sessions.",
+        )
+
+    ark_sid = await get_provider_state(str(session_id), "ark")
+    if not ark_sid:
+        raise HTTPException(
+            status_code=409,
+            detail="Session has no ark session yet — send at least one message first.",
+        )
+
+    base_url, api_key = await agent_manager.resolve_llm_config(agent)
+    if not base_url:
+        raise HTTPException(
+            status_code=502,
+            detail="Ark server not configured for this agent.",
+        )
+
+    ark_agent = agent.llm_model
+    if ark_agent.startswith("ark:"):
+        ark_agent = ark_agent[len("ark:"):]
+
+    url = f"{base_url.rstrip('/')}/agents/{ark_agent}/sessions/{ark_sid}/project"
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.patch(
+                url, json={"project_id": body.project_id}, headers=headers,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Ark unreachable: {exc}")
+
+    if resp.status_code >= 400:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    result = resp.json()
+    # Mirror the new binding into Relay's row so the session list, filter
+    # dropdowns, and chip renderer reflect it right away. Ark's response
+    # includes `changed`; on no-ops we skip the write.
+    if result.get("changed"):
+        session.project_id = body.project_id
+        # ark keeps sessions on a single server, so the server_id doesn't
+        # change unless the session had no project before (or is now
+        # unbound). Compute from the current agent's ark server.
+        server_id = _server_id_for(base_url.rstrip("/"), api_key)
+        session.project_server_id = server_id if body.project_id else None
+        await db.commit()
+        await invalidate_session_cache(str(session_id))
+
+    labels = await get_session_labels(db, session_id)
+    return SessionOut(
+        session_id=str(session.session_id),
+        agent_id=str(session.agent_id),
+        agent_name=agent.name,
+        status=session.status,
+        created_at=session.created_at.isoformat(),
+        last_active=session.last_active.isoformat(),
+        name=session.name,
+        summary=session.summary,
+        labels=labels,
+        project_id=session.project_id,
+        project_server_id=session.project_server_id,
+    )
 
 
 # ── Labels endpoints ──────────────────────────────────────────────────
