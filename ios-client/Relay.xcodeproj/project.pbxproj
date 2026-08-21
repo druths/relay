@@ -26,6 +26,7 @@
 		2973FB0270D7410A3122FA14 /* live_end_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 69AE7D992CD3BE725117CEB7 /* live_end_1.wav */; };
 		2ADD40A2159E60D16579813F /* WebSocketEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 071718BDCBB8F15D92597F38 /* WebSocketEvent.swift */; };
 		2BADAC4FEA45ACE7D4FCEF77 /* AgentActivityStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 990911AEA0E3DD0DF5C3C264 /* AgentActivityStrip.swift */; };
+		2CF2C02F77F15FABD850B68C /* SetProjectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6EFCD7267878AFF4D537DC4 /* SetProjectSheet.swift */; };
 		2E2D6803F353C124CFB03BAE /* PlatformSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61FD94630C73BA584916A9DB /* PlatformSettings.swift */; };
 		3030079E872051F3413460F7 /* AgentManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */; };
 		31BDFBA3E636C62A6CA73390 /* CreateChatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D58D290F2871D77D97152DF /* CreateChatSheet.swift */; };
@@ -182,6 +183,7 @@
 		CB134658D8D2BA7B62B343A1 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
 		D26249E8004C02E5E5519D8B /* PixelFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelFace.swift; sourceTree = "<group>"; };
 		D5AEC3C080AB67D402F85445 /* live_start_1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = live_start_1.wav; sourceTree = "<group>"; };
+		D6EFCD7267878AFF4D537DC4 /* SetProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetProjectSheet.swift; sourceTree = "<group>"; };
 		D88BF482E109DC4EFBD553C3 /* VT323-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "VT323-Regular.ttf"; sourceTree = "<group>"; };
 		E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
 		E587D02A8BB568FC7933144B /* AgentSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSelector.swift; sourceTree = "<group>"; };
@@ -229,6 +231,7 @@
 				13641BF20F696B8D8FAD4D20 /* SelectableTextEditor.swift */,
 				139F18AD293C3DAB5116785B /* SessionFilterMenu.swift */,
 				A54D9305405BD042B6817944 /* SessionList.swift */,
+				D6EFCD7267878AFF4D537DC4 /* SetProjectSheet.swift */,
 				39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */,
 				361BF127CF429820121827A5 /* StatusOrb.swift */,
 			);
@@ -584,6 +587,7 @@
 				1E9AE3DDD2A970945C1B167A /* SessionFilterMenu.swift in Sources */,
 				055F7970735EBA917899D839 /* SessionList.swift in Sources */,
 				4B81BFEC604C131241F5B077 /* SessionsAPI.swift in Sources */,
+				2CF2C02F77F15FABD850B68C /* SetProjectSheet.swift in Sources */,
 				A4EA4E59387250DED44FA16C /* SilentKeepAlive.swift in Sources */,
 				EBEF3DA54A41FE4B33D7210D /* SoundWaveView.swift in Sources */,
 				1EFFDE00EC63BC6944634598 /* SpeechRecognitionService.swift in Sources */,
