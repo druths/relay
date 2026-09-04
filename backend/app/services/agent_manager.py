@@ -657,6 +657,38 @@ async def _handle_ark_event(
             })
         return
 
+    # ── RunError from a session Relay isn't actively streaming ─────
+    # In-flight turns Relay initiated drain `error` through the per-turn
+    # queue and conversation_manager persists the marker itself. This
+    # branch catches everything else: cron/heartbeat turns firing on the
+    # ark side while Relay is running, or catch-up replays after a
+    # reconnect. Codes match ark's RunError set — context_too_long,
+    # rate_limit, auth, token_budget_exceeded, other.
+    if etype == "error":
+        code = str(event.get("code") or "other")
+        message = str(event.get("message") or "")
+        marker_text = f"{code}: {message}" if message else code
+        if not await _message_already_persisted(
+            relay_session_id, marker_text, role="error",
+        ):
+            await _persist_error_marker(
+                session_id_str=relay_session_id,
+                code=code, message=message,
+            )
+        if not is_catch_up:
+            await _broadcast_to_user(user_id, {
+                "type": "session_error",
+                "payload": {
+                    "session_id": relay_session_id,
+                    "agent_name": agent_name,
+                    "code": code,
+                    "message": message,
+                    "marker_text": marker_text,
+                },
+            })
+        await _maybe_mark_unread(user_id, relay_session_id)
+        return
+
 
 async def _file_already_persisted(session_id_str: str, path: str) -> str | None:
     """Return the file_id of an existing File row for this session+path, or
@@ -802,6 +834,34 @@ async def _persist_compaction_marker(
             await invalidate_session_cache(session_id_str)
     except Exception:
         logger.exception("Failed to persist compaction marker")
+
+
+async def _persist_error_marker(
+    *, session_id_str: str, code: str, message: str,
+) -> None:
+    """Persist an ark RunError as a marker row. Uses `role="error"` so
+    clients render it as a red-tinted divider rather than a chat bubble.
+    Metadata carries `code` (the classified error kind) + the raw
+    `message` for the UI to show alongside."""
+    from app.db.database import async_session
+    from app.db.redis import invalidate_session_cache
+    from app.models.message import Message as MessageModel
+    import uuid as _uuid
+
+    text = f"{code}: {message}" if message else code
+    try:
+        async with async_session() as db:
+            db_msg = MessageModel(
+                session_id=_uuid.UUID(session_id_str),
+                role="error",
+                text_content=text,
+                metadata_={"code": code, "message": message},
+            )
+            db.add(db_msg)
+            await db.commit()
+            await invalidate_session_cache(session_id_str)
+    except Exception:
+        logger.exception("Failed to persist error marker")
 
 
 async def _persist_project_change_marker(

@@ -57,6 +57,13 @@ ASYNC_EVENT_TYPES = {
     # detach). Routed async because it happens outside any given turn — a
     # manual PATCH from a client, a CLI `ark session set-project`, etc.
     "session_project_changed",
+    # `error` is also a TURN_EVENT_TYPE, drained by iter_turn_events for
+    # in-flight turns Relay initiated. Listing it here so it ALSO reaches
+    # the async callback when the turn belongs to a session Relay isn't
+    # currently streaming (cron/heartbeat firing on the ark side, or a
+    # catch-up replay after reconnect) — otherwise those errors are
+    # silently dropped.
+    "error",
 }
 
 
@@ -558,7 +565,16 @@ class ArkProvider(LLMProvider):
                     if isinstance(event.get("model"), str) and event["model"]:
                         usage_model = event["model"]
                 elif etype == "error":
+                    # Surface upward so conversation_manager can persist a
+                    # `role="error"` marker + broadcast a `session_error`
+                    # WS event. Same envelope convention as `__activity__`
+                    # — a dict chunk that downstream distinguishes from
+                    # string deltas by isinstance check.
                     logger.warning("Ark error event: %s", event.get("message"))
+                    yield {"__error__": {
+                        "code": event.get("code") or "other",
+                        "message": event.get("message") or "",
+                    }}
                 elif etype == "done":
                     break
                 elif etype in ("thinking", "tool_call", "tool_result"):

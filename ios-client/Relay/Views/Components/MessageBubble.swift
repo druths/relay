@@ -61,11 +61,12 @@ struct MessageBubble: View {
         case .operator: "Operator"
         case .agent: "Agent"
         case .system: ""
-        // compaction + projectChange rows are rendered by dividers in
-        // ConversationLog and never reach MessageBubble; kept here so
-        // the switch is exhaustive.
+        // compaction / projectChange / error rows are rendered by
+        // dividers in ConversationLog and never reach MessageBubble;
+        // kept here so the switch is exhaustive.
         case .compaction: ""
         case .projectChange: ""
+        case .error: ""
         }
     }
 
@@ -77,6 +78,7 @@ struct MessageBubble: View {
         case .system: .clear
         case .compaction: .clear
         case .projectChange: .clear
+        case .error: .clear
         }
     }
 

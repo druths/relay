@@ -31,6 +31,7 @@ enum WebSocketEvent {
     case compactionSkipped(CompactionSkippedPayload)
     case agentActivity(AgentActivityPayload)
     case sessionProjectChanged(SessionProjectChangedPayload)
+    case sessionError(SessionErrorPayload)
     case error(ErrorPayload)
 }
 
@@ -360,6 +361,29 @@ struct CompactionSkippedPayload: Codable {
     }
 }
 
+/// Fires when a session's turn terminates with a `RunError` (ark's four
+/// classified codes: context_too_long, rate_limit, auth,
+/// token_budget_exceeded, plus a catch-all `other`). Clients sweep any
+/// in-flight streaming bubble to interrupted and drop a red-tinted
+/// divider into the transcript with the code + message.
+struct SessionErrorPayload: Codable {
+    let sessionId: String
+    let agentName: String
+    let code: String
+    let message: String
+    /// Server-composed "code: message" label so all clients render the
+    /// same divider text.
+    let markerText: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case agentName = "agent_name"
+        case code
+        case message
+        case markerText = "marker_text"
+    }
+}
+
 /// Fired when a session's ark project binding changes (assign / reassign
 /// / detach). Only real changes emit — no-op PATCHes are silent. Clients
 /// update the session's `projectId` in place and drop a divider into the
@@ -495,6 +519,8 @@ extension WebSocketEvent {
                 return .agentActivity(try decoder.decode(AgentActivityPayload.self, from: payloadData))
             case "session_project_changed":
                 return .sessionProjectChanged(try decoder.decode(SessionProjectChangedPayload.self, from: payloadData))
+            case "session_error":
+                return .sessionError(try decoder.decode(SessionErrorPayload.self, from: payloadData))
             case "error":
                 return .error(try decoder.decode(ErrorPayload.self, from: payloadData))
             default:

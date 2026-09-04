@@ -1143,6 +1143,29 @@ final class RelayViewModel {
             compacting.removeValue(forKey: payload.sessionId)
             _ = payload  // no visible UI — the chip just goes away
 
+        case .sessionError(let payload):
+            // Only surface inline if it concerns the currently-open
+            // session; non-active sessions pick up the marker next
+            // resume via session_history. Sweep any in-flight
+            // streaming bubble to interrupted so the thinking dots
+            // stop, then drop the error divider immediately below.
+            if payload.sessionId == activeSessionId {
+                for i in sessionMessages.indices where sessionMessages[i].isStreaming {
+                    sessionMessages[i].isStreaming = false
+                    sessionMessages[i].isInterrupted = true
+                }
+                var meta = MessageMetadata()
+                meta.code = payload.code
+                meta.message = payload.message
+                sessionMessages.append(Message(
+                    role: .error,
+                    textContent: payload.markerText,
+                    createdAt: Date(),
+                    metadata: meta,
+                ))
+                activities = []
+            }
+
         case .sessionProjectChanged(let payload):
             // Mirror the new binding into the session list so the chip
             // + filter dropdowns refresh. Only append the divider inline

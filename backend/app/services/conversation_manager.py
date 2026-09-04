@@ -985,6 +985,33 @@ async def handle_session_message_stream(
                 },
             }
             continue
+        # Ark provider surfaces a fatal RunError this way. Persist as a
+        # `role="error"` marker so history renders a divider on replay,
+        # emit a dedicated WS event so the client can sweep any
+        # in-flight streaming bubble to interrupted and drop the
+        # divider inline, then terminate the turn cleanly.
+        if isinstance(chunk, dict) and "__error__" in chunk:
+            err = chunk["__error__"]
+            code = str(err.get("code") or "other")
+            message = str(err.get("message") or "")
+            marker_text = f"{code}: {message}" if message else code
+            await _persist_message(
+                db, session_id, "error", marker_text,
+                metadata={"code": code, "message": message},
+            )
+            await invalidate_session_cache(str(session_id))
+            yield {
+                "type": "session_error",
+                "payload": {
+                    "session_id": str(session_id),
+                    "agent_name": agent.name,
+                    "code": code,
+                    "message": message,
+                    "marker_text": marker_text,
+                },
+            }
+            yield _session_state_event(session, agent.name, "ready")
+            return
         full_response += chunk
         yield {"type": "text_delta", "payload": {"speaker": agent.name, "delta": chunk}}
 

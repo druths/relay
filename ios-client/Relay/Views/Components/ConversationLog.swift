@@ -23,6 +23,9 @@ struct ConversationLog: View {
                             } else if message.role == .projectChange {
                                 ProjectChangeDivider(message: message)
                                     .id(message.id)
+                            } else if message.role == .error {
+                                ErrorDivider(message: message)
+                                    .id(message.id)
                             } else {
                                 MessageBubble(message: message, diagnostics: diagnostics)
                                     .id(message.id)
@@ -72,6 +75,84 @@ struct ConversationLog: View {
             Rectangle()
                 .fill(theme.border)
                 .frame(height: theme.borderWidth)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Renders a `role: .error` marker as a full-width divider with an
+/// expandable message body. Red so a dead turn reads as visibly
+/// distinct from compaction (amber) or project change (blue) at a
+/// glance. The chip shows the classified code (context_too_long,
+/// rate_limit, auth, token_budget_exceeded, other); tap reveals the
+/// raw provider message when there is one.
+private struct ErrorDivider: View {
+    let message: Message
+    @Environment(\.relayTheme) private var theme
+    @State private var expanded = false
+
+    private var codeLabel: String {
+        switch message.metadata?.code ?? "" {
+        case "context_too_long": return "context too long"
+        case "rate_limit": return "rate limit"
+        case "auth": return "auth"
+        case "token_budget_exceeded": return "token budget exceeded"
+        case "other": return "provider error"
+        case let c where !c.isEmpty: return c
+        default: return "error"
+        }
+    }
+
+    private var bodyMessage: String {
+        message.metadata?.message ?? ""
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Rectangle()
+                    .fill(theme.error.opacity(0.4))
+                    .frame(height: theme.borderWidth)
+                Button {
+                    if !bodyMessage.isEmpty { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle")
+                            .font(.system(size: 9))
+                        Text("Turn ended — \(codeLabel)")
+                            .font(theme.monoFont(size: 11))
+                        if !bodyMessage.isEmpty {
+                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 9))
+                        }
+                    }
+                    .foregroundStyle(theme.error)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(theme.error.opacity(0.15))
+                    .overlay(
+                        Capsule().stroke(theme.error.opacity(0.35), lineWidth: theme.borderWidth),
+                    )
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(bodyMessage.isEmpty)
+                Rectangle()
+                    .fill(theme.error.opacity(0.4))
+                    .frame(height: theme.borderWidth)
+            }
+            if expanded && !bodyMessage.isEmpty {
+                Text(bodyMessage)
+                    .font(theme.monoFont(size: 11))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(theme.error.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6).stroke(theme.error.opacity(0.2), lineWidth: theme.borderWidth),
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
         }
         .padding(.vertical, 4)
     }

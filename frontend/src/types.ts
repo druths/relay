@@ -102,6 +102,13 @@ export interface MessageMetadata {
   to_project_id?: string | null;
   from_project_name?: string | null;
   to_project_name?: string | null;
+  /** Set on `role: "error"` marker rows. `code` is ark's classified
+   *  RunError kind (`context_too_long` / `rate_limit` / `auth` /
+   *  `token_budget_exceeded` / `other`); `message` is the raw provider
+   *  text — the divider renders both so users can copy details into
+   *  bug reports without leaving the app. */
+  code?: string;
+  message?: string;
 }
 
 export interface Message {
@@ -374,6 +381,24 @@ export interface WsCompactionSkipped {
 // as they want. Clients accumulate into a per-turn activity list
 // that clears on text_done / new user send.
 
+/** Fires when a session's turn terminates with a `RunError`. Clients
+ *  should sweep any in-flight streaming bubble to interrupted and drop
+ *  a divider into the transcript with the error code + message. Codes
+ *  match ark's RunError set — `context_too_long`, `rate_limit`, `auth`,
+ *  `token_budget_exceeded`, `other`. */
+export interface WsSessionError {
+  type: "session_error";
+  payload: {
+    session_id: string;
+    agent_name: string;
+    code: string;
+    message: string;
+    /** Server-composed "code: message" label so all clients render the
+     *  same divider text. */
+    marker_text: string;
+  };
+}
+
 /** Fires when a session's ark project binding is (re)assigned or
  *  detached. Only real changes emit — no-op PATCHes are silent. Clients
  *  should update the session's `project_id` in place and drop a
@@ -440,4 +465,5 @@ export type WsEvent =
   | WsCompactionSkipped
   | WsAgentActivity
   | WsSessionProjectChanged
+  | WsSessionError
   | WsError;

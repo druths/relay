@@ -704,6 +704,38 @@ export function useRelay() {
           }
           break;
 
+        case "session_error":
+          setState((s) => {
+            // Only surface inline if it concerns the currently-open
+            // session; other sessions pick the marker up next resume
+            // via session_history. Sweep any streaming bubble first —
+            // an in-flight turn that died deserves an interrupted
+            // marker so the thinking dots don't linger, then drop the
+            // error divider immediately below.
+            const isActive = s.activeSessionId === event.payload.session_id;
+            if (!isActive) return s;
+            const swept = s.sessionMessages.map((m) =>
+              m.streaming ? { ...m, streaming: false, interrupted: true } : m
+            );
+            return {
+              ...s,
+              sessionMessages: [
+                ...swept,
+                {
+                  role: "error",
+                  text_content: event.payload.marker_text,
+                  created_at: new Date().toISOString(),
+                  metadata: {
+                    code: event.payload.code,
+                    message: event.payload.message,
+                  },
+                },
+              ],
+              activities: [],
+            };
+          });
+          break;
+
         case "session_project_changed":
           setState((s) => {
             // Mirror the new binding into the session list so the chip

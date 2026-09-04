@@ -39,6 +39,12 @@ struct MessageMetadata: Equatable, Codable {
     var toProjectId: String?
     var fromProjectName: String?
     var toProjectName: String?
+    /// Set on `role: .error` marker rows. `code` is ark's classified
+    /// RunError kind (context_too_long / rate_limit / auth /
+    /// token_budget_exceeded / other); `message` is the raw provider
+    /// text so the divider can expose it to the user.
+    var code: String?
+    var message: String?
 
     enum CodingKeys: String, CodingKey {
         case usage
@@ -47,6 +53,8 @@ struct MessageMetadata: Equatable, Codable {
         case toProjectId = "to_project_id"
         case fromProjectName = "from_project_name"
         case toProjectName = "to_project_name"
+        case code
+        case message
     }
 }
 
@@ -67,6 +75,7 @@ struct Message: Identifiable, Equatable {
         case system  // client-side markers (e.g., "Session ended")
         case compaction  // ark session summary — rendered as a divider
         case projectChange = "project_change"  // ark project (re)assign — divider
+        case error  // ark RunError — rendered as a red divider
     }
 
     init(
@@ -146,6 +155,7 @@ struct ServerMessage: Codable {
         case "agent": messageRole = .agent
         case "compaction": messageRole = .compaction
         case "project_change": messageRole = .projectChange
+        case "error": messageRole = .error
         default: messageRole = .operator
         }
         let mapped = (attachments ?? []).map {

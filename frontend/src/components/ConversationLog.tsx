@@ -184,6 +184,9 @@ export function ConversationLog({
         if (msg.role === "project_change") {
           return <ProjectChangeDivider key={i} msg={msg} />;
         }
+        if (msg.role === "error") {
+          return <ErrorDivider key={i} msg={msg} />;
+        }
         const usage = msg.metadata?.usage;
         const totalTokens =
           (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
@@ -322,6 +325,63 @@ function CompactionDivider({ msg }: { msg: Message }) {
       <div className="flex-1 border-t border-amber-800/50" />
     </div>
   );
+}
+
+// ── Error divider ────────────────────────────────────────────────────
+
+/** Renders a `role: "error"` marker as a full-width divider with an
+ *  expandable message body. Red-tinted so a dead turn reads as visibly
+ *  distinct from compaction (amber) or project change (blue) at a
+ *  glance. The chip shows the classified `code` (context_too_long,
+ *  rate_limit, auth, token_budget_exceeded, other); the raw message
+ *  reveals on click for cases where the provider's text matters. */
+function ErrorDivider({ msg }: { msg: Message }) {
+  const [expanded, setExpanded] = useState(false);
+  const code = msg.metadata?.code ?? "error";
+  const message = msg.metadata?.message ?? "";
+  const label = _errorCodeLabel(code);
+  return (
+    <div className="my-4 flex items-center gap-3 px-1">
+      <div className="flex-1 border-t border-red-800/50" />
+      <div className="flex flex-col items-center gap-1 max-w-[80%]">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          disabled={!message}
+          className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full
+                     bg-red-950/60 border border-red-800/60 text-[11px]
+                     font-mono text-red-200 hover:bg-red-900/60 transition-colors
+                     disabled:hover:bg-red-950/60 disabled:cursor-default"
+          title={message ? "Toggle error message" : undefined}
+        >
+          <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden>
+            <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm-.75 4h1.5v5h-1.5V5Zm.75 6.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/>
+          </svg>
+          <span>Turn ended — {label}</span>
+          {message && <span className="text-red-500">{expanded ? "▾" : "▸"}</span>}
+        </button>
+        {expanded && message && (
+          <div className="text-[11px] text-red-100/80 bg-red-950/40 border border-red-900/40
+                          rounded-md px-3 py-2 max-h-64 overflow-y-auto whitespace-pre-wrap
+                          font-mono">
+            {message}
+          </div>
+        )}
+      </div>
+      <div className="flex-1 border-t border-red-800/50" />
+    </div>
+  );
+}
+
+function _errorCodeLabel(code: string): string {
+  switch (code) {
+    case "context_too_long": return "context too long";
+    case "rate_limit": return "rate limit";
+    case "auth": return "auth";
+    case "token_budget_exceeded": return "token budget exceeded";
+    case "other": return "provider error";
+    default: return code;
+  }
 }
 
 // ── Project-change divider ──────────────────────────────────────────
