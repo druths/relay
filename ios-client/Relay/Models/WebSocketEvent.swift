@@ -184,6 +184,22 @@ struct TextDonePayload: Codable {
     let speaker: String
     let text: String
     let metadata: MessageMetadata?
+    /// Set when the turn ended via the Stop button (ark cancelled
+    /// mid-turn and emitted `done {stopped: true}`). The VM applies
+    /// this to the streaming bubble so it renders the interrupted
+    /// affordance. Absent on natural completions.
+    let interrupted: Bool?
+    /// Ark's stop_reason (e.g. `"stopped"`), present alongside
+    /// `interrupted`. Kept for future diagnostics.
+    let stopReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case speaker
+        case text
+        case metadata
+        case interrupted
+        case stopReason = "stop_reason"
+    }
 }
 
 struct AudioStartPayload: Codable {
@@ -641,6 +657,12 @@ enum ClientEvent {
     case setLiveMode(enabled: Bool)
     case renameSession(sessionId: String, name: String)
     case updateSessionLabels(sessionId: String, labels: [String])
+    /// Ask the backend to stop the currently-running turn on this ark
+    /// session. Server sends ark's `stop`; ark cancels the turn and
+    /// emits `done {stopped: true}` which rides back as
+    /// `text_done {interrupted: true}` — the streaming bubble picks up
+    /// the interrupted affordance via the normal text_done path.
+    case stopSession(sessionId: String)
 
     func toJSON() -> String? {
         let dict: [String: Any]
@@ -661,6 +683,8 @@ enum ClientEvent {
             dict = ["type": "rename_session", "payload": ["session_id": sessionId, "name": name]]
         case .updateSessionLabels(let sessionId, let labels):
             dict = ["type": "update_session_labels", "payload": ["session_id": sessionId, "labels": labels]]
+        case .stopSession(let sessionId):
+            dict = ["type": "stop_session", "payload": ["session_id": sessionId]]
         }
         guard let jsonData = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
         return String(data: jsonData, encoding: .utf8)

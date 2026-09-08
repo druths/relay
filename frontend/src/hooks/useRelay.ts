@@ -389,6 +389,10 @@ export function useRelay() {
                 ...last,
                 text_content: event.payload.text,
                 streaming: false,
+                // Set when the server-side stopped this turn (client
+                // pressed Stop → ark fired `done {stopped: true}`).
+                // MessageBubble already renders the interrupted state.
+                ...(event.payload.interrupted ? { interrupted: true } : {}),
                 // Attach the diagnostics metadata (token usage etc.) the
                 // server reports at end of turn so the Diagnostics view can
                 // render it on this bubble.
@@ -867,6 +871,20 @@ export function useRelay() {
     });
   }, []);
 
+  /// Ask the backend to stop the currently-running turn on this ark
+  /// session. Ark's mid-turn cancel unwinds the turn and emits a
+  /// terminal `done {stopped: true}` which lands back here as a
+  /// `text_done` with `interrupted: true` — so the streaming bubble
+  /// gets its interrupted affordance via the existing text_done
+  /// path. Silent no-op for non-ark sessions or when nothing's in
+  /// flight (backend enforces both).
+  const stopSession = useCallback((sessionId: string) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    ws.current.send(
+      JSON.stringify({ type: "stop_session", payload: { session_id: sessionId } })
+    );
+  }, []);
+
   // Send audio for STT transcription
   const sendAudio = useCallback((audioBase64: string, format: string) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
@@ -1011,6 +1029,7 @@ export function useRelay() {
     toggleMute,
     compactSession,
     setSessionProject,
+    stopSession,
   };
 }
 

@@ -1066,15 +1066,41 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
               </span>
             </div>
           )}
-          <TextInput
-            onSend={relay.sendMessage}
-            disabled={
-              !relay.connected
-              || !!(relay.activeSessionId && relay.compacting[relay.activeSessionId])
-            }
-            sessionId={relay.activeSessionId}
-            onAttachment={relay.appendUserAttachment}
-          />
+          {(() => {
+            // Show Stop while an ark turn is in flight on the active
+            // session. Detected off the last message being a
+            // streaming agent bubble — a robust signal that mirrors
+            // what the user sees (thinking dots) and doesn't depend
+            // on the coarser `status` state which can lag.
+            const sessId = relay.activeSessionId;
+            const activeAgent = sessId
+              ? relay.agents.find((a) =>
+                  a.agent_id === relay.sessions.find(
+                    (s) => s.session_id === sessId,
+                  )?.agent_id,
+                )
+              : null;
+            const lastMsg = relay.sessionMessages[relay.sessionMessages.length - 1];
+            const busy =
+              !!sessId
+              && activeAgent?.llm_provider === "ark"
+              && !!lastMsg?.streaming;
+            return (
+              <TextInput
+                onSend={relay.sendMessage}
+                disabled={
+                  !relay.connected
+                  || !!(relay.activeSessionId && relay.compacting[relay.activeSessionId])
+                }
+                sessionId={relay.activeSessionId}
+                onAttachment={relay.appendUserAttachment}
+                busy={busy}
+                onStop={busy && sessId
+                  ? () => relay.stopSession(sessId)
+                  : undefined}
+              />
+            );
+          })()}
         </div>
       </main>
 

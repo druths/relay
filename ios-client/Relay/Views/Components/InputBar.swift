@@ -111,15 +111,42 @@ struct InputBar: View {
         .opacity(disabled ? 0.5 : 1)
         .disabled(disabled)
 
-        Button(action: handleSend) {
-            ThemedIcon(systemName: "paperplane.fill")
-                .font(theme.bodyFont(size: 18, weight: .semibold))
-                .foregroundStyle(theme.sendButtonInverted ? theme.background : .white)
-                .frame(width: 44, height: 44)
-                .background(sendButtonEnabled ? theme.primary : theme.border)
-                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        if isTurnInFlight, let sid = relay.activeSessionId {
+            Button(action: { Task { await relay.stopSession(sid) } }) {
+                ThemedIcon(systemName: "stop.fill")
+                    .font(theme.bodyFont(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(theme.error)
+                    .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+            }
+        } else {
+            Button(action: handleSend) {
+                ThemedIcon(systemName: "paperplane.fill")
+                    .font(theme.bodyFont(size: 18, weight: .semibold))
+                    .foregroundStyle(theme.sendButtonInverted ? theme.background : .white)
+                    .frame(width: 44, height: 44)
+                    .background(sendButtonEnabled ? theme.primary : theme.border)
+                    .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+            }
+            .disabled(!sendButtonEnabled)
         }
-        .disabled(!sendButtonEnabled)
+    }
+
+    /// True while an ark turn is streaming on the active session. Signal
+    /// is the last message being an in-flight streaming agent bubble —
+    /// mirrors what the user sees (thinking dots) so the Stop button
+    /// appears exactly when there's actually something to stop.
+    private var isTurnInFlight: Bool {
+        guard relay.activeSessionId != nil,
+              let last = relay.sessionMessages.last,
+              last.isStreaming else { return false }
+        // Stop is ark-only for now; direct-provider paths don't have
+        // an equivalent cancellation primitive on the Relay side.
+        guard let sess = relay.sessions.first(where: { $0.sessionId == relay.activeSessionId }),
+              let agent = relay.agents.first(where: { $0.agentId == sess.agentId }),
+              agent.llmProvider == "ark" else { return false }
+        return true
     }
 
     private var attachButton: some View {

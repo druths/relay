@@ -209,6 +209,14 @@ export interface WsTextDone {
     speaker: string;
     text: string;
     metadata?: MessageMetadata;
+    /** Set when the turn ended via the client's Stop button (ark
+     *  cancelled mid-turn). Clients render the bubble with the
+     *  interrupted affordance. Omitted on natural completions. */
+    interrupted?: boolean;
+    /** Ark's stop_reason (e.g. `"stopped"`); present alongside
+     *  `interrupted`. Not surfaced in the UI today but kept for
+     *  future diagnostics. */
+    stop_reason?: string;
   };
 }
 

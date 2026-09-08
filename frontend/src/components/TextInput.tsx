@@ -42,9 +42,17 @@ interface TextInputProps {
   disabled: boolean;
   sessionId?: string | null;
   onAttachment?: (attachment: FileAttachment) => void;
+  /** True while an agent turn is in flight on this session. When set,
+   *  the trailing Send button is replaced by a Stop button that fires
+   *  `onStop`. Textarea stays editable so the user can start typing
+   *  the next prompt while the current turn winds down. */
+  busy?: boolean;
+  onStop?: () => void;
 }
 
-export function TextInput({ onSend, disabled, sessionId, onAttachment }: TextInputProps) {
+export function TextInput({
+  onSend, disabled, sessionId, onAttachment, busy, onStop,
+}: TextInputProps) {
   const [value, setValue] = useState("");
   const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -127,19 +135,32 @@ export function TextInput({ onSend, disabled, sessionId, onAttachment }: TextInp
                    focus:ring-2 focus:ring-blue-500 disabled:opacity-50
                    placeholder-gray-500 resize-none overflow-hidden"
       />
-      <button
-        onClick={handleSend}
-        disabled={disabled || !value.trim()}
-        className="send-btn bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
-                   disabled:opacity-50 rounded-lg px-4 py-2 text-sm font-medium
-                   transition-colors flex items-center justify-center"
-      >
-        {tva ? (
-          <ReturnIcon color="var(--bg)" />
-        ) : (
-          "Send"
-        )}
-      </button>
+      {busy && onStop ? (
+        <button
+          onClick={onStop}
+          title="Stop generating"
+          className="stop-btn bg-red-700 hover:bg-red-600 rounded-lg px-4 py-2
+                     text-sm font-medium text-white transition-colors
+                     flex items-center justify-center gap-1.5"
+        >
+          <span className="inline-block w-2.5 h-2.5 bg-white rounded-sm" aria-hidden />
+          Stop
+        </button>
+      ) : (
+        <button
+          onClick={handleSend}
+          disabled={disabled || !value.trim()}
+          className="send-btn bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
+                     disabled:opacity-50 rounded-lg px-4 py-2 text-sm font-medium
+                     transition-colors flex items-center justify-center"
+        >
+          {tva ? (
+            <ReturnIcon color="var(--bg)" />
+          ) : (
+            "Send"
+          )}
+        </button>
+      )}
     </div>
   );
 }

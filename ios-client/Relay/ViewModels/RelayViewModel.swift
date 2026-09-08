@@ -380,6 +380,19 @@ final class RelayViewModel {
         }
     }
 
+    /// Ask the backend to stop the currently-running turn on this ark
+    /// session. Server forwards ark's `stop`; ark cancels the turn and
+    /// emits `done {stopped: true}` which rides back as
+    /// `text_done {interrupted: true}` — the streaming bubble gets its
+    /// interrupted affordance via the normal text_done path.
+    func stopSession(_ sessionId: String) async {
+        do {
+            try await webSocketService.send(.stopSession(sessionId: sessionId))
+        } catch {
+            print("[Relay] Failed to stop session: \(error)")
+        }
+    }
+
     func renameSession(_ sessionId: String, name: String) async {
         do {
             try await webSocketService.send(.renameSession(sessionId: sessionId, name: name))
@@ -956,6 +969,11 @@ final class RelayViewModel {
                 }
                 if sessionMessages[lastIdx].createdAt == nil {
                     sessionMessages[lastIdx].createdAt = Date()
+                }
+                // Stop button was pressed — mark the bubble so the
+                // interrupted affordance (little x-circle icon) shows.
+                if payload.interrupted == true {
+                    sessionMessages[lastIdx].isInterrupted = true
                 }
             }
             // Turn's over — clear the "current activity" strip. The

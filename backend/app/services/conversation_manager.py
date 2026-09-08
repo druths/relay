@@ -966,9 +966,22 @@ async def handle_session_message_stream(
 
     full_response = ""
     response_meta: dict = {}
+    # Set when ark emits `done {stopped: true}` — a client-initiated stop
+    # that lands as a clean turn end rather than a mid-stream drop. Used
+    # below to (a) mark the final text_done payload with `interrupted:
+    # true` so the client renders the interrupted-bubble affordance,
+    # (b) persist the partial response with matching metadata so history
+    # replay preserves the "this turn was stopped" signal.
+    stopped_reason: str | None = None
     async for chunk in agent_manager.generate_response_stream(agent, text, context, voice_instructions, session_id=session_id):
         if isinstance(chunk, agent_manager.ResponseMeta):
             response_meta = chunk.metadata
+            continue
+        # Client-initiated stop. Ark cancels its turn, emits
+        # `done {stopped: true}`, and the ark provider surfaces this
+        # marker before the async-for loop naturally ends.
+        if isinstance(chunk, dict) and "__stopped__" in chunk:
+            stopped_reason = str(chunk["__stopped__"].get("stop_reason") or "stopped")
             continue
         # Activity dicts flow from the ark provider when it observes
         # thinking / tool_call / tool_result events during a turn.
@@ -1018,11 +1031,23 @@ async def handle_session_message_stream(
     text_done_payload: dict = {"speaker": agent.name, "text": full_response}
     if response_meta:
         text_done_payload["metadata"] = response_meta
+    # `interrupted` on the wire tells the client to render the bubble
+    # with the interrupted affordance (little x-circle icon) instead of
+    # a clean-completion look. Only set when the stop actually came in;
+    # a natural turn end omits the field so the client renders normally.
+    if stopped_reason:
+        text_done_payload["interrupted"] = True
+        text_done_payload["stop_reason"] = stopped_reason
     yield {"type": "text_done", "payload": text_done_payload}
     yield _session_state_event(session, agent.name, "ready")
 
-    # Persist complete response
-    await _persist_message(db, session_id, "agent", full_response, metadata=response_meta or None)
+    # Persist complete response — same interruption metadata lands on
+    # the message so history replay preserves the stopped state.
+    persist_meta = dict(response_meta) if response_meta else {}
+    if stopped_reason:
+        persist_meta["interrupted"] = True
+        persist_meta["stop_reason"] = stopped_reason
+    await _persist_message(db, session_id, "agent", full_response, metadata=persist_meta or None)
     await invalidate_session_cache(str(session_id))
 
     # Auto-name the session after 4 turns (2 user + 2 agent)

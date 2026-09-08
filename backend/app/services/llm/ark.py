@@ -247,14 +247,32 @@ class ArkClientConnection:
             async with self._turn_lock:
                 self._turn_queues.pop(ark_session_id, None)
 
-    async def send_stop(self, ark_session_id: str) -> None:
-        # Bump the generation immediately so anything ark still emits for
-        # the cancelled turn — which may keep arriving for hundreds of ms
-        # after `stop` reaches ark — is dead-on-arrival for the next turn.
-        async with self._turn_lock:
-            self._turn_generation[ark_session_id] = (
-                self._turn_generation.get(ark_session_id, 0) + 1
-            )
+    async def send_stop(
+        self, ark_session_id: str, *, bump_generation: bool = True,
+    ) -> None:
+        """Send ark's `stop` command for the named session.
+
+        `bump_generation` controls whether we invalidate the current turn
+        on our side (dropping any straggler events tagged with it):
+
+        - `True` (default, used from iter_turn_events' CancelledError
+          branch): the local iterator is about to die. Bump so anything
+          ark still emits for the cancelled turn — which may keep
+          arriving for hundreds of ms after `stop` reaches ark — is
+          dead-on-arrival for the NEXT turn on the same session_id.
+
+        - `False` (used from the client-initiated stop-button path): the
+          local iterator is STILL active and we want to receive ark's
+          terminal `done {stopped: true}` event so conversation_manager
+          can persist the partial response as interrupted. Bumping here
+          would drop that terminal event as stale and leave the client's
+          streaming bubble hanging.
+        """
+        if bump_generation:
+            async with self._turn_lock:
+                self._turn_generation[ark_session_id] = (
+                    self._turn_generation.get(ark_session_id, 0) + 1
+                )
         if self._ws is None:
             return
         try:
@@ -267,22 +285,36 @@ class ArkClientConnection:
 
     # ── Internals ───────────────────────────────────────────────────
 
-    async def _connect(self) -> None:
-        # Run catch-up BEFORE starting the consumer so the gap between
-        # last-stored cursor and "now" is filled before we start handling
-        # new events. Live events arriving during catch-up are queued by
-        # the WS library and processed by the consumer once it starts.
+    async def _open_ws(self) -> None:
+        """Open (or re-open) the WS and run catch-up. Does NOT start the
+        consumer task — that's `_connect`'s job for first-time setup, and
+        `_consume`'s own reconnect loop just re-opens the socket inline
+        (spawning a new consumer from inside `_consume` would leave the
+        existing task running and produce a second concurrent
+        `recv()` on the same connection, which `websockets` refuses with
+        `ConcurrencyError`)."""
         url = f"{self.base_ws}/events"
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else None
         self._ws = await websockets.connect(url, additional_headers=headers, max_size=None)
         logger.info("Ark client WS connected: server=%s", self.server_id)
 
+        # Run catch-up BEFORE the consumer starts (or resumes) reading so
+        # the gap between last-stored cursor and "now" is filled before
+        # we begin handling new events. Live events arriving during
+        # catch-up are queued by the WS library and processed when the
+        # consumer's `async for` starts (or picks back up).
         if self._catch_up_callback:
             try:
                 await self._run_catch_up()
             except Exception:
                 logger.exception("Ark catch-up failed (continuing with live stream)")
 
+    async def _connect(self) -> None:
+        """First-time setup: open the WS + run catch-up + spawn the
+        singleton consumer task. Reconnects from inside `_consume` go
+        through `_open_ws` instead, keeping the consumer task count at
+        exactly one for the connection's whole life."""
+        await self._open_ws()
         self._consumer = asyncio.create_task(
             self._consume(), name=f"ark-consumer-{self.server_id}",
         )
@@ -347,12 +379,21 @@ class ArkClientConnection:
                 if self._closed:
                     return
                 logger.warning("Ark WS closed by server, reconnecting…")
-            except websockets.ConnectionClosed:
+            except websockets.ConnectionClosed as exc:
                 if self._closed:
                     return
-                logger.warning("Ark WS connection closed, reconnecting…")
-            except Exception:
-                logger.exception("Ark WS consumer error, reconnecting…")
+                logger.warning(
+                    "Ark WS connection closed (%s), reconnecting…", exc,
+                )
+            except Exception as exc:
+                # Log the concrete exception type + message BEFORE the
+                # traceback so a scan of the log can spot repeated
+                # failure modes (e.g. `ConcurrencyError`) without having
+                # to read every stack frame.
+                logger.exception(
+                    "Ark WS consumer error (%s: %s), reconnecting…",
+                    type(exc).__name__, exc,
+                )
             # Drop any in-flight turns — callers will surface the failure.
             # Tag with the sid's current generation so the error reaches
             # the waiting iterator instead of being dropped as stale.
@@ -362,7 +403,13 @@ class ArkClientConnection:
             self._ws = None
             await asyncio.sleep(min(backoff, 30.0))
             try:
-                await self._connect()
+                # Re-open the socket in place — must NOT spawn a fresh
+                # consumer task (that's what `_connect` does for first-
+                # time setup). Spawning one here would leave the current
+                # `_consume` task alive, and the next `async for raw in
+                # self._ws:` would race the new task's own `recv()`,
+                # yielding `websockets.ConcurrencyError`.
+                await self._open_ws()
                 backoff = 1.0
             except Exception:
                 logger.exception("Ark WS reconnect failed; backing off")
@@ -515,6 +562,13 @@ class ArkProvider(LLMProvider):
         ark_session_id = previous_session_id or await self._ensure_session(
             agent, context=session_context, project_id=project_id,
         )
+        # Surface the ark session id BEFORE we start streaming so the
+        # agent_manager can persist it into provider_state right away.
+        # Waiting until the final ArkResult (end of turn) means an early
+        # Stop press during the very first turn of a fresh session can't
+        # find the ark_sid to cancel — see `_forward_stop_to_ark` in
+        # api/websocket.py, which returns silently on missing ark_sid.
+        yield {"__ark_session__": ark_session_id}
 
         # The agent_manager has the user_id context to install the proper
         # async/catch-up callbacks. We just look up the connection here.
@@ -576,6 +630,17 @@ class ArkProvider(LLMProvider):
                         "message": event.get("message") or "",
                     }}
                 elif etype == "done":
+                    # Ark's new mid-turn stop path lands here with
+                    # `stopped: true` (and `stop_reason: "stopped"`).
+                    # Surface that upward so conversation_manager can
+                    # persist the partial response as interrupted and
+                    # emit `text_done {interrupted: true}` — otherwise
+                    # a client-initiated stop would look like a clean
+                    # completion from the UI's perspective.
+                    if event.get("stopped"):
+                        yield {"__stopped__": {
+                            "stop_reason": event.get("stop_reason") or "stopped",
+                        }}
                     break
                 elif etype in ("thinking", "tool_call", "tool_result"):
                     # Surface as an opaque dict so downstream (agent_manager

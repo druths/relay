@@ -314,6 +314,24 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                             skip_pause=task_running,
                         )
 
+                    elif msg_type == "stop_session":
+                        # Client-initiated turn cancellation. Sends ark's
+                        # `stop` command for the currently-active session;
+                        # ark's new mid-turn cancel unwinds the turn and
+                        # emits `done {stopped: true}` which flows back
+                        # through the normal streaming path — no local
+                        # task cancellation needed. Silent no-op for
+                        # non-ark sessions (no equivalent primitive on
+                        # direct-provider paths yet) or when nothing's
+                        # in flight for this session.
+                        target_sid_raw = data.get("payload", {}).get("session_id")
+                        try:
+                            target_sid = uuid.UUID(target_sid_raw) if target_sid_raw else None
+                        except (ValueError, TypeError):
+                            target_sid = None
+                        if target_sid is not None:
+                            await _forward_stop_to_ark(db, target_sid)
+
                     elif msg_type == "rename_session":
                         target_sid = uuid.UUID(data["payload"]["session_id"])
                         new_name = data["payload"]["name"]
@@ -379,6 +397,41 @@ async def _cancel_active_task(active_task: asyncio.Task | None) -> None:
             await active_task
         except (asyncio.CancelledError, Exception):
             pass
+
+
+async def _forward_stop_to_ark(db, session_id: uuid.UUID) -> None:
+    """Send ark's `stop` command for the given Relay session's ark
+    backend. No-op when the session isn't ark-backed, has no ark
+    session yet (nothing to cancel), or ark isn't reachable. Ark itself
+    is a silent no-op if nothing's actually in flight for that
+    ark_session_id, so we don't check turn-in-flight state here."""
+    from app.db.redis import get_provider_state
+    from app.services import agent_manager
+    from app.services.llm.ark import get_connection_by_key, _server_id_for
+
+    session = await get_session(db, session_id)
+    if session is None:
+        return
+    agent = await agent_manager.get_agent_by_id(db, session.agent_id)
+    if agent is None or agent.llm_provider != "ark":
+        return
+    ark_sid = await get_provider_state(str(session_id), "ark")
+    if not ark_sid:
+        return
+    base_url, api_key = await agent_manager.resolve_llm_config(agent)
+    if not base_url:
+        return
+    key = _server_id_for(base_url.rstrip("/"), api_key)
+    conn = get_connection_by_key(key)
+    if conn is None:
+        return
+    try:
+        # Do NOT bump the generation — the streaming task is still
+        # active and needs to receive ark's `done {stopped: true}` to
+        # unwind cleanly. See ArkClientConnection.send_stop for why.
+        await conn.send_stop(ark_sid, bump_generation=False)
+    except Exception:
+        logger.exception("Failed to forward stop to ark session=%s", ark_sid)
 
 
 async def _handle_text(

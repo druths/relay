@@ -321,6 +321,17 @@ async def generate_response_stream(
                 session_context=agent.persona_prompt if not prev_sid else None,
                 project_id=bound_project_id,
             ):
+                # Ark surfaces the just-created (or resumed) ark session
+                # id up-front so we can persist it into provider_state
+                # BEFORE the streaming loop begins. This is what makes
+                # an early Stop press on the very first turn of a fresh
+                # session work — `_forward_stop_to_ark` looks up the
+                # mapping and would otherwise find nothing and no-op.
+                if isinstance(chunk, dict) and "__ark_session__" in chunk:
+                    ark_sid = chunk["__ark_session__"]
+                    if ark_sid:
+                        await set_provider_state(str(session_id), "ark", ark_sid)
+                    continue
                 if isinstance(chunk, ArkResult):
                     if chunk.session_id:
                         await set_provider_state(str(session_id), "ark", chunk.session_id)
