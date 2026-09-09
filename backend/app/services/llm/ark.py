@@ -167,6 +167,18 @@ class ArkClientConnection:
         # after send_stop for a while and the session_id is reused
         # across turns (chain continuation).
         self._turn_generation: dict[str, int] = {}
+        # High-water mark of ark event ids we've seen — live OR catch-up.
+        # Written from `_dispatch_event`; flushed to platform_settings
+        # by the periodic `_cursor_flusher` task. Without live tracking,
+        # cursor only advances during catch-up passes, so a long-lived
+        # Relay process's next restart replays every event since the
+        # last catch-up — and `_handle_ark_event`'s 60-second dedupe
+        # window misses them all, silently duplicating persisted rows.
+        self._max_event_id_seen: int = 0
+        # Value of `_max_event_id_seen` when we last called `set_cursor`.
+        # Lets the flusher skip DB writes when nothing has moved.
+        self._flushed_cursor: int = 0
+        self._cursor_flusher: asyncio.Task | None = None
 
     # ── Public lifecycle ────────────────────────────────────────────
 
@@ -191,6 +203,16 @@ class ArkClientConnection:
             except (asyncio.CancelledError, Exception):
                 pass
             self._consumer = None
+        if self._cursor_flusher:
+            # `_closed = True` above breaks out of the sleep loop and
+            # runs the final flush inside the task itself. Cancel is
+            # a belt-and-suspenders for the sleep case.
+            self._cursor_flusher.cancel()
+            try:
+                await self._cursor_flusher
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._cursor_flusher = None
         if self._ws:
             try:
                 await self._ws.close()
@@ -318,6 +340,47 @@ class ArkClientConnection:
         self._consumer = asyncio.create_task(
             self._consume(), name=f"ark-consumer-{self.server_id}",
         )
+        if self._cursor_flusher is None:
+            self._cursor_flusher = asyncio.create_task(
+                self._flush_cursor_loop(),
+                name=f"ark-cursor-flusher-{self.server_id}",
+            )
+
+    async def _flush_cursor_loop(self) -> None:
+        """Persist `_max_event_id_seen` to the platform_settings cursor
+        every few seconds while it's ahead of what's on disk. Without
+        this, the cursor only advances during catch-up passes, and a
+        long-lived Relay process's next restart replays every live
+        event since the last catch-up — which `_handle_ark_event`'s
+        60s text-based dedupe misses, silently duplicating messages."""
+        from app.services.llm.ark_cursor import set_cursor
+        while not self._closed:
+            try:
+                await asyncio.sleep(5.0)
+            except asyncio.CancelledError:
+                break
+            hwm = self._max_event_id_seen
+            if hwm > self._flushed_cursor:
+                try:
+                    await set_cursor(self.server_id, hwm)
+                    self._flushed_cursor = hwm
+                except Exception:
+                    logger.exception(
+                        "Ark cursor flush failed (server=%s hwm=%s)",
+                        self.server_id, hwm,
+                    )
+        # Final flush on shutdown so the last few seconds of live
+        # events don't get replayed on the next boot.
+        hwm = self._max_event_id_seen
+        if hwm > self._flushed_cursor:
+            try:
+                await set_cursor(self.server_id, hwm)
+                self._flushed_cursor = hwm
+            except Exception:
+                logger.exception(
+                    "Ark cursor final flush failed (server=%s hwm=%s)",
+                    self.server_id, hwm,
+                )
 
     async def _run_catch_up(self) -> None:
         """Pull persisted events since the stored cursor and hand each to the
@@ -325,6 +388,13 @@ class ArkClientConnection:
         from app.services.llm.ark_cursor import get_cursor, set_cursor
 
         cursor = await get_cursor(self.server_id)
+        # Seed the live high-water mark from disk so a very early live
+        # event (arriving before the flusher task runs) doesn't reset
+        # our idea of what we've already persisted. Only bump forward.
+        if isinstance(cursor, int) and cursor > self._max_event_id_seen:
+            self._max_event_id_seen = cursor
+        if isinstance(cursor, int) and cursor > self._flushed_cursor:
+            self._flushed_cursor = cursor
         client = httpx.AsyncClient(timeout=30, headers=self._http_headers())
         try:
             # Pages, in case there's a lot. Cap at a few iterations to bound
@@ -358,6 +428,13 @@ class ArkClientConnection:
 
         if isinstance(cursor, int):
             await set_cursor(self.server_id, cursor)
+            # Keep the live tracker's baselines in sync so the flusher
+            # doesn't rewrite the same value seconds later, and so any
+            # live event with id <= cursor doesn't look like a regression.
+            if cursor > self._max_event_id_seen:
+                self._max_event_id_seen = cursor
+            if cursor > self._flushed_cursor:
+                self._flushed_cursor = cursor
         logger.info("Ark catch-up complete: server=%s cursor=%s", self.server_id, cursor)
 
     def _http_headers(self) -> dict[str, str]:
@@ -418,6 +495,13 @@ class ArkClientConnection:
     async def _dispatch_event(self, event: dict) -> None:
         etype = event.get("type")
         sid = event.get("session_id")
+        # Track the max event id we've seen. `_cursor_flusher` writes
+        # this to the platform_settings cursor so the next restart's
+        # catch-up starts from the true high-water mark, not from where
+        # the previous restart's catch-up left off.
+        eid = event.get("id")
+        if isinstance(eid, int) and eid > self._max_event_id_seen:
+            self._max_event_id_seen = eid
         if etype in TURN_EVENT_TYPES and sid and sid in self._turn_queues:
             # Tag with the current generation so iter_turn_events can
             # drop stragglers from a previous, cancelled turn.
