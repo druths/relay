@@ -499,7 +499,15 @@ class ArkClientConnection:
         # this to the platform_settings cursor so the next restart's
         # catch-up starts from the true high-water mark, not from where
         # the previous restart's catch-up left off.
-        eid = event.get("id")
+        #
+        # Ark's contract (see ark CHANGELOG "event_id on live WS
+        # events"): persisted-row events carry `event_id` matching the
+        # same `messages.id` that `GET /events` returns. Ephemeral
+        # events (assistant_delta / thinking / tool_call / per-turn
+        # done / project_file_changed / etc.) omit it, and we must NOT
+        # advance the cursor for them — the cursor is only meaningful
+        # against ark's persisted event log.
+        eid = event.get("event_id")
         if isinstance(eid, int) and eid > self._max_event_id_seen:
             self._max_event_id_seen = eid
         if etype in TURN_EVENT_TYPES and sid and sid in self._turn_queues:

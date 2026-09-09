@@ -541,8 +541,19 @@ async def _handle_ark_event(
         text = event.get("text") or event.get("message") or ""
         if not text:
             return
+        # `agent_name` on this dispatch is the *source* agent — ark's
+        # `post_to_session` sets it to `ctx.agent.name`. Persisting it
+        # lets the client render a small "source · time" boundary when
+        # this message lands next to normal turns from a different
+        # agent. Catch-up InjectedMessage rows don't currently carry
+        # the source (see `_ark_catch_up_dispatch`) — those come
+        # through with no speaker and render as ordinary flow.
         if not await _message_already_persisted(relay_session_id, text, role="agent"):
-            await _persist_injected_message(session_id_str=relay_session_id, text=text)
+            await _persist_injected_message(
+                session_id_str=relay_session_id,
+                text=text,
+                source_agent=agent_name,
+            )
         if not is_catch_up:
             # Tag the broadcast with the target session_id so clients only
             # render it in the right pane. Without this, every connected
@@ -722,11 +733,16 @@ async def _file_already_persisted(session_id_str: str, path: str) -> str | None:
 async def _message_already_persisted(
     session_id_str: str, text: str, *, role: str, within_seconds: int = 60,
 ) -> bool:
-    """Recent-duplicate check: do we already have an exact-text message in
-    this session from the last `within_seconds`? Bounded by time so that
-    legitimate repeats (e.g. a cron firing the same line every minute)
-    flow through while a WS↔catch-up race on reconnect (which happens
-    within seconds) is still deduped."""
+    """Recent-duplicate check: do we already have an exact-text message
+    in this session from the last `within_seconds`? Bounded by time so
+    that legitimate repeats (e.g. a cron firing the same line every
+    minute) flow through while a WS↔catch-up race on reconnect (which
+    happens within seconds) is still deduped.
+
+    Note: the real defense against catch-up replaying already-processed
+    live events is cursor-tracking on `event_id` (see
+    ArkClientConnection._dispatch_event) — this check is just the
+    narrow race window."""
     from app.db.database import async_session
     from app.models.message import Message as MessageModel
     from datetime import datetime, timedelta, timezone
@@ -775,9 +791,21 @@ async def _maybe_mark_unread(user_id: str, relay_session_id: str) -> None:
     })
 
 
-async def _persist_injected_message(*, session_id_str: str, text: str) -> None:
-    """Write a cross-session-injected ark message as an `agent`-role row in
-    Relay's messages table. Invalidates the session history cache."""
+async def _persist_injected_message(
+    *, session_id_str: str, text: str, source_agent: str | None = None,
+) -> None:
+    """Write an agent-role message row into Relay's messages table.
+
+    Two callers today:
+      - Live `injected_message` events (cross-session posts via
+        `post_to_session`) — passes `source_agent` = the *sending*
+        agent, which the client uses to render a small header when it
+        differs from the surrounding conversation's agent.
+      - Catch-up `AssistantText` replays of turns Relay didn't see
+        live — no `source_agent`, since the message is from the
+        session's own owner agent and doesn't need a boundary marker.
+
+    Invalidates the session history cache."""
     from app.db.database import async_session
     from app.db.redis import invalidate_session_cache
     from app.models.message import Message as MessageModel
@@ -785,32 +813,14 @@ async def _persist_injected_message(*, session_id_str: str, text: str) -> None:
 
     try:
         async with async_session() as db:
+            metadata: dict = {}
+            if source_agent:
+                metadata["speaker"] = source_agent
             db_msg = MessageModel(
                 session_id=_uuid.UUID(session_id_str),
                 role="agent",
                 text_content=text,
-            )
-            db.add(db_msg)
-            await db.commit()
-            await invalidate_session_cache(session_id_str)
-    except Exception:
-        logger.exception("Failed to persist injected_message")
-
-
-async def _persist_injected_message(*, session_id_str: str, text: str) -> None:
-    """Write a cross-session-injected ark message as an `agent`-role row in
-    Relay's messages table. Invalidates the session history cache."""
-    from app.db.database import async_session
-    from app.db.redis import invalidate_session_cache
-    from app.models.message import Message as MessageModel
-    import uuid as _uuid
-
-    try:
-        async with async_session() as db:
-            db_msg = MessageModel(
-                session_id=_uuid.UUID(session_id_str),
-                role="agent",
-                text_content=text,
+                metadata_=metadata or {},
             )
             db.add(db_msg)
             await db.commit()

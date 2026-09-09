@@ -119,6 +119,13 @@ export interface MessageMetadata {
    *  bug reports without leaving the app. */
   code?: string;
   message?: string;
+  /** Source agent name on cross-session-injected agent messages. Only
+   *  set when the message was posted from a *different* agent's
+   *  session via `post_to_session`. Normal turns from the session's
+   *  own agent leave this unset so the client renders them as ordinary
+   *  flow (no header). Compared between consecutive messages to
+   *  decide whether to draw a boundary. */
+  speaker?: string;
 }
 
 export interface Message {

@@ -271,13 +271,25 @@ export function useRelay() {
               return s;
             }
             if (s.activeSessionId) {
+              const isAgent = event.payload.speaker !== "operator";
+              // Only cross-session injected `text` events carry a
+              // `session_id` in payload — that's what distinguishes
+              // them from the session's own greetings/responses.
+              // We tag the message with the source speaker only in
+              // that case, so the header appears exclusively for
+              // different-agent injections and not for ordinary
+              // agent turns.
+              const isInjected = !!event.payload.session_id;
               return {
                 ...s,
                 sessionMessages: [
                   ...s.sessionMessages,
                   {
-                    role: event.payload.speaker === "operator" ? "operator" : "agent",
+                    role: isAgent ? "agent" : "operator",
                     text_content: event.payload.text,
+                    ...(isAgent && isInjected && event.payload.speaker
+                      ? { metadata: { speaker: event.payload.speaker } }
+                      : {}),
                   },
                 ],
               };

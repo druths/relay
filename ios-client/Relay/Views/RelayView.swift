@@ -349,7 +349,7 @@ struct RelayView: View {
                     agents: relay.agents,
                     activeAgentName: relay.activeAgentName,
                     onSelect: { agent in
-                        Task { await relay.sendMessage("connect me to \(agent.name)") }
+                        Task { await selectAgent(agent) }
                     },
                     onCreateChat: { agent in createChatAgent = agent },
                     onEndpointCheck: { agent in endpointCheckAgent = agent }
@@ -575,7 +575,7 @@ struct RelayView: View {
                 ForEach(visibleAgents) { agent in
                     let isActive = agent.name.lowercased() == (relay.activeAgentName ?? "").lowercased()
                     Button {
-                        Task { await relay.sendMessage("connect me to \(agent.name)") }
+                        Task { await selectAgent(agent) }
                     } label: {
                         HStack(spacing: 8) {
                             StatusIndicator(
@@ -1011,6 +1011,21 @@ struct RelayView: View {
     }
 
     // MARK: - Tab actions
+
+    /// User tapped an agent to switch into a new session. If we're
+    /// already in one, leave it FIRST so the "connect me to …"
+    /// message routes through the lobby operator instead of getting
+    /// delivered to the current session's agent as a literal
+    /// message. The backend WS handler processes `leave_session`
+    /// before `text_input`, so by the time the connect request is
+    /// parsed, active_session_id is null and the lobby fast-path
+    /// picks it up.
+    private func selectAgent(_ agent: Agent) async {
+        if relay.activeSessionId != nil {
+            await relay.leaveSession()
+        }
+        await relay.sendMessage("connect me to \(agent.name)")
+    }
 
     /// Resolve an agent-shared FileAttachment's workspace/project ref
     /// to the values `openFileTab` needs, then either route into the

@@ -22,7 +22,9 @@ struct ConversationLog: View {
                     if messages.isEmpty {
                         emptyState
                     } else {
-                        ForEach(messages) { message in
+                        ForEach(Array(messages.enumerated()), id: \.element.id) { pair in
+                            let (idx, message) = pair
+                            let prev = idx > 0 ? messages[idx - 1] : nil
                             if message.role == .compaction {
                                 CompactionDivider(message: message)
                                     .id(message.id)
@@ -36,6 +38,21 @@ struct ConversationLog: View {
                                 MessageBubble(
                                     message: message,
                                     diagnostics: diagnostics,
+                                    // Header appears only when this
+                                    // message's *source agent* differs
+                                    // from the previous message's.
+                                    // Normal turns from the session's
+                                    // own agent leave `metadata.speaker`
+                                    // nil, so back-to-back same-agent
+                                    // output flows without a divider.
+                                    // Cross-agent injected messages
+                                    // (whose speaker is set to the
+                                    // source agent) get a boundary.
+                                    showAgentHeader: _shouldShowAgentHeader(
+                                        current: message, previous: prev,
+                                    ),
+                                    agentName: message.metadata?.speaker
+                                        ?? activeAgentName ?? "Agent",
                                     onOpenAttachment: onOpenAttachment,
                                 )
                                     .id(message.id)
@@ -54,6 +71,24 @@ struct ConversationLog: View {
                 }
             }
         }
+    }
+
+    /// True when the current agent message came from a different
+    /// source than the previous message. Speaker is only set on
+    /// cross-session-injected messages, so this evaluates to true
+    /// exactly in the "different agent just spoke" case — the common
+    /// single-agent flow keeps `speaker` nil throughout and renders
+    /// as one continuous stream.
+    private func _shouldShowAgentHeader(
+        current: Message, previous: Message?,
+    ) -> Bool {
+        guard current.role == .agent,
+              let currentSpeaker = current.metadata?.speaker
+        else { return false }
+        let prevSpeaker = previous?.role == .agent
+            ? previous?.metadata?.speaker
+            : nil
+        return currentSpeaker != prevSpeaker
     }
 
     @ViewBuilder

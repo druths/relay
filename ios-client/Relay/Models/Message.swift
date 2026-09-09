@@ -66,6 +66,11 @@ struct MessageMetadata: Equatable, Codable {
     /// text so the divider can expose it to the user.
     var code: String?
     var message: String?
+    /// Source agent name on cross-session-injected agent messages.
+    /// Absent on normal turns from the session's own agent. Clients
+    /// compare against the previous message's speaker to decide
+    /// whether to draw a "different agent" header boundary.
+    var speaker: String?
 
     enum CodingKeys: String, CodingKey {
         case usage
@@ -76,6 +81,7 @@ struct MessageMetadata: Equatable, Codable {
         case toProjectName = "to_project_name"
         case code
         case message
+        case speaker
     }
 }
 

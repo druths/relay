@@ -202,12 +202,51 @@ export function ConversationLog({
           diagnostics && msg.role === "agent" && usage && totalTokens > 0;
         const showTime = diagnostics && !!msg.created_at;
         const isRight = msg.role === "user";
+        const isAgent = msg.role === "agent";
+        // Header rule: only appear when this message's source agent
+        // differs from the previous message's. That means:
+        //  - Two normal turns from the same agent → nothing (both
+        //    have `metadata.speaker` unset → equal → no header).
+        //  - A cross-agent injected message landing next to normal
+        //    turns → header shows the source agent name.
+        //  - Two injected messages from the same other agent → no
+        //    header on the second one.
+        // For the common single-agent session this means the pane is
+        // just flowing text — no separators at all.
+        const prev = messages[i - 1];
+        const speakerOf = (m: typeof msg | undefined) =>
+          m?.role === "agent" ? (m.metadata?.speaker ?? null) : undefined;
+        const showAgentHeader =
+          isAgent
+          && speakerOf(msg) !== undefined  // always true for agent, kept for symmetry
+          && !!msg.metadata?.speaker      // only inject-source messages get a header
+          && speakerOf(prev) !== speakerOf(msg);
         return (
         <div key={i}>
+        {showAgentHeader && (
+          <div className="mt-2 mb-1 flex items-center gap-2 text-[10px] font-mono text-gray-500 uppercase tracking-wider">
+            <span>{msg.metadata?.speaker ?? activeAgentName ?? "Agent"}</span>
+            {msg.created_at && (
+              <>
+                <span className="text-gray-700">·</span>
+                <span>{_formatTime(msg.created_at)}</span>
+              </>
+            )}
+            <span className="flex-1 h-px bg-gray-800/70" />
+          </div>
+        )}
         <div
-          className={`rounded-lg px-4 py-3 text-sm ${
-            ROLE_STYLES[msg.role] || ROLE_STYLES.agent
-          }`}
+          className={
+            isAgent
+              // Agent contributions flow into the pane as plain
+              // markdown — no bubble, no rounded corners, no
+              // width constraint. Long-form output (code, tables,
+              // lists) was fighting the bubble's padding jail.
+              ? "text-sm msg-agent"
+              : `rounded-lg px-4 py-3 text-sm ${
+                  ROLE_STYLES[msg.role] || ROLE_STYLES.agent
+                }`
+          }
         >
           <div className={msg.role === "user" || msg.streaming ? "whitespace-pre-wrap" : "msg-md"}>
             {/* User messages and in-flight streaming text stay literal:

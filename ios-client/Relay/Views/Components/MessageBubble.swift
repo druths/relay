@@ -4,6 +4,12 @@ import QuickLook
 struct MessageBubble: View {
     let message: Message
     var diagnostics: Bool = false
+    /// True when the immediately-preceding message was also an agent
+    /// message and we should draw a small "AgentName · time" label
+    /// above this one as a subtle boundary. Set from ConversationLog
+    /// where the previous message is known.
+    var showAgentHeader: Bool = false
+    var agentName: String = "Agent"
     /// Passed through to each attachment pill — tapping an
     /// openable-extension attachment with a workspace ref calls this
     /// instead of the default preview flow.
@@ -14,6 +20,7 @@ struct MessageBubble: View {
 
     private var isUser: Bool { message.role == .user }
     private var isSystem: Bool { message.role == .system }
+    private var isAgent: Bool { message.role == .agent }
 
     private static let _diagTimeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -97,8 +104,78 @@ struct MessageBubble: View {
                 Rectangle().fill(theme.border).frame(height: theme.borderWidth)
             }
             .padding(.vertical, 4)
+        } else if isAgent {
+            agentBody
         } else {
             messageBody
+        }
+    }
+
+    /// Bubble-less rendering for agent contributions. Full-width
+    /// markdown that flows into the chat pane — the bubble padding
+    /// was fighting long-form content (tables, code, lists).
+    /// A small name+time header appears only when `showAgentHeader`
+    /// is set (i.e. two agent messages back-to-back), otherwise the
+    /// output just flows in without any framing.
+    private var agentBody: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if showAgentHeader {
+                HStack(spacing: 6) {
+                    Text(agentName.uppercased())
+                        .font(theme.monoFont(size: 10))
+                        .foregroundStyle(theme.textQuaternary)
+                        .tracking(1)
+                    if let ts = formattedTimestamp {
+                        Text("·")
+                            .foregroundStyle(theme.textQuaternary.opacity(0.5))
+                        Text(ts)
+                            .font(theme.monoFont(size: 10))
+                            .foregroundStyle(theme.textQuaternary)
+                    }
+                    Rectangle()
+                        .fill(theme.border.opacity(0.6))
+                        .frame(height: theme.borderWidth)
+                }
+                .padding(.top, 6)
+            }
+            if !message.textContent.isEmpty {
+                MarkdownText(text: message.textContent)
+            }
+            ForEach(message.attachments) { att in
+                AttachmentPill(attachment: att, onOpen: onOpenAttachment)
+            }
+            HStack(alignment: .center, spacing: 6) {
+                if message.isStreaming {
+                    HStack(spacing: 3) {
+                        ForEach(0..<3, id: \.self) { i in
+                            StatusIndicator(color: theme.textTertiary, size: 5)
+                                .scaleEffect(animating ? 1.0 : 0.5)
+                                .opacity(animating ? 1.0 : 0.3)
+                                .animation(
+                                    .easeInOut(duration: 0.45)
+                                        .repeatForever(autoreverses: true)
+                                        .delay(Double(i) * 0.15),
+                                    value: animating,
+                                )
+                        }
+                    }
+                } else if message.isInterrupted {
+                    Image(systemName: "waveform.badge.xmark")
+                        .font(.caption)
+                        .foregroundStyle(theme.textQuaternary)
+                }
+            }
+            if let line = diagnosticsLine {
+                Text(line)
+                    .font(theme.monoFont(size: 10))
+                    .foregroundStyle(theme.textQuaternary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { animating = message.isStreaming }
+        .onChange(of: message.isStreaming) { _, streaming in
+            animating = streaming
         }
     }
 
@@ -247,13 +324,18 @@ private struct AttachmentPill: View {
         .buttonStyle(.plain)
         .disabled(downloading)
         .contextMenu {
-            // For editor-openable attachments, the primary tap opens
-            // the file in the editor. Long-press exposes the two
-            // fallbacks users might still want: a QuickLook preview
-            // and the system share sheet. Copy Link was dropped
-            // because the URL is bearer-scoped and pasting it
-            // elsewhere doesn't work.
-            if canOpenInEditor {
+            // Mirror what web does: even though tap already opens
+            // editor-openable attachments, expose "Open" in the menu
+            // too so both actions are discoverable in one place.
+            // Preview + Share remain for the "I want QuickLook / the
+            // system share sheet" cases. Copy Link was dropped
+            // because bearer-scoped URLs don't paste usefully.
+            if canOpenInEditor, let onOpen {
+                Button {
+                    onOpen(attachment)
+                } label: {
+                    Label("Open", systemImage: "arrow.up.right.square")
+                }
                 Button {
                     Task { await openPreview() }
                 } label: {

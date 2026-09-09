@@ -742,7 +742,23 @@ final class RelayViewModel {
                 break
             }
             let role: Message.MessageRole = payload.speaker == "operator" ? .operator : .agent
-            let msg = Message(role: role, textContent: payload.text, createdAt: Date())
+            // Only cross-session injected `text` events carry a
+            // sessionId in payload — that's how we distinguish them
+            // from the session's own greetings/responses (which use
+            // the same wire type). Tag only injected messages with
+            // the source speaker so the boundary header shows up
+            // exclusively when a *different* agent has spoken.
+            let isInjected = payload.sessionId != nil
+            var meta: MessageMetadata? = nil
+            if role == .agent && isInjected {
+                var m = MessageMetadata()
+                m.speaker = payload.speaker
+                meta = m
+            }
+            let msg = Message(
+                role: role, textContent: payload.text, createdAt: Date(),
+                metadata: meta,
+            )
             if isInSession {
                 sessionMessages.append(msg)
             } else {
