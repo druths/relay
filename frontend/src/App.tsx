@@ -14,6 +14,7 @@ import { FileBrowserPanel } from "./components/FileBrowserPanel";
 import { CreateChatDialog } from "./components/CreateChatDialog";
 import { EndpointCheckDialog } from "./components/EndpointCheckDialog";
 import { SetProjectDialog } from "./components/SetProjectDialog";
+import { copyToClipboard } from "./utils/clipboard";
 import type { Agent } from "./types";
 import { FileEditorTab } from "./components/FileEditorTab";
 import { uploadFiles } from "./api";
@@ -46,6 +47,9 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
   const [confirmingCompactId, setConfirmingCompactId] = useState<string | null>(null);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [settingProjectSessionId, setSettingProjectSessionId] = useState<string | null>(null);
+  // Session whose "Copy Session ID" row just flashed. Cleared on a
+  // timer so the row's label reverts from "Copied" back to normal.
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [sessionSearch, setSessionSearch] = useState("");
@@ -664,7 +668,7 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                             Rename
                           </button>
                           <button
-                            onClick={(e) => {
+                            onClick={async (e) => {
                               e.stopPropagation();
                               // For ark sessions, copy the ark server-side
                               // session id (useful for cron entries and
@@ -672,13 +676,25 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                               // Relay's internal id.
                               const id =
                                 s.provider_state?.ark ?? s.session_id;
-                              navigator.clipboard.writeText(id).catch(() => {});
-                              setMenuOpenId(null);
+                              const ok = await copyToClipboard(id);
+                              if (ok) {
+                                // Flash "Copied" for a beat before closing
+                                // so the user actually sees the feedback —
+                                // otherwise the menu vanishes and the button
+                                // looks like it did nothing.
+                                setCopiedSessionId(s.session_id);
+                                setTimeout(() => {
+                                  setCopiedSessionId(null);
+                                  setMenuOpenId(null);
+                                }, 800);
+                              } else {
+                                setMenuOpenId(null);
+                              }
                             }}
                             className="w-full text-left px-3 py-1.5 text-sm text-gray-300
                                        hover:bg-gray-700 transition-colors"
                           >
-                            Copy Session ID
+                            {copiedSessionId === s.session_id ? "Copied ✓" : "Copy Session ID"}
                           </button>
                           {/* Only ark sessions have a project concept —
                               hide the item entirely for non-ark rows so
