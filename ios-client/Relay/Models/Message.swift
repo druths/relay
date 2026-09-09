@@ -9,6 +9,27 @@ struct FileAttachment: Identifiable, Equatable, Codable {
     /// Either a Relay-internal URL (`/v1/files/<id>/<name>`) or an
     /// ark-passthrough URL (`/v1/files/ark/<agent>/<workspace-path>`).
     var url: String
+    /// Optional workspace/project reference. When present, the pill
+    /// becomes tap-to-open-in-editor for openable extensions and falls
+    /// back to download-on-tap for binaries. Absent on legacy /
+    /// user-upload attachments — those stay download-only.
+    var kind: String? = nil    // "workspace" | "project"
+    /// For `kind == "workspace"`, the ark agent name owning the
+    /// workspace. For `kind == "project"`, the ark project id.
+    var scope: String? = nil
+    /// Path relative to the workspace or project root.
+    var path: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case fileId = "file_id"
+        case filename
+        case mimeType = "mime_type"
+        case sizeBytes = "size_bytes"
+        case url
+        case kind
+        case scope
+        case path
+    }
 }
 
 struct TokenUsage: Equatable, Codable {
@@ -107,6 +128,12 @@ struct ServerAttachment: Codable {
     let mimeType: String
     let sizeBytes: Int
     let url: String
+    /// Optional workspace/project reference — server sets these on
+    /// agent-shared files (File rows whose storage_path is
+    /// `ark:<agent>:<path>`). Absent on user uploads and legacy rows.
+    let kind: String?
+    let scope: String?
+    let path: String?
 
     enum CodingKeys: String, CodingKey {
         case fileId = "file_id"
@@ -114,6 +141,9 @@ struct ServerAttachment: Codable {
         case mimeType = "mime_type"
         case sizeBytes = "size_bytes"
         case url
+        case kind
+        case scope
+        case path
     }
 }
 
@@ -165,6 +195,9 @@ struct ServerMessage: Codable {
                 mimeType: $0.mimeType,
                 sizeBytes: $0.sizeBytes,
                 url: $0.url,
+                kind: $0.kind,
+                scope: $0.scope,
+                path: $0.path,
             )
         }
         let parsedDate: Date? = {

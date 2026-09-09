@@ -512,6 +512,13 @@ export function useRelay() {
             // file_id, so we use a direct path-based variant here. The download
             // route below interprets `agent/path` form.
             url: `/v1/files/ark/${encodeURIComponent(event.payload.agent_name)}/${path.split("/").map(encodeURIComponent).join("/")}`,
+            // Workspace reference — enables tap-to-open-in-editor for
+            // openable file types. History replay populates these
+            // fields from File.storage_path server-side, so the
+            // behavior is consistent between live and reloaded views.
+            kind: "workspace" as const,
+            scope: event.payload.agent_name,
+            path,
           };
           setState((s) => {
             if (s.activeSessionId !== event.payload.session_id) return s;

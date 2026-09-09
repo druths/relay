@@ -82,6 +82,16 @@ export interface FileAttachment {
   mime_type: string;
   size_bytes: number;
   url: string;
+  /** Optional workspace/project reference. When present, the pill
+   *  becomes tap-to-open-in-editor for openable file types and falls
+   *  back to download-on-tap only for binaries. Absent on legacy or
+   *  user-upload attachments — those stay download-only. */
+  kind?: "workspace" | "project";
+  /** For `kind: "workspace"`, the ark agent name owning the workspace.
+   *  For `kind: "project"`, the ark project id. */
+  scope?: string;
+  /** Path relative to the workspace or project root. */
+  path?: string;
 }
 
 export interface MessageMetadata {

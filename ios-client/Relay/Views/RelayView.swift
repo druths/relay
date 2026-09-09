@@ -47,6 +47,21 @@ struct RelayView: View {
     // Session whose "Set project" dialog is currently open. Set from
     // the sidebar/menu context menu → cleared when the sheet dismisses.
     @State private var setProjectSessionId: String? = nil
+    // An in-flight request to open an agent-shared attachment as a
+    // full-screen editor sheet — used on iPhone where there's no tab
+    // area to route through. iPad uses `openFileTab` directly.
+    @State private var attachmentEditorRequest: AttachmentEditorRequest? = nil
+
+    /// Payload for `attachmentEditorRequest`. Identifiable so
+    /// `.sheet(item:)` can key its presentation off a fresh instance.
+    struct AttachmentEditorRequest: Identifiable {
+        let id = UUID()
+        let kind: APIClient.FsKind
+        let targetId: String
+        let path: String
+        let server: String?
+        let scope: String
+    }
     /// Server-side error text from the last compaction trigger, surfaced
     /// as an alert when non-nil.
     @State private var compactError: String? = nil
@@ -159,6 +174,31 @@ struct RelayView: View {
         ) { session in
             SetProjectSheet(relay: relay, session: session)
                 .environment(\.relayTheme, themeManager.current)
+        }
+        .sheet(item: $attachmentEditorRequest) { req in
+            // iPhone-only path — iPad routes through openFileTab into
+            // the tabbed central pane. Full-screen navigation stack so
+            // FileEditorView's toolbar (Save / Wrap / Find / Reload)
+            // has somewhere to hang.
+            NavigationStack {
+                FileEditorView(
+                    relay: relay,
+                    kind: req.kind,
+                    targetId: req.targetId,
+                    path: req.path,
+                    server: req.server,
+                    scope: req.scope,
+                    onDirtyChange: { _ in },
+                )
+                .navigationTitle(req.path.components(separatedBy: "/").last ?? req.path)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { attachmentEditorRequest = nil }
+                    }
+                }
+            }
+            .environment(\.relayTheme, themeManager.current)
         }
         .sheet(isPresented: $showFileBrowser) {
             if let s = activeSession {
@@ -326,7 +366,8 @@ struct RelayView: View {
                 activeSessionId: relay.activeSessionId,
                 activeAgentName: relay.activeAgentName,
                 connected: relay.connected,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                onOpenAttachment: openAttachmentInEditor,
             )
             .frame(maxHeight: .infinity)
 
@@ -860,7 +901,8 @@ struct RelayView: View {
                     activeSessionId: relay.activeSessionId,
                     activeAgentName: relay.activeAgentName,
                     connected: relay.connected,
-                    diagnostics: diagnostics
+                    diagnostics: diagnostics,
+                    onOpenAttachment: openAttachmentInEditor,
                 )
                 .frame(maxHeight: .infinity)
 
@@ -969,6 +1011,42 @@ struct RelayView: View {
     }
 
     // MARK: - Tab actions
+
+    /// Resolve an agent-shared FileAttachment's workspace/project ref
+    /// to the values `openFileTab` needs, then either route into the
+    /// iPad tab bar or (on iPhone) trigger a full-screen editor sheet.
+    /// Bails out silently if the attachment lacks a ref or its ark
+    /// scope doesn't match any known agent.
+    private func openAttachmentInEditor(_ att: FileAttachment) {
+        guard att.kind == "workspace",
+              let arkAgentName = att.scope,
+              let path = att.path,
+              let agent = relay.agents.first(where: { a in
+                  let name = a.llmModel.hasPrefix("ark:")
+                      ? String(a.llmModel.dropFirst("ark:".count))
+                      : a.llmModel
+                  return name == arkAgentName
+              })
+        else { return }
+        let server = agent.llmBaseUrl
+        if horizontalSizeClass == .regular {
+            openFileTab(
+                kind: .workspace,
+                targetId: agent.agentId,
+                path: path,
+                server: server,
+                scope: arkAgentName,
+            )
+        } else {
+            attachmentEditorRequest = AttachmentEditorRequest(
+                kind: .workspace,
+                targetId: agent.agentId,
+                path: path,
+                server: server,
+                scope: arkAgentName,
+            )
+        }
+    }
 
     private func openFileTab(
         kind: APIClient.FsKind, targetId: String, path: String,

@@ -6,6 +6,12 @@ struct ConversationLog: View {
     let activeAgentName: String?
     let connected: Bool
     var diagnostics: Bool = false
+    /// Called when the user taps an attachment that carries a
+    /// workspace/project reference and has an openable extension. The
+    /// parent resolves the ark scope to an editor invocation.
+    /// Attachments without a ref (or with a binary extension) fall
+    /// through to the pill's default download-and-preview behavior.
+    var onOpenAttachment: ((FileAttachment) -> Void)? = nil
 
     @Environment(\.relayTheme) private var theme
 
@@ -27,7 +33,11 @@ struct ConversationLog: View {
                                 ErrorDivider(message: message)
                                     .id(message.id)
                             } else {
-                                MessageBubble(message: message, diagnostics: diagnostics)
+                                MessageBubble(
+                                    message: message,
+                                    diagnostics: diagnostics,
+                                    onOpenAttachment: onOpenAttachment,
+                                )
                                     .id(message.id)
                             }
                         }

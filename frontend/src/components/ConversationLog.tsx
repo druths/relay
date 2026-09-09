@@ -4,6 +4,7 @@ import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message, FileAttachment } from "../types";
 import { apiFetch } from "../api";
+import { isPreviewableFile } from "./FileEditorTab";
 
 /// GitHub-flavoured markdown plugin list. Adds table support (the
 /// motivating feature — agent output often includes tables), plus
@@ -124,6 +125,12 @@ interface ConversationLogProps {
   activeSessionId: string | null;
   activeAgentName: string | null;
   diagnostics?: boolean;
+  /** Called when a user taps an agent-shared attachment that carries a
+   *  workspace/project reference. Parent resolves the ark scope to a
+   *  Relay agent + ark base_url and opens a `FileEditorTab`. When
+   *  omitted, or the attachment lacks a ref, or the extension isn't
+   *  openable, tap falls back to a plain download. */
+  onOpenAttachment?: (att: FileAttachment) => void;
 }
 
 const ROLE_STYLES: Record<string, string> = {
@@ -157,6 +164,7 @@ export function ConversationLog({
   activeSessionId,
   activeAgentName,
   diagnostics = false,
+  onOpenAttachment,
 }: ConversationLogProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const messages = activeSessionId ? sessionMessages : lobbyMessages;
@@ -217,20 +225,11 @@ export function ConversationLog({
             {msg.attachments && msg.attachments.length > 0 && (
               <div className={`flex flex-col gap-1 ${msg.text_content ? "mt-2" : ""}`}>
                 {msg.attachments.map((att, ai) => (
-                  <button
+                  <AttachmentPill
                     key={ai}
-                    type="button"
-                    onClick={() => _downloadAttachment(att)}
-                    className="inline-flex items-center gap-2 self-start px-2 py-1 rounded bg-gray-900/60 hover:bg-gray-900 border border-gray-700 text-xs text-gray-200"
-                  >
-                    <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" className="text-gray-400">
-                      <path d="M9.5 0a.5.5 0 0 1 .5.5V3h2.5a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H6V.5a.5.5 0 0 1 .5-.5h3ZM4 4v10h8V4H4Z"/>
-                    </svg>
-                    <span className="truncate max-w-[20rem]">{att.filename}</span>
-                    {att.size_bytes > 0 && (
-                      <span className="text-gray-500">({_formatSize(att.size_bytes)})</span>
-                    )}
-                  </button>
+                    attachment={att}
+                    onOpen={onOpenAttachment}
+                  />
                 ))}
               </div>
             )}
@@ -323,6 +322,123 @@ function CompactionDivider({ msg }: { msg: Message }) {
         )}
       </div>
       <div className="flex-1 border-t border-amber-800/50" />
+    </div>
+  );
+}
+
+// ── Attachment pill ─────────────────────────────────────────────────
+
+/** Renders a file attachment as a compact chip with two hit targets:
+ *
+ *  - The pill body: tap opens the file in an editor/viewer tab when the
+ *    attachment carries a workspace/project ref and its extension is
+ *    editor-openable. For binary attachments or attachments without a
+ *    ref, tap falls back to a plain download (same single-action
+ *    behavior as before this change).
+ *  - The trailing kebab (⋮): opens a small popover with a Download
+ *    item. Only rendered when the pill body would open — otherwise the
+ *    single tap already downloads and a kebab would be noise.
+ *
+ *  Openability is classified by `isPreviewableFile` (the same list the
+ *  file browser uses). Content-type mismatch is handled inside the
+ *  editor tab, which will show "binary file — download" for anything
+ *  it can't render. */
+function AttachmentPill({
+  attachment,
+  onOpen,
+}: {
+  attachment: FileAttachment;
+  onOpen?: (att: FileAttachment) => void;
+}) {
+  const canOpen =
+    !!onOpen
+    && !!attachment.kind
+    && !!attachment.path
+    && isPreviewableFile(attachment.path);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuOpen]);
+
+  const handleOpenClick = () => {
+    if (canOpen && onOpen) onOpen(attachment);
+    else _downloadAttachment(attachment);
+  };
+
+  return (
+    // No `overflow-hidden` here on purpose — the kebab's dropdown is
+    // positioned below the pill via `top-full` and would get clipped
+    // by an overflow-hidden wrapper. Rounding is applied to the two
+    // inner buttons individually instead so the pill still reads as a
+    // single chip.
+    <div className="inline-flex items-stretch self-start rounded border border-gray-700 text-xs text-gray-200">
+      <button
+        type="button"
+        onClick={handleOpenClick}
+        title={canOpen ? "Open" : "Download"}
+        className={`inline-flex items-center gap-2 px-2 py-1 bg-gray-900/60 hover:bg-gray-900 rounded-l ${canOpen ? "" : "rounded-r"}`}
+      >
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" className="text-gray-400">
+          <path d="M9.5 0a.5.5 0 0 1 .5.5V3h2.5a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H6V.5a.5.5 0 0 1 .5-.5h3ZM4 4v10h8V4H4Z"/>
+        </svg>
+        <span className="truncate max-w-[20rem]">{attachment.filename}</span>
+        {attachment.size_bytes > 0 && (
+          <span className="text-gray-500">({_formatSize(attachment.size_bytes)})</span>
+        )}
+      </button>
+      {canOpen && (
+        <div className="relative flex" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            title="More actions"
+            aria-label="More actions"
+            className="px-1.5 border-l border-gray-700 bg-gray-900/60 hover:bg-gray-900 text-gray-400 hover:text-gray-200 flex items-center rounded-r"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+              <circle cx="8" cy="3" r="1.5" />
+              <circle cx="8" cy="8" r="1.5" />
+              <circle cx="8" cy="13" r="1.5" />
+            </svg>
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full mt-1 z-[300] bg-gray-800 border border-gray-700 rounded-md shadow-xl py-1 min-w-[120px]">
+              {/* Open is the pill's default tap action but we mirror it
+                  in the menu so both actions are discoverable in one
+                  place — matches what folks expect from a "…" menu. */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpen) onOpen(attachment);
+                  setMenuOpen(false);
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-700"
+              >
+                Open
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  _downloadAttachment(attachment);
+                  setMenuOpen(false);
+                }}
+                className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-700"
+              >
+                Download
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

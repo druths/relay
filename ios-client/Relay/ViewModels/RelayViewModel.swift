@@ -1070,7 +1070,16 @@ final class RelayViewModel {
                 filename: filename,
                 mimeType: "application/octet-stream",
                 sizeBytes: payload.size ?? 0,
-                url: "/v1/files/ark/\(encodedAgent)/\(encodedPath)"
+                url: "/v1/files/ark/\(encodedAgent)/\(encodedPath)",
+                // Workspace reference — lets MessageBubble render this
+                // pill as tap-to-open-in-editor for openable
+                // extensions (history replay populates the same
+                // fields server-side from File.storage_path, so the
+                // affordance is consistent between live and reloaded
+                // views).
+                kind: "workspace",
+                scope: payload.agentName,
+                path: payload.path
             )
             sessionMessages.append(Message(
                 role: .agent,

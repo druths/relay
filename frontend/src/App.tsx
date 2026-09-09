@@ -1053,6 +1053,25 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             activeSessionId={relay.activeSessionId}
             activeAgentName={relay.activeAgentName}
             diagnostics={diagnostics}
+            onOpenAttachment={(att) => {
+              // Resolve the ark scope to a Relay agent so we can hand
+              // openFileTab the shapes it expects: agent_id for the
+              // API path, llm_base_url for the ark server, and
+              // agent_name for fileChanges scope matching.
+              if (att.kind !== "workspace" || !att.scope || !att.path) return;
+              const agent = relay.agents.find((a) => {
+                const arkName = (a.llm_model ?? "").replace(/^ark:/, "");
+                return arkName === att.scope;
+              });
+              if (!agent) return;
+              openFileTab(
+                "workspace",
+                agent.agent_id,
+                att.path,
+                agent.llm_base_url ?? undefined,
+                att.scope,
+              );
+            }}
           />
           {isArkAgent && <AgentActivityStrip activities={relay.activities} />}
           {relay.activeSessionId && relay.compacting[relay.activeSessionId] && (

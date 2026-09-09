@@ -334,25 +334,41 @@ async def get_session_messages(
         # because there isn't always a Relay-side file_id at the moment ark
         # pushes; user uploads use the file-id route.
         url: str
+        # Optional workspace/project reference — lets clients render a
+        # tap-to-open-in-editor affordance for agent-shared files instead
+        # of the download-only path we had before. Populated when the
+        # File row's storage_path is `ark:<agent>:<workspace-path>` (the
+        # only shape agent shares use today; user uploads don't get it).
+        kind: str | None = None
+        scope: str | None = None
+        ref_path: str | None = None
         if f.role == "agent" and f.storage_path.startswith("ark:"):
             # ark:<agent>:<workspace-path>
             rest = f.storage_path[len("ark:"):]
             agent_name, _, ark_path = rest.partition(":")
             url = f"/v1/files/ark/{agent_name}/{ark_path}"
+            kind = "workspace"
+            scope = agent_name
+            ref_path = ark_path
         else:
             url = f"/v1/files/{f.file_id}/{f.filename}"
+        attachment: dict = {
+            "file_id": str(f.file_id),
+            "filename": f.filename,
+            "mime_type": f.mime_type,
+            "size_bytes": f.size_bytes,
+            "url": url,
+        }
+        if kind is not None:
+            attachment["kind"] = kind
+            attachment["scope"] = scope
+            attachment["path"] = ref_path
         file_entries.append({
             "role": f.role,
             "text_content": "",
             "created_at": f.created_at.isoformat(),
             "_ts": f.created_at,
-            "attachments": [{
-                "file_id": str(f.file_id),
-                "filename": f.filename,
-                "mime_type": f.mime_type,
-                "size_bytes": f.size_bytes,
-                "url": url,
-            }],
+            "attachments": [attachment],
         })
 
     messages = sorted(text_entries + file_entries, key=lambda e: e["_ts"])

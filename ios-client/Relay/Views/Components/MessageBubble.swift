@@ -4,6 +4,10 @@ import QuickLook
 struct MessageBubble: View {
     let message: Message
     var diagnostics: Bool = false
+    /// Passed through to each attachment pill — tapping an
+    /// openable-extension attachment with a workspace ref calls this
+    /// instead of the default preview flow.
+    var onOpenAttachment: ((FileAttachment) -> Void)? = nil
 
     @Environment(\.relayTheme) private var theme
     @State private var animating = false
@@ -109,7 +113,7 @@ struct MessageBubble: View {
                             MarkdownText(text: message.textContent)
                         }
                         ForEach(message.attachments) { att in
-                            AttachmentPill(attachment: att)
+                            AttachmentPill(attachment: att, onOpen: onOpenAttachment)
                         }
                     }
 
@@ -173,13 +177,45 @@ struct MessageBubble: View {
 ///   toolbar provides Share / Save to Files / etc.).
 /// • **Long press** — surfaces a SwiftUI context menu with Share + Copy Link
 ///   for quick export without opening the preview.
+/// Extensions we consider "openable in the editor/viewer" — mirrors
+/// `isPreviewableFile` on the web client so the tap-to-open affordance
+/// is consistent across clients. Anything not here (binaries, archives,
+/// office docs) falls through to the QuickLook preview path.
+private let _editorOpenableExts: Set<String> = [
+    // Text-y
+    "txt", "md", "markdown", "json", "yaml", "yml", "toml", "ini", "cfg",
+    "csv", "tsv", "log", "py", "js", "ts", "tsx", "jsx", "swift", "go",
+    "rs", "rb", "java", "c", "h", "cpp", "hpp", "cs", "sh", "bash", "zsh",
+    "css", "scss", "html", "xml", "sql", "env", "gitignore",
+    // Editor renders these inline
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic",
+    "heif", "ico", "svg", "avif",
+    "pdf",
+]
+
+private func _isEditorOpenable(_ path: String) -> Bool {
+    let ext = (path as NSString).pathExtension.lowercased()
+    return !ext.isEmpty && _editorOpenableExts.contains(ext)
+}
+
 private struct AttachmentPill: View {
     let attachment: FileAttachment
+    var onOpen: ((FileAttachment) -> Void)? = nil
 
     @Environment(\.relayTheme) private var theme
     @State private var downloading = false
     @State private var previewURL: FileURLRef?
     @State private var shareURL: FileURLRef?
+
+    /// True when the attachment carries a workspace/project ref AND
+    /// its extension is one the editor can render. Drives whether tap
+    /// opens in the editor (via `onOpen`) or falls through to preview.
+    private var canOpenInEditor: Bool {
+        onOpen != nil
+            && attachment.kind != nil
+            && attachment.path != nil
+            && _isEditorOpenable(attachment.path ?? "")
+    }
 
     private var sizeLabel: String? {
         guard attachment.sizeBytes > 0 else { return nil }
@@ -196,24 +232,38 @@ private struct AttachmentPill: View {
 
     var body: some View {
         Button {
-            Task { await openPreview() }
+            if canOpenInEditor, let onOpen {
+                onOpen(attachment)
+            } else {
+                // Legacy / binary path: tap goes straight to the
+                // QuickLook preview. That gets the user's eyes on the
+                // file quickly and lets iOS's built-in share sheet on
+                // the preview handle Save/Share/etc.
+                Task { await openPreview() }
+            }
         } label: {
             pillContent
         }
         .buttonStyle(.plain)
         .disabled(downloading)
         .contextMenu {
+            // For editor-openable attachments, the primary tap opens
+            // the file in the editor. Long-press exposes the two
+            // fallbacks users might still want: a QuickLook preview
+            // and the system share sheet. Copy Link was dropped
+            // because the URL is bearer-scoped and pasting it
+            // elsewhere doesn't work.
+            if canOpenInEditor {
+                Button {
+                    Task { await openPreview() }
+                } label: {
+                    Label("Preview", systemImage: "eye")
+                }
+            }
             Button {
                 Task { await openShare() }
             } label: {
                 Label("Share…", systemImage: "square.and.arrow.up")
-            }
-            Button {
-                #if canImport(UIKit)
-                UIPasteboard.general.string = fullURL?.absoluteString ?? attachment.url
-                #endif
-            } label: {
-                Label("Copy Link", systemImage: "link")
             }
         }
         .sheet(item: $previewURL) { wrapped in
