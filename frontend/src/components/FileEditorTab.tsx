@@ -4,6 +4,9 @@ import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { openSearchPanel } from "@codemirror/search";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { readFile, writeFile } from "../api";
 import type { FileChangeEvent } from "../hooks/useRelay";
 
@@ -51,6 +54,77 @@ function _extOf(path: string): string {
 function _hasTextExt(path: string): boolean {
   return TEXT_EXT_ALLOWLIST.has(_extOf(path));
 }
+
+/// Markdown files get a view/edit toggle in the toolbar. Extension-
+/// based so the toggle button never appears for anything that
+/// wouldn't render sensibly as markdown.
+function _isMarkdownFile(path: string): boolean {
+  const ext = _extOf(path);
+  return ext === "md" || ext === "markdown";
+}
+
+// GFM plugin list — kept as a module-level constant so react-markdown
+// doesn't rebuild its pipeline on each render.
+const _MD_REMARK_PLUGINS = [remarkGfm];
+
+// Rendered-preview styling for the file editor's View mode. Tuned for
+// document reading (larger text, more vertical rhythm) rather than the
+// chat-bubble scale we use in ConversationLog.
+const _MD_COMPONENTS: Components = {
+  h1: ({ children }) => <h1 className="text-2xl font-semibold mt-6 mb-3 text-gray-100">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-xl font-semibold mt-5 mb-2 text-gray-100">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-lg font-semibold mt-4 mb-2 text-gray-100">{children}</h3>,
+  h4: ({ children }) => <h4 className="text-base font-semibold mt-3 mb-1.5 text-gray-100">{children}</h4>,
+  h5: ({ children }) => <h5 className="text-sm font-semibold mt-3 mb-1 text-gray-100">{children}</h5>,
+  h6: ({ children }) => <h6 className="text-sm font-medium mt-3 mb-1 text-gray-200">{children}</h6>,
+  p: ({ children }) => <p className="my-2 leading-relaxed text-gray-200">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc ml-6 my-2 space-y-1 text-gray-200">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal ml-6 my-2 space-y-1 text-gray-200">{children}</ol>,
+  li: ({ children }) => <li>{children}</li>,
+  a: ({ children, href }) => (
+    <a href={href} target="_blank" rel="noreferrer noopener" className="text-blue-300 underline hover:text-blue-200">
+      {children}
+    </a>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-gray-600 pl-3 my-2 italic text-gray-400">{children}</blockquote>
+  ),
+  hr: () => <hr className="my-4 border-gray-800" />,
+  code: ({ className, children, ...props }) => {
+    const isBlock = (className ?? "").includes("language-");
+    if (isBlock) {
+      return (
+        <pre className="bg-gray-900/70 border border-gray-800 rounded p-3 my-2 overflow-x-auto text-[13px] leading-snug">
+          <code {...props}>{children}</code>
+        </pre>
+      );
+    }
+    return (
+      <code className="bg-gray-900/70 rounded px-1 py-0.5 text-[13px]" {...props}>
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children }) => <>{children}</>,
+  table: ({ children }) => (
+    <div className="my-3 overflow-x-auto">
+      <table className="min-w-full border-collapse border border-gray-700 text-[13px]">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-gray-900/70">{children}</thead>,
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  tr: ({ children }) => <tr className="border-t border-gray-800 first:border-t-0">{children}</tr>,
+  th: ({ children, style }) => (
+    <th className="border border-gray-700 px-2 py-1 text-left font-semibold text-gray-200" style={style}>
+      {children}
+    </th>
+  ),
+  td: ({ children, style }) => (
+    <td className="border border-gray-800 px-2 py-1 text-gray-300 align-top" style={style}>
+      {children}
+    </td>
+  ),
+};
 
 function _hasImageExt(path: string): boolean {
   return IMAGE_EXT_ALLOWLIST.has(_extOf(path));
@@ -117,6 +191,24 @@ export function FileEditorTab({
     try { localStorage.setItem("relay_editor_wrap", wrap ? "1" : "0"); }
     catch { /* ignore */ }
   }, [wrap]);
+
+  /// View/edit toggle for markdown files. Defaults to "view" so
+  /// opening a `.md` file lands in the rendered layout — the common
+  /// case. Users click the toggle to enter Edit; state is per-tab
+  /// (no persistence across sessions), simple > clever.
+  /// `notOnDisk` (a fresh file that doesn't exist yet) forces Edit
+  /// because rendering an empty preview isn't useful — you're
+  /// clearly making the file, not reading it.
+  const isMarkdown = _isMarkdownFile(path);
+  const [mode, setMode] = useState<"view" | "edit">(
+    isMarkdown ? "view" : "edit",
+  );
+  useEffect(() => {
+    // Fresh files always want Edit mode. Non-markdown files also
+    // stay in Edit — the toggle is hidden for them anyway, but this
+    // keeps state consistent.
+    if (notOnDisk || !isMarkdown) setMode("edit");
+  }, [notOnDisk, isMarkdown]);
 
   // Handle to the CodeMirror instance so we can open the search panel
   // imperatively (from the toolbar magnifier button). The Cmd/Ctrl+F
@@ -277,11 +369,34 @@ export function FileEditorTab({
     <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-gray-950 relative">
       <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-800 text-xs">
         <span className="font-mono text-gray-400 truncate flex-1" title={path}>{path}</span>
+        {/* Preview toggle (markdown only). Its "selected" background
+            means preview is showing; unselected means the raw editor.
+            Preview and Edit aren't opposites — Save/Reload apply in
+            both. Find/Wrap only apply to the editor, so those grey
+            out below when the preview is on. */}
+        {isMarkdown && !imageUrl && !pdfUrl && !loading && !isBinary && (
+          <button
+            onClick={() => setMode((m) => (m === "view" ? "edit" : "view"))}
+            title={mode === "view" ? "Hide rendered preview" : "Show rendered preview"}
+            className={`p-1.5 rounded transition-colors ${
+              mode === "view"
+                ? "text-blue-300 bg-blue-900/30 hover:bg-blue-900/40"
+                : "text-gray-300 hover:text-white hover:bg-gray-800"
+            }`}
+          >
+            <EyeIcon />
+          </button>
+        )}
         {!isBinary && !imageUrl && !pdfUrl && !loading && (
           <button
             onClick={openFind}
-            title="Find (⌘F)"
-            className="p-1.5 rounded text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
+            disabled={mode === "view"}
+            title={mode === "view"
+              ? "Find — switch to editor to use"
+              : "Find in file (⌘F)"}
+            className="p-1.5 rounded text-gray-300 hover:text-white hover:bg-gray-800
+                       disabled:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed
+                       transition-colors"
           >
             <SearchIcon />
           </button>
@@ -289,10 +404,15 @@ export function FileEditorTab({
         {!isBinary && !imageUrl && !pdfUrl && !loading && (
           <button
             onClick={() => setWrap((v) => !v)}
-            title={wrap ? "Disable word wrap" : "Enable word wrap"}
-            className={`p-1.5 rounded transition-colors ${
-              wrap ? "text-blue-300 bg-blue-900/30 hover:bg-blue-900/40"
-                   : "text-gray-300 hover:text-white hover:bg-gray-800"
+            disabled={mode === "view"}
+            title={mode === "view"
+              ? "Word wrap — switch to editor to use"
+              : (wrap ? "Turn off word wrap" : "Turn on word wrap")}
+            className={`p-1.5 rounded transition-colors
+                       disabled:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed ${
+              wrap && mode !== "view"
+                ? "text-blue-300 bg-blue-900/30 hover:bg-blue-900/40"
+                : "text-gray-300 hover:text-white hover:bg-gray-800"
             }`}
           >
             <WrapIcon />
@@ -302,9 +422,14 @@ export function FileEditorTab({
           <button
             onClick={save}
             disabled={!isDirty || saving}
-            title={saving ? "Saving…" : "Save"}
+            title={
+              saving ? "Saving…"
+                : isDirty ? "Save changes to disk"
+                : "Nothing to save"
+            }
             className="p-1.5 rounded text-emerald-300 hover:text-white hover:bg-emerald-700/40
-                       disabled:text-gray-600 disabled:hover:bg-transparent transition-colors"
+                       disabled:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed
+                       transition-colors"
           >
             {saving ? <SpinnerIcon /> : <SaveIcon />}
           </button>
@@ -312,9 +437,9 @@ export function FileEditorTab({
         <button
           onClick={reload}
           disabled={loading}
-          title="Reload from disk"
+          title="Reload from disk (discards unsaved changes)"
           className="p-1.5 rounded text-gray-300 hover:text-white hover:bg-gray-800
-                     disabled:opacity-50 transition-colors"
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <RefreshIcon />
         </button>
@@ -379,7 +504,20 @@ export function FileEditorTab({
             Binary file — open in the file browser to download.
           </div>
         )}
-        {!loading && !isBinary && !imageUrl && !pdfUrl && savedContent !== null && (
+        {!loading && !isBinary && !imageUrl && !pdfUrl && savedContent !== null && mode === "view" && (
+          // Markdown preview. Rendered from `draft` (the live buffer)
+          // rather than `savedContent` so unsaved edits are still
+          // visible in preview — keeps the mental model simple:
+          // "I see what I typed, just laid out."
+          <div className="h-full overflow-auto px-6 py-4 bg-gray-950">
+            <div className="max-w-3xl mx-auto">
+              <ReactMarkdown components={_MD_COMPONENTS} remarkPlugins={_MD_REMARK_PLUGINS}>
+                {draft}
+              </ReactMarkdown>
+            </div>
+          </div>
+        )}
+        {!loading && !isBinary && !imageUrl && !pdfUrl && savedContent !== null && mode === "edit" && (
           <CodeMirror
             ref={cmRef}
             value={draft}
@@ -451,6 +589,14 @@ function SpinnerIcon() {
         opacity="0.25"
       />
       <path d="M10 2a8 8 0 018 8h-2a6 6 0 00-6-6V2z" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M10 4C5.5 4 1.7 6.9 0 10c1.7 3.1 5.5 6 10 6s8.3-2.9 10-6c-1.7-3.1-5.5-6-10-6zm0 10a4 4 0 110-8 4 4 0 010 8zm0-2a2 2 0 100-4 2 2 0 000 4z"/>
     </svg>
   );
 }

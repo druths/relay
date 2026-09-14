@@ -58,6 +58,29 @@ struct FileEditorView: View {
     /// built-in UIFindInteraction (system find navigator).
     @State private var findTrigger = 0
 
+    /// View/edit toggle for markdown files. Opens in "view" for a
+    /// clean read; toggle enters "edit" for the occasional tweak.
+    /// Per-tab state (no cross-session persistence). See `_mdMode`
+    /// helper below for the actual value used at render — a
+    /// notOnDisk file (fresh, nothing to preview) is always forced
+    /// to edit regardless of this flag.
+    @State private var mode: MarkdownMode = .view
+    /// Snapshot of the editor's live buffer at the moment the user
+    /// toggled to view mode. Rendered as the preview. Not
+    /// continuously updated in view mode — the editor is unmounted
+    /// there, so there's nothing to update from. The snapshot
+    /// approach means "I see what I typed, just laid out" holds at
+    /// the moment of toggle, which is what matters.
+    @State private var previewText: String = ""
+
+    enum MarkdownMode { case view, edit }
+
+    /// Effective mode after applying the "notOnDisk → force edit"
+    /// override. Use this everywhere we branch on the mode.
+    private var effectiveMode: MarkdownMode {
+        (isMarkdown && !notOnDisk) ? mode : .edit
+    }
+
     private var isImageMode: Bool {
         #if canImport(UIKit)
         return image != nil
@@ -76,6 +99,14 @@ struct FileEditorView: View {
 
     private var filename: String {
         path.split(separator: "/").last.map(String.init) ?? path
+    }
+
+    /// True when this file is a markdown document — drives the
+    /// visibility of the view/edit toggle and defaults `mode` to
+    /// "view" on open. Extension-based classification, same as web.
+    private var isMarkdown: Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        return ext == "md" || ext == "markdown"
     }
 
     var body: some View {
@@ -126,19 +157,56 @@ struct FileEditorView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
+            // Preview toggle (markdown only). Its highlighted state
+            // means preview is showing; unselected means raw editor.
+            // Preview and Edit aren't opposites — Save/Reload apply
+            // regardless of which is visible. Find/Wrap only apply to
+            // the editor, so those grey out below when preview is on.
+            if isMarkdown && !notOnDisk && !isBinary && !loading && !isImageMode && !isPdfMode {
+                Button {
+                    if effectiveMode == .edit {
+                        // Snapshot the live buffer so the preview
+                        // reflects what the user typed, not on-disk.
+                        previewText = handle.currentText
+                        mode = .view
+                    } else {
+                        mode = .edit
+                    }
+                } label: {
+                    Image(systemName: "eye")
+                        .font(.system(size: 15))
+                }
+                .foregroundStyle(effectiveMode == .view ? theme.primary : theme.textSecondary)
+                .help(effectiveMode == .view ? "Hide rendered preview" : "Show rendered preview")
+            }
+            // Find and Wrap only affect the editor — disable them in
+            // preview mode. Save + Reload stay enabled either way
+            // (Save writes the live buffer regardless of what's on
+            // screen; Reload throws away buffer state either way).
             if !isBinary && !loading && !isImageMode && !isPdfMode {
+                let editorHidden = effectiveMode != .edit
                 Button { openFind() } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 15))
                 }
-                .foregroundStyle(theme.textSecondary)
-                .help("Find (⌘F)")
+                .disabled(editorHidden)
+                .foregroundStyle(editorHidden ? theme.textQuaternary : theme.textSecondary)
+                .help(editorHidden
+                      ? "Find — switch to editor to use"
+                      : "Find in file (⌘F)")
                 Button { wrap.toggle() } label: {
                     Image(systemName: wrap ? "arrow.turn.down.left" : "arrow.right.to.line")
                         .font(.system(size: 15))
                 }
-                .foregroundStyle(wrap ? theme.primary : theme.textSecondary)
-                .help(wrap ? "Disable word wrap" : "Enable word wrap")
+                .disabled(editorHidden)
+                .foregroundStyle(
+                    editorHidden
+                        ? theme.textQuaternary
+                        : (wrap ? theme.primary : theme.textSecondary),
+                )
+                .help(editorHidden
+                      ? "Word wrap — switch to editor to use"
+                      : (wrap ? "Turn off word wrap" : "Turn on word wrap"))
                 Button {
                     Task { await save() }
                 } label: {
@@ -151,7 +219,7 @@ struct FileEditorView: View {
                 }
                 .disabled(!isDirty || saving)
                 .foregroundStyle(isDirty ? theme.success : theme.textQuaternary)
-                .help(saving ? "Saving…" : "Save")
+                .help(saving ? "Saving…" : (isDirty ? "Save changes to disk" : "Nothing to save"))
             }
             Button {
                 Task { await reload() }
@@ -161,7 +229,7 @@ struct FileEditorView: View {
             }
             .disabled(loading)
             .foregroundStyle(theme.textSecondary)
-            .help("Reload from disk")
+            .help("Reload from disk (discards unsaved changes)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -243,17 +311,39 @@ struct FileEditorView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if let saved = savedContent {
             #if canImport(UIKit)
-            SelectableTextEditor(
-                handle: handle,
-                cleanText: saved,
-                cleanVersion: editorCleanVersion,
-                wrap: wrap,
-                onDirtyChange: { isDirty = $0 },
-                onFocusChange: { relay.editorFocused = $0 },
-                resignTrigger: relay.resignEditorFocusTrigger,
-                findTrigger: findTrigger,
-            )
-            .background(theme.elevated)
+            // The editor stays mounted at all times so its Runestone
+            // buffer keeps the user's unsaved draft across mode
+            // toggles — remounting resets `v.text = cleanText` and
+            // would nuke the draft on every switch back to edit.
+            // View mode overlays a scrollable MarkdownText on top.
+            ZStack {
+                SelectableTextEditor(
+                    handle: handle,
+                    cleanText: saved,
+                    cleanVersion: editorCleanVersion,
+                    wrap: wrap,
+                    onDirtyChange: { isDirty = $0 },
+                    onFocusChange: { relay.editorFocused = $0 },
+                    resignTrigger: relay.resignEditorFocusTrigger,
+                    findTrigger: findTrigger,
+                )
+                .background(theme.elevated)
+                .opacity(effectiveMode == .view ? 0 : 1)
+                .allowsHitTesting(effectiveMode == .edit)
+                if effectiveMode == .view {
+                    // `previewText` was snapshotted at toggle time
+                    // (from `handle.currentText`). On the initial
+                    // open — markdown files default to view and we
+                    // haven't toggled yet — fall back to `saved`.
+                    ScrollView {
+                        MarkdownText(text: previewText.isEmpty ? saved : previewText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                    }
+                    .background(theme.elevated)
+                }
+            }
             #else
             Text("Editor unavailable on this platform.")
                 .font(.system(size: 14, design: .monospaced))
