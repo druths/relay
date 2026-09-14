@@ -83,7 +83,7 @@ export async function deleteProject(projectId: string, server: string): Promise<
 }
 
 interface FsTarget { base: string; q: string }
-function fsTarget(kind: "project" | "workspace", id: string, server?: string): FsTarget {
+export function fsTarget(kind: "project" | "workspace", id: string, server?: string): FsTarget {
   if (kind === "project") {
     return { base: `/v1/projects/${id}/files`, q: server ? `?server=${encodeURIComponent(server)}` : "" };
   }
@@ -303,4 +303,87 @@ export async function uploadFiles(
       console.error("Upload error", err);
     }
   }
+}
+
+// ── Progress-aware upload primitive ──────────────────────────────────
+
+/** Report progress + return an abort handle. */
+export interface UploadHandle {
+  /** Resolves with the response body on 2xx; rejects on error or abort. */
+  promise: Promise<{ status: number; text: string; json: () => unknown }>;
+  /** Cancel the in-flight XHR. Rejects the promise with `AbortError`. */
+  abort: () => void;
+}
+
+/** Progress-aware, cancellable file upload primitive. Uses XHR
+ *  because `fetch` gives no upload-side byte progress in browsers.
+ *  Both the chat attach flow (POST multipart) and the file browser
+ *  upload flow (PUT raw bytes) call through here so the upload
+ *  registry sees consistent progress events regardless of origin.
+ *
+ *  Callers get a live progress stream via `onProgress(loaded, total)`,
+ *  plus an `abort()` handle to cancel. The response body is returned
+ *  as both raw text and a `json()` lazy parser so callers can pick. */
+export function uploadWithProgress(
+  method: "POST" | "PUT",
+  path: string,
+  body: FormData | Blob | ArrayBuffer,
+  opts: {
+    contentType?: string;
+    onProgress?: (loaded: number, total: number) => void;
+  } = {},
+): UploadHandle {
+  const token = getToken();
+  const url = `${API_BASE}${path}`;
+  const xhr = new XMLHttpRequest();
+  xhr.open(method, url);
+  if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+  // FormData needs the browser to compose its own multipart boundary;
+  // do NOT set Content-Type when body is FormData.
+  if (opts.contentType && !(body instanceof FormData)) {
+    xhr.setRequestHeader("Content-Type", opts.contentType);
+  }
+
+  let aborted = false;
+  const promise = new Promise<{ status: number; text: string; json: () => unknown }>((resolve, reject) => {
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && opts.onProgress) {
+        opts.onProgress(e.loaded, e.total);
+      }
+    };
+    xhr.onload = () => {
+      // Auth-expired handling matches apiFetch — clear + reload once.
+      if (xhr.status === 401) {
+        clearToken();
+        window.location.reload();
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(`upload failed: ${xhr.status} ${xhr.responseText}`));
+        return;
+      }
+      const text = xhr.responseText;
+      resolve({
+        status: xhr.status,
+        text,
+        json: () => JSON.parse(text),
+      });
+    };
+    xhr.onerror = () => reject(new Error("upload: network error"));
+    xhr.onabort = () => {
+      const err = new Error("upload aborted") as Error & { name: string };
+      err.name = "AbortError";
+      reject(err);
+    };
+    xhr.send(body);
+  });
+
+  return {
+    promise,
+    abort: () => {
+      if (aborted) return;
+      aborted = true;
+      try { xhr.abort(); } catch { /* ignore */ }
+    },
+  };
 }

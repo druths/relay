@@ -204,6 +204,19 @@ private struct FileTreeView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
             }
+            // Browser-origin uploads targeting this view's kind + id.
+            // Hides when empty. Matches the strip used above the
+            // chat input bar so users get the same visual regardless
+            // of origin.
+            UploadStrip(
+                uploads: relay.uploads.filter {
+                    $0.origin == .browser
+                        && $0.target?.kind == kind
+                        && $0.target?.id == targetId
+                },
+                onCancel: { relay.cancelUpload($0) },
+                onDismiss: { relay.dismissUpload($0) },
+            )
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let root = rootListing {
@@ -500,8 +513,16 @@ private struct FileTreeView: View {
             defer { url.stopAccessingSecurityScopedResource() }
             do {
                 let data = try Data(contentsOf: url)
-                try await relay.apiClient.writeFile(
-                    kind, id: targetId, path: url.lastPathComponent, body: data, server: server,
+                let mime = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.preferredMIMEType)
+                    ?? "application/octet-stream"
+                // Progress-aware version — feeds the shared uploads
+                // registry rendered by UploadStrip at the top of the
+                // file browser. Errors land in the row's status; no
+                // panel-level error banner needed for the routine case.
+                _ = await relay.uploadBrowserFile(
+                    kind: kind, targetId: targetId, targetDir: "",
+                    filename: url.lastPathComponent,
+                    data: data, mimeType: mime, server: server,
                 )
             } catch {
                 self.error = String(describing: error)

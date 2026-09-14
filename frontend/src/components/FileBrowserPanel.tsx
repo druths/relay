@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DirListing } from "../types";
+import type { DirListing, UploadItem } from "../types";
 import type { FileChangeEvent } from "../hooks/useRelay";
 import {
   deletePath,
@@ -8,9 +8,9 @@ import {
   mkdir,
   probeFile,
   renamePath,
-  writeFile,
 } from "../api";
 import { isKnownBinaryExt } from "./FileEditorTab";
+import { UploadProgressStrip } from "./UploadProgressStrip";
 
 type Kind = "project" | "workspace";
 
@@ -42,6 +42,17 @@ interface Props {
    * renders an inline preview/editor. */
   onOpenFile: (kind: Kind, targetId: string, path: string, server?: string) => void;
   onClose: () => void;
+  /** Shared upload registry (browser-origin rows) + the actions the
+   *  panel needs to trigger a new upload and manage its lifecycle.
+   *  The panel filters `uploads` down to the currently-visible
+   *  tab's target so users see progress for what they can see. */
+  uploads: UploadItem[];
+  onUpload: (
+    kind: Kind, targetId: string, targetDir: string,
+    files: FileList | File[], server?: string,
+  ) => Promise<void>;
+  onCancelUpload: (id: string) => void;
+  onDismissUpload: (id: string) => void;
 }
 
 export function FileBrowserPanel({
@@ -55,6 +66,10 @@ export function FileBrowserPanel({
   fileChanges,
   onOpenFile,
   onClose,
+  uploads,
+  onUpload,
+  onCancelUpload,
+  onDismissUpload,
 }: Props) {
   const projectTabAvailable = !!projectId;
   // Default to Project when bound; else Workspace.
@@ -104,7 +119,7 @@ export function FileBrowserPanel({
       </div>
 
       {/* Body */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {tab === "project" && projectId && (
           <FileTreeView
             kind="project"
@@ -113,6 +128,14 @@ export function FileBrowserPanel({
             server={projectServerId ?? undefined}
             fileChanges={fileChanges}
             onOpenFile={onOpenFile}
+            uploads={uploads.filter(
+              (u) => u.origin === "browser"
+                && u.target?.kind === "project"
+                && u.target?.id === projectId,
+            )}
+            onUpload={onUpload}
+            onCancelUpload={onCancelUpload}
+            onDismissUpload={onDismissUpload}
           />
         )}
         {tab === "workspace" && agentId && agentName && (
@@ -122,6 +145,14 @@ export function FileBrowserPanel({
             scope={agentArkName ?? agentName}
             onOpenFile={onOpenFile}
             fileChanges={fileChanges}
+            uploads={uploads.filter(
+              (u) => u.origin === "browser"
+                && u.target?.kind === "workspace"
+                && u.target?.id === agentId,
+            )}
+            onUpload={onUpload}
+            onCancelUpload={onCancelUpload}
+            onDismissUpload={onDismissUpload}
           />
         )}
       </div>
@@ -151,6 +182,7 @@ function TabButton({
 
 function FileTreeView({
   kind, id, scope, server, fileChanges, onOpenFile,
+  uploads, onUpload, onCancelUpload, onDismissUpload,
 }: {
   kind: Kind;
   id: string;
@@ -158,6 +190,13 @@ function FileTreeView({
   server?: string;
   fileChanges: FileChangeEvent[];
   onOpenFile: (kind: Kind, targetId: string, path: string, server?: string) => void;
+  uploads: UploadItem[];
+  onUpload: (
+    kind: Kind, targetId: string, targetDir: string,
+    files: FileList | File[], server?: string,
+  ) => Promise<void>;
+  onCancelUpload: (id: string) => void;
+  onDismissUpload: (id: string) => void;
 }) {
   const [root, setRoot] = useState<DirListing | null>(null);
   const [expanded, setExpanded] = useState<Map<string, DirListing>>(new Map());
@@ -247,10 +286,11 @@ function FileTreeView({
     setUploading(true);
     setError(null);
     try {
-      for (const f of Array.from(files)) {
-        const path = targetDir ? `${targetDir}/${f.name}` : f.name;
-        await writeFile(kind, id, path, f, server);
-      }
+      // Progress + cancel routes through the shared registry. Errors
+      // land in the per-row `status: "failed"` state instead of
+      // panel-level `error` — the strip surfaces them next to the
+      // filename which reads much better than a generic bar.
+      await onUpload(kind, id, targetDir, files, server);
       // Listings refresh via the WS event, but if ark misses the event for
       // some reason, force a reload. For a non-root target we always
       // loadSubdir — that also expands a previously-closed folder, so the
@@ -487,6 +527,15 @@ function FileTreeView({
       {error && (
         <div className="px-3 py-1 text-xs text-red-400 border-b border-gray-800">{error}</div>
       )}
+
+      {/* Live upload progress — browser-origin rows targeting this
+          tab (project or workspace, matching id). Same visual + set
+          of controls as the chat-side strip. */}
+      <UploadProgressStrip
+        uploads={uploads}
+        onCancel={onCancelUpload}
+        onDismiss={onDismissUpload}
+      />
 
       <div
         className={`flex-1 min-h-0 overflow-y-auto py-1 relative transition-colors

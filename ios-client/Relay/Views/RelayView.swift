@@ -375,6 +375,14 @@ struct RelayView: View {
                 AgentActivityStrip(relay: relay)
             }
             CompactingChip(relay: relay)
+            // Chat-origin uploads for the current session — hides when
+            // empty. Rendered directly above InputBar so the user finds
+            // status right where they initiated the upload.
+            UploadStrip(
+                uploads: relay.uploads.filter { $0.origin == .chat && $0.sessionId == relay.activeSessionId },
+                onCancel: { relay.cancelUpload($0) },
+                onDismiss: { relay.dismissUpload($0) },
+            )
             InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
         }
     }
@@ -910,6 +918,14 @@ struct RelayView: View {
                 AgentActivityStrip(relay: relay)
             }
             CompactingChip(relay: relay)
+            // Chat-origin uploads for the current session — hides when
+            // empty. Rendered directly above InputBar so the user finds
+            // status right where they initiated the upload.
+            UploadStrip(
+                uploads: relay.uploads.filter { $0.origin == .chat && $0.sessionId == relay.activeSessionId },
+                onCancel: { relay.cancelUpload($0) },
+                onDismiss: { relay.dismissUpload($0) },
+            )
             InputBar(relay: relay, messageFocus: $relay.messageInputFocused)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -91,6 +91,16 @@ final class RelayViewModel {
         }
     }
     var activities: [AgentActivity] = []
+    /// In-flight and recently-completed uploads. Shared between the
+    /// chat attach flow and the file-browser upload flow — each row
+    /// is tagged with `origin` and (for browser) the target so both
+    /// surfaces can filter to just theirs. Successful rows self-fade
+    /// after a short hold; failures persist until dismissed.
+    var uploads: [UploadItem] = []
+    /// Live cancel handles per upload id — outside the @Observable
+    /// state so a hold on `ProgressiveUpload` doesn't churn view
+    /// observers on every progress tick.
+    @ObservationIgnored private var uploadOperations: [UUID: ProgressiveUpload] = [:]
     var sttAvailable = false
     var sttSettings: PlatformSettings?
     var outputMode: OutputMode = .speaker
@@ -324,6 +334,211 @@ final class RelayViewModel {
             print("[Relay] Upload failed: \(error)")
             return nil
         }
+    }
+
+    // ── Upload registry ─────────────────────────────────────────────
+
+    /// Upload a chat attachment with live byte-level progress. Ends
+    /// as a `FileAttachment` on a fresh user message. Progress feeds
+    /// the shared `uploads` list, which the chat surface renders
+    /// filtered to the current session.
+    @discardableResult
+    func uploadChatAttachment(
+        data: Data, filename: String, mimeType: String,
+    ) async -> FileAttachment? {
+        struct UploadResponse: Decodable {
+            let file_id: String
+            let filename: String
+            let mime_type: String
+            let size_bytes: Int
+            let url: String
+        }
+        let id = UUID()
+        let sidForRow = activeSessionId
+        // Register the row before kicking off the network call so the
+        // strip appears instantly. Progress ticks flow in from the
+        // upload delegate. The strip auto-fades on completion.
+        uploads.append(UploadItem(
+            id: id, origin: .chat,
+            filename: filename, sizeBytes: Int64(data.count),
+            uploadedBytes: 0, status: .uploading,
+            error: nil,
+            sessionId: sidForRow,
+            target: nil,
+            startedAt: Date(),
+        ))
+
+        var path = "/v1/files"
+        if let sid = activeSessionId,
+           let encoded = sid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            path += "?session_id=\(encoded)"
+        }
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var request = URLRequest(url: URL(string: "\(AppConfig.apiBase)\(path)")!)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = KeychainService.load() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let att = try await _runUpload(id: id, request: request, body: body) { respData in
+                let decoded = try JSONDecoder().decode(UploadResponse.self, from: respData)
+                let a = FileAttachment(
+                    fileId: decoded.file_id, filename: decoded.filename,
+                    mimeType: decoded.mime_type, sizeBytes: decoded.size_bytes,
+                    url: decoded.url,
+                )
+                // Land the pill in the conversation before the row
+                // fades out — same visual promise as web.
+                let msg = Message(role: .user, textContent: "",
+                                  createdAt: Date(), attachments: [a])
+                if self.activeSessionId != nil {
+                    self.sessionMessages.append(msg)
+                } else {
+                    self.lobbyMessages.append(msg)
+                }
+                return a
+            }
+            return att
+        } catch {
+            return nil
+        }
+    }
+
+    /// Upload a file into a project/workspace directory via the file
+    /// browser. Progress feeds the shared `uploads` list; the browser
+    /// filters to `.browser` origin + its currently-visible target.
+    @discardableResult
+    func uploadBrowserFile(
+        kind: APIClient.FsKind, targetId: String, targetDir: String,
+        filename: String, data: Data, mimeType: String? = nil,
+        server: String? = nil,
+    ) async -> Bool {
+        let id = UUID()
+        let path = targetDir.isEmpty ? filename : "\(targetDir)/\(filename)"
+        uploads.append(UploadItem(
+            id: id, origin: .browser,
+            filename: filename, sizeBytes: Int64(data.count),
+            uploadedBytes: 0, status: .uploading,
+            error: nil,
+            sessionId: nil,
+            target: UploadItem.Target(
+                kind: kind, id: targetId, path: path, server: server,
+            ),
+            startedAt: Date(),
+        ))
+
+        // Build the fs URL the same way `writeFile` does.
+        let base = kind == .project
+            ? "/v1/projects/\(targetId)/files"
+            : "/v1/agents/\(targetId)/workspace/files"
+        let q = server?.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed).map { "?server=\($0)" } ?? ""
+        let encodedPath = path.split(separator: "/")
+            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+            .joined(separator: "/")
+        var request = URLRequest(url: URL(string: "\(AppConfig.apiBase)\(base)/\(encodedPath)\(q)")!)
+        request.httpMethod = "PUT"
+        request.setValue(mimeType ?? "application/octet-stream", forHTTPHeaderField: "Content-Type")
+        if let token = KeychainService.load() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            _ = try await _runUpload(id: id, request: request, body: data) { _ in true }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Shared upload driver: bind a `ProgressiveUpload` to the given
+    /// registry row, stream progress into `uploads`, register with
+    /// `uploadOperations` so `cancelUpload` can find it, and route
+    /// the response through the caller's `decode` closure. On
+    /// success the row transitions to `.done` and auto-fades; on
+    /// failure it flips to `.failed` and sticks until dismissed.
+    private func _runUpload<T>(
+        id: UUID, request: URLRequest, body: Data,
+        decode: @escaping (Data) throws -> T,
+    ) async throws -> T {
+        let op = ProgressiveUpload { [weak self] sent, total in
+            guard let self else { return }
+            Task { @MainActor in
+                if let idx = self.uploads.firstIndex(where: { $0.id == id }) {
+                    self.uploads[idx].uploadedBytes = sent
+                    // `total` from URLSession is authoritative — if it
+                    // differs from the initial size (rare, on re-encoded
+                    // multipart), trust it.
+                    if total > 0 { self.uploads[idx].sizeBytes = total }
+                }
+            }
+        }
+        uploadOperations[id] = op
+        defer { uploadOperations.removeValue(forKey: id) }
+        do {
+            let (respData, http) = try await op.upload(request: request, from: body)
+            guard (200...299).contains(http.statusCode) else {
+                _markFailed(id: id, error: "HTTP \(http.statusCode)")
+                throw URLError(.badServerResponse)
+            }
+            let result = try decode(respData)
+            _markDone(id: id)
+            return result
+        } catch is CancellationError {
+            // Cancel already flipped the row to `.cancelled` in
+            // `cancelUpload`; nothing else to do here.
+            throw CancellationError()
+        } catch {
+            _markFailed(id: id, error: String(describing: error))
+            throw error
+        }
+    }
+
+    private func _markDone(id: UUID) {
+        if let idx = uploads.firstIndex(where: { $0.id == id }) {
+            uploads[idx].status = .done
+            uploads[idx].uploadedBytes = uploads[idx].sizeBytes
+        }
+        // Auto-fade after a short hold so users see the "done" state.
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            await MainActor.run {
+                self?.uploads.removeAll { $0.id == id }
+            }
+        }
+    }
+
+    private func _markFailed(id: UUID, error: String) {
+        if let idx = uploads.firstIndex(where: { $0.id == id }) {
+            uploads[idx].status = .failed
+            uploads[idx].error = error
+        }
+        // Failures persist until the user dismisses them.
+    }
+
+    func cancelUpload(_ id: UUID) {
+        uploadOperations[id]?.cancel()
+        uploadOperations.removeValue(forKey: id)
+        if let idx = uploads.firstIndex(where: { $0.id == id }) {
+            uploads[idx].status = .cancelled
+        }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            await MainActor.run {
+                self?.uploads.removeAll { $0.id == id }
+            }
+        }
+    }
+
+    func dismissUpload(_ id: UUID) {
+        uploadOperations.removeValue(forKey: id)
+        uploads.removeAll { $0.id == id }
     }
 
     func sendAudio(_ base64: String, format: String) async {

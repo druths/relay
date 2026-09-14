@@ -186,7 +186,9 @@ struct InputBar: View {
                 let data = try Data(contentsOf: url)
                 let mime = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.preferredMIMEType)
                     ?? "application/octet-stream"
-                _ = await relay.uploadAttachment(
+                // Progress-aware version — feeds the shared uploads
+                // registry rendered by UploadStrip above the input bar.
+                _ = await relay.uploadChatAttachment(
                     data: data,
                     filename: url.lastPathComponent,
                     mimeType: mime,

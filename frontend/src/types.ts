@@ -76,6 +76,36 @@ export interface DirListing {
   entries: DirEntry[];
 }
 
+/** A single upload's live progress state. Shared by both surfaces
+ *  that trigger uploads — the chat attach button and the file
+ *  browser — so the same visual strip can render either. Each row
+ *  tags itself with `origin` so a surface can filter to just its own
+ *  uploads. */
+export interface UploadItem {
+  /** Unique id (uuid-ish), stable across the upload's lifetime. */
+  id: string;
+  origin: "chat" | "browser";
+  filename: string;
+  sizeBytes: number;
+  uploadedBytes: number;
+  status: "uploading" | "done" | "failed" | "cancelled";
+  /** Populated when `status === "failed"`. */
+  error?: string;
+  /** Chat-origin uploads: which Relay session they attach into. */
+  sessionId?: string;
+  /** Browser-origin uploads: which filesystem target they land in.
+   *  `scope` is the ark server_id (base_url) — used to match against
+   *  file-tree views open in a specific project on a specific ark. */
+  target?: {
+    kind: "project" | "workspace";
+    id: string;
+    path: string;
+    server?: string;
+  };
+  /** Wall-clock start; used for the auto-dismiss timer on completion. */
+  startedAt: number;
+}
+
 export interface FileAttachment {
   file_id: string;
   filename: string;

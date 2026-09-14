@@ -17,7 +17,7 @@ import { SetProjectDialog } from "./components/SetProjectDialog";
 import { copyToClipboard } from "./utils/clipboard";
 import type { Agent } from "./types";
 import { FileEditorTab } from "./components/FileEditorTab";
-import { uploadFiles } from "./api";
+import { UploadProgressStrip } from "./components/UploadProgressStrip";
 
 function App() {
   const [authed, setAuthed] = useState(isAuthenticated());
@@ -236,11 +236,11 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
     if (!files || files.length === 0) return;
     setDropUploading(true);
     try {
-      await uploadFiles(files, relay.activeSessionId, relay.appendUserAttachment);
+      await relay.uploadChatFiles(files, relay.activeSessionId);
     } finally {
       setDropUploading(false);
     }
-  }, [relay.activeSessionId, relay.appendUserAttachment]);
+  }, [relay.activeSessionId, relay.uploadChatFiles]);
 
   const handleAgentSelect = (agentName: string) => {
     // If we're already in a session, leave it first so the connect
@@ -1120,20 +1120,33 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
               !!sessId
               && activeAgent?.llm_provider === "ark"
               && !!lastMsg?.streaming;
+            // Chat-origin uploads scoped to the current session.
+            // Strip lives directly above the input so users find it
+            // where they initiated the upload.
+            const chatUploads = relay.uploads.filter(
+              (u) => u.origin === "chat" && u.sessionId === (sessId ?? undefined),
+            );
             return (
-              <TextInput
-                onSend={relay.sendMessage}
-                disabled={
-                  !relay.connected
-                  || !!(relay.activeSessionId && relay.compacting[relay.activeSessionId])
-                }
-                sessionId={relay.activeSessionId}
-                onAttachment={relay.appendUserAttachment}
-                busy={busy}
-                onStop={busy && sessId
-                  ? () => relay.stopSession(sessId)
-                  : undefined}
-              />
+              <>
+                <UploadProgressStrip
+                  uploads={chatUploads}
+                  onCancel={relay.cancelUpload}
+                  onDismiss={relay.dismissUpload}
+                />
+                <TextInput
+                  onSend={relay.sendMessage}
+                  disabled={
+                    !relay.connected
+                    || !!(relay.activeSessionId && relay.compacting[relay.activeSessionId])
+                  }
+                  sessionId={relay.activeSessionId}
+                  onUpload={(files) => relay.uploadChatFiles(files, sessId)}
+                  busy={busy}
+                  onStop={busy && sessId
+                    ? () => relay.stopSession(sessId)
+                    : undefined}
+                />
+              </>
             );
           })()}
         </div>
@@ -1245,6 +1258,10 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             openFileTab(kind, targetId, path, server, scope);
           }}
           onClose={() => setShowFileBrowser(false)}
+          uploads={relay.uploads}
+          onUpload={relay.uploadBrowserFiles}
+          onCancelUpload={relay.cancelUpload}
+          onDismissUpload={relay.dismissUpload}
         />
       )}
 

@@ -1,6 +1,4 @@
 import { useRef, useState, useEffect, type KeyboardEvent } from "react";
-import { uploadFiles } from "../api";
-import type { FileAttachment } from "../types";
 
 // 11x9 pixel grid for ⏎ return arrow — matches iOS PixelIcons.returnArrow
 const RETURN_GRID = [
@@ -41,7 +39,11 @@ interface TextInputProps {
   onSend: (text: string) => void;
   disabled: boolean;
   sessionId?: string | null;
-  onAttachment?: (attachment: FileAttachment) => void;
+  /** Uploader — provided when attach + drop should be enabled. The
+   *  uploader manages the progress registry itself; the strip above
+   *  this bar renders the live state. Absent when there's no
+   *  session to attach into (lobby). */
+  onUpload?: (files: FileList | File[]) => Promise<void>;
   /** True while an agent turn is in flight on this session. When set,
    *  the trailing Send button is replaced by a Stop button that fires
    *  `onStop`. Textarea stays editable so the user can start typing
@@ -51,13 +53,14 @@ interface TextInputProps {
 }
 
 export function TextInput({
-  onSend, disabled, sessionId, onAttachment, busy, onStop,
+  onSend, disabled, sessionId, onUpload, busy, onStop,
 }: TextInputProps) {
   const [value, setValue] = useState("");
   const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tva = isTvaTheme();
+  void sessionId;  // caller uses this to wire `onUpload` for the right session
 
   const handleSend = () => {
     const trimmed = value.trim();
@@ -84,10 +87,10 @@ export function TextInput({
   }, [value]);
 
   const handleFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0 || !onAttachment) return;
+    if (!files || files.length === 0 || !onUpload) return;
     setUploading(true);
     try {
-      await uploadFiles(files, sessionId, onAttachment);
+      await onUpload(files);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -98,7 +101,7 @@ export function TextInput({
 
   return (
     <div className="flex gap-2 p-4 border-t border-gray-800 input-bar items-end">
-      {onAttachment && (
+      {onUpload && (
         <>
           <input
             ref={fileInputRef}

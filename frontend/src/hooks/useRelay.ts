@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Agent, Message, Project, Session, WsEvent } from "../types";
+import type { Agent, Message, Project, Session, UploadItem, WsEvent } from "../types";
 import { useAudioPlayer } from "./useAudioPlayer";
 import { apiFetch, getWsUrl, listProjects } from "../api";
 
@@ -59,6 +59,12 @@ export interface RelayState {
    *  sidebar filter dropdowns so values on older sessions remain
    *  filter-selectable. */
   sessionFacets: { labels: string[]; projectIds: string[] };
+  /** In-flight and recently-completed uploads. Shared between the
+   *  chat attach flow and the file-browser upload flow — each row is
+   *  tagged with `origin` and (for browser) the target so the two
+   *  surfaces can filter to just theirs. Completed rows self-remove
+   *  after a short display hold; failures persist until dismissed. */
+  uploads: UploadItem[];
 }
 
 export function useRelay() {
@@ -85,7 +91,13 @@ export function useRelay() {
     compacting: {},
     activities: [],
     sessionFacets: { labels: [], projectIds: [] },
+    uploads: [],
   });
+
+  // Live abort handles per upload id — kept outside setState so we
+  // can call `.abort()` on Cancel without a stale-closure hazard.
+  // Removed on completion / failure / cancel.
+  const uploadAborters = useRef<Map<string, () => void>>(new Map());
 
   // Fetch agent list
   const refreshAgents = useCallback(async () => {
@@ -1026,6 +1038,195 @@ export function useRelay() {
     audioPlayerRef.current.setMuted(!audioPlayerRef.current.muted);
   }, []);
 
+  // ── Upload registry helpers ─────────────────────────────────────
+  //
+  // Small state-mutation primitives used by both origins (chat and
+  // browser). Each origin composes them into its own upload flow via
+  // the shared `uploadWithProgress` primitive in api.ts. The row's
+  // lifecycle is:
+  //
+  //   startUpload → many updateUploadProgress → completeUpload
+  //                                           → failUpload
+  //                                           → cancelUpload
+  //
+  // Successful and cancelled rows self-remove after a short hold so
+  // users see the "done" state briefly before it fades. Failed rows
+  // persist until the user dismisses them, so they don't miss the
+  // error.
+
+  const startUpload = useCallback((row: UploadItem, aborter: () => void) => {
+    uploadAborters.current.set(row.id, aborter);
+    setState((s) => ({ ...s, uploads: [...s.uploads, row] }));
+  }, []);
+
+  const updateUploadProgress = useCallback(
+    (id: string, uploadedBytes: number) => {
+      setState((s) => ({
+        ...s,
+        uploads: s.uploads.map((u) =>
+          u.id === id ? { ...u, uploadedBytes } : u,
+        ),
+      }));
+    }, [],
+  );
+
+  const _removeUploadAfterHold = useCallback((id: string, ms: number) => {
+    setTimeout(() => {
+      setState((s) => ({ ...s, uploads: s.uploads.filter((u) => u.id !== id) }));
+    }, ms);
+  }, []);
+
+  const completeUpload = useCallback((id: string) => {
+    uploadAborters.current.delete(id);
+    setState((s) => ({
+      ...s,
+      uploads: s.uploads.map((u) =>
+        u.id === id
+          ? { ...u, status: "done" as const, uploadedBytes: u.sizeBytes }
+          : u,
+      ),
+    }));
+    _removeUploadAfterHold(id, 900);
+  }, [_removeUploadAfterHold]);
+
+  const failUpload = useCallback((id: string, error: string) => {
+    uploadAborters.current.delete(id);
+    setState((s) => ({
+      ...s,
+      uploads: s.uploads.map((u) =>
+        u.id === id ? { ...u, status: "failed" as const, error } : u,
+      ),
+    }));
+    // Errors stick around until the user dismisses them explicitly.
+  }, []);
+
+  const cancelUpload = useCallback((id: string) => {
+    const abort = uploadAborters.current.get(id);
+    if (abort) abort();
+    uploadAborters.current.delete(id);
+    setState((s) => ({
+      ...s,
+      uploads: s.uploads.map((u) =>
+        u.id === id ? { ...u, status: "cancelled" as const } : u,
+      ),
+    }));
+    _removeUploadAfterHold(id, 600);
+  }, [_removeUploadAfterHold]);
+
+  const dismissUpload = useCallback((id: string) => {
+    uploadAborters.current.delete(id);
+    setState((s) => ({ ...s, uploads: s.uploads.filter((u) => u.id !== id) }));
+  }, []);
+
+  /// Attach files to a chat session. Each file becomes a row in the
+  /// upload registry (rendered by the strip above InputBar), streams
+  /// bytes with real progress via the shared uploader, and on success
+  /// pipes the resulting FileAttachment into the conversation. Runs
+  /// with a concurrency cap of 3 so a batch pick doesn't saturate.
+  const uploadChatFiles = useCallback(async (
+    files: FileList | File[],
+    sessionId: string | null,
+  ) => {
+    const { uploadWithProgress } = await import("../api");
+    const list = Array.from(files);
+    const CONCURRENCY = 3;
+    let cursor = 0;
+
+    const runOne = async (file: File) => {
+      const id = crypto.randomUUID();
+      const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+      const form = new FormData();
+      form.append("file", file);
+      const handle = uploadWithProgress("POST", `/v1/files${qs}`, form, {
+        onProgress: (loaded) => updateUploadProgress(id, loaded),
+      });
+      startUpload({
+        id, origin: "chat",
+        filename: file.name, sizeBytes: file.size,
+        uploadedBytes: 0, status: "uploading",
+        sessionId: sessionId ?? undefined,
+        startedAt: Date.now(),
+      }, handle.abort);
+      try {
+        const res = await handle.promise;
+        const att = res.json() as import("../types").FileAttachment;
+        // Append the attachment first, so the pill shows in the
+        // conversation before the row fades out.
+        appendUserAttachment(att);
+        completeUpload(id);
+      } catch (e) {
+        const name = (e as { name?: string })?.name;
+        if (name === "AbortError") return;  // cancelUpload already handled it
+        failUpload(id, String(e instanceof Error ? e.message : e));
+      }
+    };
+
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < Math.min(CONCURRENCY, list.length); i++) {
+      workers.push((async function pump() {
+        while (cursor < list.length) {
+          const idx = cursor++;
+          await runOne(list[idx]);
+        }
+      })());
+    }
+    await Promise.all(workers);
+  }, [startUpload, updateUploadProgress, completeUpload, failUpload, appendUserAttachment]);
+
+  /// Upload files into a project or workspace directory via the file
+  /// browser. Each file goes through the shared uploader + registry
+  /// so the browser can render its own progress strip filtered to
+  /// browser-origin rows.
+  const uploadBrowserFiles = useCallback(async (
+    kind: "project" | "workspace",
+    targetId: string,
+    targetDir: string,
+    files: FileList | File[],
+    server?: string,
+  ) => {
+    const { uploadWithProgress, fsTarget } = await import("../api");
+    const list = Array.from(files);
+    const CONCURRENCY = 3;
+    let cursor = 0;
+
+    const runOne = async (file: File) => {
+      const id = crypto.randomUUID();
+      const t = fsTarget(kind, targetId, server);
+      const path = targetDir ? `${targetDir}/${file.name}` : file.name;
+      const url = `${t.base}/${path.replace(/^\/+/, "")}${t.q}`;
+      const handle = uploadWithProgress("PUT", url, file, {
+        contentType: file.type || "application/octet-stream",
+        onProgress: (loaded) => updateUploadProgress(id, loaded),
+      });
+      startUpload({
+        id, origin: "browser",
+        filename: file.name, sizeBytes: file.size,
+        uploadedBytes: 0, status: "uploading",
+        target: { kind, id: targetId, path, server },
+        startedAt: Date.now(),
+      }, handle.abort);
+      try {
+        await handle.promise;
+        completeUpload(id);
+      } catch (e) {
+        const name = (e as { name?: string })?.name;
+        if (name === "AbortError") return;
+        failUpload(id, String(e instanceof Error ? e.message : e));
+      }
+    };
+
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < Math.min(CONCURRENCY, list.length); i++) {
+      workers.push((async function pump() {
+        while (cursor < list.length) {
+          const idx = cursor++;
+          await runOne(list[idx]);
+        }
+      })());
+    }
+    await Promise.all(workers);
+  }, [startUpload, updateUploadProgress, completeUpload, failUpload]);
+
   return {
     ...state,
     connect,
@@ -1049,6 +1250,14 @@ export function useRelay() {
     compactSession,
     setSessionProject,
     stopSession,
+    startUpload,
+    updateUploadProgress,
+    completeUpload,
+    failUpload,
+    cancelUpload,
+    dismissUpload,
+    uploadChatFiles,
+    uploadBrowserFiles,
   };
 }
 
