@@ -38,6 +38,7 @@
 		3C261BCD405BCBF02C13013B /* RelayActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D4C97F298DF8083BE24410 /* RelayActivityAttributes.swift */; };
 		3EC69077C140DED12C6E435F /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2C16BE961C550509F0634F5 /* Agent.swift */; };
 		45E17BA3AD68410A2FC2E05A /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AEEB07DBA1DF0CDC1A99B74 /* AudioSessionManager.swift */; };
+		468A9996AEC058947793A338 /* UploadStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08028B103E8B8FA6A10EE52 /* UploadStrip.swift */; };
 		4727621A68E27C6972481B87 /* StatusOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361BF127CF429820121827A5 /* StatusOrb.swift */; };
 		4900F6EF78F8F5B2F3228ECA /* Runestone in Frameworks */ = {isa = PBXBuildFile; productRef = AB2E926FF4DEE24B40AE5587 /* Runestone */; };
 		4B81BFEC604C131241F5B077 /* SessionsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9692A36756E86694D6DCF64F /* SessionsAPI.swift */; };
@@ -64,7 +65,9 @@
 		8A89EBFBE5068FDB360EA2AD /* LoginViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B71D1E2344D1C02A44198F5 /* LoginViewModel.swift */; };
 		901CFC9A32A9F29842303390 /* AgentManagementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C90A06111D3088C0334A02A /* AgentManagementViewModel.swift */; };
 		92B9D0910332ED2BD5DCA849 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E3E6922C9E8819987A2C44C /* MarkdownText.swift */; };
+		9455FA9BBCFC1477C6908913 /* UploadItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3F84D77B71C33C0093AC68D /* UploadItem.swift */; };
 		9996E5FB3AB7CA3D363AFC02 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B1F2A24DC524D9098334350 /* APIClient.swift */; };
+		9D536EC85B866AE7AC5DEC41 /* ProgressiveUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AB9707523AC385AD3004DC1 /* ProgressiveUpload.swift */; };
 		A1265EA794B82F430E6CD9B8 /* RelayColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C16E77EE957B8D8F2CB9659 /* RelayColors.swift */; };
 		A4EA4E59387250DED44FA16C /* SilentKeepAlive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 912432D794E9D1FE7165651C /* SilentKeepAlive.swift */; };
 		A80820F384AD84A776B054FE /* FileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */; };
@@ -159,6 +162,7 @@
 		6E3E6922C9E8819987A2C44C /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
 		73F8CE7B75365F8F88F0DA57 /* RelayLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayLiveActivity.swift; sourceTree = "<group>"; };
 		79719ECC3D01B1F82B573722 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		7AB9707523AC385AD3004DC1 /* ProgressiveUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressiveUpload.swift; sourceTree = "<group>"; };
 		7CBE41AF5C080E5DED126546 /* SpeechRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognitionService.swift; sourceTree = "<group>"; };
 		8AEEB07DBA1DF0CDC1A99B74 /* AudioSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionManager.swift; sourceTree = "<group>"; };
 		909727E85D2D35F4161B5F24 /* AudioViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioViewModel.swift; sourceTree = "<group>"; };
@@ -182,9 +186,11 @@
 		C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManagementView.swift; sourceTree = "<group>"; };
 		CB134658D8D2BA7B62B343A1 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
 		D26249E8004C02E5E5519D8B /* PixelFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelFace.swift; sourceTree = "<group>"; };
+		D3F84D77B71C33C0093AC68D /* UploadItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadItem.swift; sourceTree = "<group>"; };
 		D5AEC3C080AB67D402F85445 /* live_start_1.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = live_start_1.wav; sourceTree = "<group>"; };
 		D6EFCD7267878AFF4D537DC4 /* SetProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetProjectSheet.swift; sourceTree = "<group>"; };
 		D88BF482E109DC4EFBD553C3 /* VT323-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "VT323-Regular.ttf"; sourceTree = "<group>"; };
+		E08028B103E8B8FA6A10EE52 /* UploadStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadStrip.swift; sourceTree = "<group>"; };
 		E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
 		E587D02A8BB568FC7933144B /* AgentSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSelector.swift; sourceTree = "<group>"; };
 		E99230868B22A5498D4052BB /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
@@ -234,6 +240,7 @@
 				D6EFCD7267878AFF4D537DC4 /* SetProjectSheet.swift */,
 				39A4BFACF93E476CF82D0717 /* SoundWaveView.swift */,
 				361BF127CF429820121827A5 /* StatusOrb.swift */,
+				E08028B103E8B8FA6A10EE52 /* UploadStrip.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -250,6 +257,7 @@
 				43D1016F3351DFA80C729268 /* AuthService.swift */,
 				20F1A7CF1C37E5D68F02F84B /* HapticService.swift */,
 				79719ECC3D01B1F82B573722 /* KeychainService.swift */,
+				7AB9707523AC385AD3004DC1 /* ProgressiveUpload.swift */,
 				1279FA47D6BF5378FDEAB722 /* ProjectsAPI.swift */,
 				9692A36756E86694D6DCF64F /* SessionsAPI.swift */,
 				912432D794E9D1FE7165651C /* SilentKeepAlive.swift */,
@@ -356,6 +364,7 @@
 				3DAFE76391BC23000E406FF9 /* ProviderSchemas.swift */,
 				B6D4C97F298DF8083BE24410 /* RelayActivityAttributes.swift */,
 				E99230868B22A5498D4052BB /* Session.swift */,
+				D3F84D77B71C33C0093AC68D /* UploadItem.swift */,
 				071718BDCBB8F15D92597F38 /* WebSocketEvent.swift */,
 			);
 			path = Models;
@@ -571,6 +580,7 @@
 				B3C6794809BCC03E5DD3D358 /* PixelFace.swift in Sources */,
 				AC91A1044DB20F944BE1B76C /* PixelIcon.swift in Sources */,
 				2E2D6803F353C124CFB03BAE /* PlatformSettings.swift in Sources */,
+				9D536EC85B866AE7AC5DEC41 /* ProgressiveUpload.swift in Sources */,
 				58B4C922AF47D2AF01829870 /* Project.swift in Sources */,
 				C43B2D4EC161876BB6394543 /* ProjectManagerView.swift in Sources */,
 				65B26FD51C35E598416ECC58 /* ProjectsAPI.swift in Sources */,
@@ -594,6 +604,8 @@
 				60324D4F56D4721206FA302D /* StatusIndicator.swift in Sources */,
 				4727621A68E27C6972481B87 /* StatusOrb.swift in Sources */,
 				BEDCE5B68A34E5661B0F6C6B /* ThinkingToneService.swift in Sources */,
+				9455FA9BBCFC1477C6908913 /* UploadItem.swift in Sources */,
+				468A9996AEC058947793A338 /* UploadStrip.swift in Sources */,
 				2ADD40A2159E60D16579813F /* WebSocketEvent.swift in Sources */,
 				D542B8D8116E090123CE96ED /* WebSocketService.swift in Sources */,
 			);

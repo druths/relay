@@ -1011,9 +1011,19 @@ struct RelayView: View {
             .buttonStyle(.plain)
             if let close = onClose {
                 Button(action: close) {
+                    // Keep the icon small but expand the tappable
+                    // rectangle around it. `contentShape` makes the
+                    // whole 28×28 hit region live regardless of
+                    // where the icon glyph actually paints — Apple's
+                    // HIG minimum is 44 but tabs are visually
+                    // dense, so 28 is a reasonable middle ground
+                    // that stays comfortably tappable on iPad
+                    // without pushing labels around.
                     Image(systemName: "xmark")
                         .font(.system(size: 11))
                         .foregroundStyle(theme.textQuaternary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
