@@ -55,6 +55,19 @@ function _hasTextExt(path: string): boolean {
   return TEXT_EXT_ALLOWLIST.has(_extOf(path));
 }
 
+/// SHA-256 hash of a string, as a lowercase hex digest. Used to
+/// distinguish "the file changed because *I* just saved it" from
+/// "the file changed because something else wrote to it" when a
+/// `*_file_changed` event arrives — a match means the on-disk
+/// content is what we sent, so the auto-reload is safe to skip.
+async function _hashText(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /// Markdown files get a view/edit toggle in the toolbar. Extension-
 /// based so the toggle button never appears for anything that
 /// wouldn't render sensibly as markdown.
@@ -215,6 +228,15 @@ export function FileEditorTab({
   // keybinding is wired by CM's `searchKeymap` (included in basicSetup).
   const cmRef = useRef<ReactCodeMirrorRef | null>(null);
 
+  /// SHA-256 hash of the text most recently saved from this editor.
+  /// Compared against the on-disk hash whenever an incoming
+  /// `*_file_changed` event lands: match = ark's echo of our own
+  /// write → skip the reload (which would scroll the viewport to
+  /// the top); mismatch = a genuinely external write → fall through
+  /// to the normal reload path. Cleared after use so the next
+  /// file-change event goes through the normal path.
+  const lastSaveHash = useRef<string | null>(null);
+
   const isDirty = savedContent !== null && draft !== savedContent;
 
   useEffect(() => {
@@ -313,11 +335,38 @@ export function FileEditorTab({
     }
     if (isDirty) {
       setStaleBanner(true);
+    } else if (lastSaveHash.current) {
+      // Auto-reload path — but first, check if this is our own
+      // save's echo by hashing the current on-disk content and
+      // comparing to what we just wrote. Match = safe to skip
+      // (viewport stays put). Mismatch = someone else wrote a
+      // different version → install it via the normal reload
+      // path so the user sees the new content.
+      (async () => {
+        try {
+          const resp = await readFile(kind, targetId, path, server);
+          const text = await resp.text();
+          const h = await _hashText(text);
+          if (h === lastSaveHash.current) {
+            lastSaveHash.current = null;
+            return;  // echo confirmed
+          }
+          lastSaveHash.current = null;
+          setSavedContent(text);
+          setDraft(text);
+          setIsBinary(false);
+          setNotOnDisk(false);
+        } catch {
+          // Fetch failed — fall back to the full load path.
+          lastSaveHash.current = null;
+          await load();
+        }
+      })();
     } else {
       // Quiet reload — the user is viewing, not editing.
       load();
     }
-  }, [fileChanges, kind, scope, path, isDirty, load]);
+  }, [fileChanges, kind, scope, path, isDirty, load, targetId, server]);
 
   const save = async () => {
     setSaving(true);
@@ -327,6 +376,20 @@ export function FileEditorTab({
       setSavedContent(draft);
       setStaleBanner(false);
       setNotOnDisk(false);
+      // Record the hash of what we just wrote so the file-change
+      // watcher below can distinguish ark's echo of our own write
+      // (skip → viewport stays put) from a genuinely external
+      // modification (reload → surface the new content). Cleared
+      // on first match or when a mismatched external write lands.
+      // `crypto.subtle` requires a secure context — on plain HTTP
+      // dev deploys it may be absent; leave the hash unset and let
+      // the effect fall through to the normal reload path (same
+      // behavior as before this feature landed).
+      try {
+        lastSaveHash.current = await _hashText(draft);
+      } catch {
+        lastSaveHash.current = null;
+      }
     } catch (e) {
       setError(String(e));
     } finally {

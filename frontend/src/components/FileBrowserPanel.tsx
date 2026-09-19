@@ -436,28 +436,49 @@ function FileTreeView({
     fileInputRef.current?.click();
   };
 
-  const handleMkdir = async () => {
-    const name = prompt("New folder name:");
+  /// Create a folder somewhere under `parentDir` (root when empty).
+  /// Called from both the toolbar (parentDir="") and a directory row's
+  /// context menu (parentDir=that directory).
+  const handleMkdirIn = async (parentDir: string) => {
+    const name = prompt(
+      parentDir
+        ? `New folder name inside "${parentDir}":`
+        : "New folder name:",
+    );
     if (!name) return;
+    const cleaned = name.replace(/^\/+/, "").trim();
+    if (!cleaned) return;
+    const full = parentDir ? `${parentDir}/${cleaned}` : cleaned;
     try {
-      await mkdir(kind, id, name, server);
-      loadRoot();
+      await mkdir(kind, id, full, server);
+      if (parentDir) await loadSubdir(parentDir);
+      else await loadRoot();
     } catch (e) {
       setError(String(e));
     }
   };
 
-  /// Prompt for a filename and open a tab for it. The file isn't written
-  /// to disk yet — the editor lands in the "not on disk — save to create"
-  /// state, and the first save creates it. Matches the New folder
-  /// affordance shape.
-  const handleNewFile = () => {
-    const name = prompt("New file path (relative to root):");
+  /// Prompt for a filename and open a fresh tab at
+  /// `parentDir/<name>`. The file isn't written to disk yet — the
+  /// editor lands in the "not on disk — save to create" state, and
+  /// the first save creates it. Called from both the toolbar
+  /// (parentDir="") and a directory row's context menu (parentDir=
+  /// that directory).
+  const handleNewFileIn = (parentDir: string) => {
+    const name = prompt(
+      parentDir
+        ? `New file name inside "${parentDir}":`
+        : "New file path (relative to root):",
+    );
     if (!name) return;
     const cleaned = name.replace(/^\/+/, "").trim();
     if (!cleaned) return;
-    onOpenFile(kind, id, cleaned, server);
+    const full = parentDir ? `${parentDir}/${cleaned}` : cleaned;
+    onOpenFile(kind, id, full, server);
   };
+
+  const handleMkdir = () => handleMkdirIn("");
+  const handleNewFile = () => handleNewFileIn("");
 
   /// Called from a row click. Probes the file first so we can bail
   /// early on binaries (opening a tab you can't do anything with is
@@ -557,6 +578,8 @@ function FileTreeView({
             onRename={handleRename}
             onDownload={handleDownload}
             onUploadInto={handleUploadInto}
+            onNewFileIn={handleNewFileIn}
+            onNewFolderIn={handleMkdirIn}
             dragOverPath={dragOverPath}
             makeDropHandlers={makeDropHandlers}
           />
@@ -608,6 +631,7 @@ function FileTreeView({
 function DirView({
   listing, path, depth, expanded, loadSubdir, collapseSubdir,
   onOpenFile, onDelete, onRename, onDownload, onUploadInto,
+  onNewFileIn, onNewFolderIn,
   dragOverPath, makeDropHandlers,
 }: {
   listing: DirListing;
@@ -621,6 +645,8 @@ function DirView({
   onRename: (p: string) => void;
   onDownload: (p: string, isDir: boolean) => void;
   onUploadInto: (dir: string) => void;
+  onNewFileIn: (dir: string) => void;
+  onNewFolderIn: (dir: string) => void;
   dragOverPath: string | null;
   makeDropHandlers: (targetDir: string) => {
     onDragOver: (e: React.DragEvent) => void;
@@ -679,6 +705,8 @@ function DirView({
                 onDownload={onDownload}
                 onDelete={onDelete}
                 onUploadInto={onUploadInto}
+                onNewFileIn={onNewFileIn}
+                onNewFolderIn={onNewFolderIn}
               />
             </div>
             {entry.is_dir && isOpen && expanded.get(childPath) && (
@@ -694,6 +722,8 @@ function DirView({
                 onRename={onRename}
                 onDownload={onDownload}
                 onUploadInto={onUploadInto}
+                onNewFileIn={onNewFileIn}
+                onNewFolderIn={onNewFolderIn}
                 dragOverPath={dragOverPath}
                 makeDropHandlers={makeDropHandlers}
               />
@@ -710,6 +740,7 @@ function DirView({
  *  pattern but expanded to a dropdown with Rename / Download / Delete. */
 function RowMenu({
   path, isDir, onRename, onDownload, onDelete, onUploadInto,
+  onNewFileIn, onNewFolderIn,
 }: {
   path: string;
   isDir: boolean;
@@ -717,6 +748,8 @@ function RowMenu({
   onDownload: (p: string, isDir: boolean) => void;
   onDelete: (p: string) => void;
   onUploadInto: (dir: string) => void;
+  onNewFileIn: (dir: string) => void;
+  onNewFolderIn: (dir: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   // Close on any click anywhere else.
@@ -749,12 +782,26 @@ function RowMenu({
                      bg-gray-900 border border-gray-700 shadow-xl text-gray-200"
         >
           {isDir && (
-            <button
-              onClick={() => { setOpen(false); onUploadInto(path); }}
-              className="block w-full text-left px-3 py-1 hover:bg-gray-800"
-            >
-              Upload here…
-            </button>
+            <>
+              <button
+                onClick={() => { setOpen(false); onNewFileIn(path); }}
+                className="block w-full text-left px-3 py-1 hover:bg-gray-800"
+              >
+                New file…
+              </button>
+              <button
+                onClick={() => { setOpen(false); onNewFolderIn(path); }}
+                className="block w-full text-left px-3 py-1 hover:bg-gray-800"
+              >
+                New folder…
+              </button>
+              <button
+                onClick={() => { setOpen(false); onUploadInto(path); }}
+                className="block w-full text-left px-3 py-1 hover:bg-gray-800"
+              >
+                Upload here…
+              </button>
+            </>
           )}
           <button
             onClick={() => { setOpen(false); onRename(path); }}

@@ -179,6 +179,11 @@ private struct FileTreeView: View {
     @State private var mkdirName = ""
     @State private var showNewFileAlert = false
     @State private var newFileName = ""
+    /// Parent directory the pending create-file / create-folder alert
+    /// should land under. Empty string = root; a non-empty path means
+    /// the user launched the action from a directory row's context
+    /// menu. Cleared once the create resolves.
+    @State private var createParentDir: String = ""
     @State private var pathToDelete: String?
     // Rename + download flow state. `renamePath` triggers the rename
     // alert; `downloadShareURL` triggers the system share sheet.
@@ -311,17 +316,38 @@ private struct FileTreeView: View {
         .onChange(of: expanded) { _, new in
             relay.fileTreeExpanded[stateKey] = new
         }
-        .alert("New folder", isPresented: $showMkdirAlert) {
+        .alert(
+            createParentDir.isEmpty
+                ? "New folder"
+                : "New folder in \(createParentDir)",
+            isPresented: $showMkdirAlert,
+        ) {
             TextField("Folder name", text: $mkdirName)
             Button("Create") { Task { await doMkdir() } }
-            Button("Cancel", role: .cancel) { mkdirName = "" }
+            Button("Cancel", role: .cancel) {
+                mkdirName = ""
+                createParentDir = ""
+            }
         }
-        .alert("New file", isPresented: $showNewFileAlert) {
-            TextField("File path (relative to root)", text: $newFileName)
+        .alert(
+            createParentDir.isEmpty
+                ? "New file"
+                : "New file in \(createParentDir)",
+            isPresented: $showNewFileAlert,
+        ) {
+            TextField(
+                createParentDir.isEmpty
+                    ? "File path (relative to root)"
+                    : "File name",
+                text: $newFileName,
+            )
                 .autocorrectionDisabled(true)
                 .textInputAutocapitalization(.never)
             Button("Open") { doNewFile() }
-            Button("Cancel", role: .cancel) { newFileName = "" }
+            Button("Cancel", role: .cancel) {
+                newFileName = ""
+                createParentDir = ""
+            }
         } message: {
             Text("Opens a tab for the new path. The file is created on first save.")
         }
@@ -423,6 +449,20 @@ private struct FileTreeView: View {
             }
         }
         .contextMenu {
+            if entry.isDir {
+                Button {
+                    createParentDir = childPath
+                    showNewFileAlert = true
+                } label: {
+                    Label("New File…", systemImage: "doc.badge.plus")
+                }
+                Button {
+                    createParentDir = childPath
+                    showMkdirAlert = true
+                } label: {
+                    Label("New Folder…", systemImage: "folder.badge.plus")
+                }
+            }
             Button {
                 renamePath = childPath
                 renameText = childPath.split(separator: "/").last.map(String.init) ?? childPath
@@ -459,10 +499,12 @@ private struct FileTreeView: View {
                 // the inline preview path wouldn't gracefully handle a
                 // not-on-disk start.
                 ToolbarIconButton(system: "doc.badge.plus", title: "New file") {
+                    createParentDir = ""  // toolbar always targets root
                     showNewFileAlert = true
                 }
             }
             ToolbarIconButton(system: "folder.badge.plus", title: "New folder") {
+                createParentDir = ""  // toolbar always targets root
                 showMkdirAlert = true
             }
             ToolbarIconButton(system: "arrow.clockwise", title: "Refresh") {
@@ -556,11 +598,20 @@ private struct FileTreeView: View {
     }
 
     private func doMkdir() async {
-        let name = mkdirName.trimmingCharacters(in: .whitespaces)
+        let name = mkdirName
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         mkdirName = ""
+        let parent = createParentDir
+        createParentDir = ""
         guard !name.isEmpty else { return }
+        let full = parent.isEmpty ? name : "\(parent)/\(name)"
         do {
-            try await relay.apiClient.mkdir(kind, id: targetId, path: name, server: server)
+            try await relay.apiClient.mkdir(kind, id: targetId, path: full, server: server)
+            // Refresh the immediate parent so the new folder shows up
+            // in place; root refresh is only needed when we created
+            // at root or the parent isn't already expanded (rare —
+            // the context menu only fires on expanded/visible rows).
             await loadRoot()
         } catch {
             self.error = String(describing: error)
@@ -572,8 +623,11 @@ private struct FileTreeView: View {
             .trimmingCharacters(in: .whitespaces)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         newFileName = ""
+        let parent = createParentDir
+        createParentDir = ""
         guard !cleaned.isEmpty, let cb = onOpenFile else { return }
-        cb(kind, targetId, cleaned, server)
+        let full = parent.isEmpty ? cleaned : "\(parent)/\(cleaned)"
+        cb(kind, targetId, full, server)
     }
 
     private func doDelete(_ path: String) async {

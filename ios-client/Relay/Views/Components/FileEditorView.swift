@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 #if canImport(UIKit)
 import UIKit
 import PDFKit
@@ -53,6 +54,13 @@ struct FileEditorView: View {
     @State private var pdfData: Data? = nil
     #endif
     @State private var lastSeenFileChangeTs: Date = .distantPast
+    /// SHA-256 hex hash of the text most recently saved from this
+    /// editor. Compared against the on-disk hash when a
+    /// `*_file_changed` event lands: match = ark's echo of our own
+    /// write → skip the reload (which would remount the editor and
+    /// reset scroll); mismatch = a genuinely external write → fall
+    /// through to `loadFile()`. Cleared after use.
+    @State private var lastSaveHash: String? = nil
 
     /// Bumped to ask `SelectableTextEditor` to present Runestone's
     /// built-in UIFindInteraction (system find navigator).
@@ -443,9 +451,23 @@ struct FileEditorView: View {
             isDirty = false
             staleBanner = false
             notOnDisk = false
+            // Record what we just wrote so `handleFileChange` can
+            // distinguish ark's echo of our own write (skip → the
+            // editor's Runestone buffer keeps its scroll position)
+            // from a genuinely external modification (reload).
+            lastSaveHash = _sha256Hex(text)
         } catch {
             self.error = String(describing: error)
         }
+    }
+
+    /// Lowercase hex SHA-256 of a UTF-8 string. Matches the web
+    /// client's `_hashText` so a save on either surface is
+    /// distinguishable from an external write on the other.
+    private func _sha256Hex(_ s: String) -> String {
+        let data = Data(s.utf8)
+        let hash = SHA256.hash(data: data)
+        return hash.map { String(format: "%02x", $0) }.joined()
     }
 
     /// React to a disk-side change to this exact file. Delete → transition
@@ -473,6 +495,29 @@ struct FileEditorView: View {
         }
         if isDirty {
             staleBanner = true
+        } else if let expected = lastSaveHash {
+            // Auto-reload path — but if we just saved, verify the
+            // on-disk content actually differs from what we wrote.
+            // Match = ark's echo of our own save → skip; mismatch =
+            // someone else wrote a different version → run the
+            // normal load path so the user sees it.
+            Task {
+                do {
+                    let (data, _) = try await relay.apiClient.readFile(
+                        kind, id: targetId, path: path, server: server,
+                    )
+                    let text = String(data: data, encoding: .utf8) ?? ""
+                    if _sha256Hex(text) == expected {
+                        lastSaveHash = nil
+                        return  // echo confirmed
+                    }
+                    lastSaveHash = nil
+                    await loadFile()
+                } catch {
+                    lastSaveHash = nil
+                    await loadFile()
+                }
+            }
         } else {
             Task { await loadFile() }
         }
