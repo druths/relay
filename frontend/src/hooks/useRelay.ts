@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Agent, Message, Project, Session, UploadItem, WsEvent } from "../types";
+import { randomUUID } from "../utils/uuid";
 import { useAudioPlayer } from "./useAudioPlayer";
 import { apiFetch, getWsUrl, listProjects } from "../api";
 
@@ -1133,7 +1134,7 @@ export function useRelay() {
     let cursor = 0;
 
     const runOne = async (file: File) => {
-      const id = crypto.randomUUID();
+      const id = randomUUID();
       const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
       const form = new FormData();
       form.append("file", file);
@@ -1190,7 +1191,7 @@ export function useRelay() {
     let cursor = 0;
 
     const runOne = async (file: File) => {
-      const id = crypto.randomUUID();
+      const id = randomUUID();
       const t = fsTarget(kind, targetId, server);
       const path = targetDir ? `${targetDir}/${file.name}` : file.name;
       const url = `${t.base}/${path.replace(/^\/+/, "")}${t.q}`;
