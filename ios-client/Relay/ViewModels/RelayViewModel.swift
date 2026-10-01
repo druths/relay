@@ -1,4 +1,5 @@
 import ActivityKit
+import AVFoundation
 import Foundation
 
 @Observable
@@ -105,6 +106,16 @@ final class RelayViewModel {
     var sttSettings: PlatformSettings?
     var outputMode: OutputMode = .speaker
     var isLiveMode = false
+
+    // DIAGNOSTIC (temporary): track whether the currently-streaming
+    // agent turn produced any audio while live mode is on. If
+    // text_done fires and still no audio has arrived after a short
+    // grace window, we log the audio-relevant state and append a
+    // visible "missing audio" marker to the conversation. Remove
+    // once the live-mode-audio-stops bug is identified and fixed.
+    @ObservationIgnored private var audioExpectedForActiveTurn: Bool = false
+    @ObservationIgnored private var audioReceivedForActiveTurn: Bool = false
+    @ObservationIgnored private var missingAudioTimerTask: Task<Void, Never>?
 
     enum OutputMode: String {
         case speaker, earpiece
@@ -237,7 +248,19 @@ final class RelayViewModel {
     func reconnect() async {
         suppressNextGreeting = true
         let previousSessionId = activeSessionId  // capture before connect() runs
+        let wasLiveMode = isLiveMode             // capture before connect() runs
         await connect()
+        // Backend's `is_live_mode` is a local variable re-initialised
+        // to False on every fresh WS connect. Re-send our live-mode
+        // state so TTS gating stays in sync — without this, a
+        // reconnect-while-in-live-mode silently stops the backend
+        // from emitting audio for subsequent turns, which in turn
+        // leaves `suppressNextGreeting` stuck true on the client
+        // (no `audioDone` ever arrives to clear it), compounding
+        // into a persistent audio-dead state until app restart.
+        if wasLiveMode && connected {
+            try? await webSocketService.send(.setLiveMode(enabled: true))
+        }
         // Re-enter the session we were in before the disconnect.
         // The backend will respond with sessionHistory (and possibly sessionEntered)
         // to re-establish the session context. If the session no longer exists,
@@ -254,8 +277,15 @@ final class RelayViewModel {
     func resync() async {
         await fetchSessions()
         await fetchSessionFacets()
+        // Note: unlike `reconnect()`, this path reuses the EXISTING
+        // WS. The backend only sends its operator greeting on fresh
+        // connect, so there's nothing to suppress here. Setting
+        // `suppressNextGreeting = true` on resync is wasteful AND
+        // dangerous: no corresponding operator-text event ever
+        // arrives to clear it (we're already in-session), and if
+        // we're in live mode the flag then survives into subsequent
+        // turns, silently dropping their audio_start events.
         if let sessionId = activeSessionId {
-            suppressNextGreeting = true
             await resumeSession(sessionId)
         }
     }
@@ -512,6 +542,46 @@ final class RelayViewModel {
                 self?.uploads.removeAll { $0.id == id }
             }
         }
+    }
+
+    /// DIAGNOSTIC (temporary): called when an in-session agent turn
+    /// finished streaming text in live mode but we never saw a single
+    /// `audio_start` / `audio_chunk` for it. Dumps a snapshot of the
+    /// audio-relevant state to the console and appends a visible
+    /// system-role message to the conversation so the user can see
+    /// at a glance that this is the bug we're hunting. Remove once
+    /// the live-mode-audio-stops bug is fixed.
+    private func _reportMissingAudio(sessionId: String, agentName: String) {
+        let session = AVAudioSession.sharedInstance()
+        let snapshot: [String: Any] = [
+            "session_id": sessionId,
+            "agent_name": agentName,
+            "isLiveMode": isLiveMode,
+            "suppressNextGreeting": suppressNextGreeting,
+            "pendingSessionId": pendingSessionId as Any,
+            "pendingAudioChunks_count": pendingAudioChunks.count,
+            "pendingAudioHasStart": pendingAudioHasStart,
+            "audio.isMuted": audio.isMuted,
+            "self.outputMode": "\(outputMode)",
+            "recorder.state": "\(audio.recorderState)",
+            "av.category": session.category.rawValue,
+            "av.mode": session.mode.rawValue,
+            "av.options": "\(session.categoryOptions.rawValue)",
+            "av.output": session.currentRoute.outputs.map(\.portType.rawValue).joined(separator: ","),
+            "connected": connected,
+        ]
+        let line = snapshot.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
+        print("[audio-diag] MISSING AUDIO after text_done — \(line)")
+
+        // Append a visible system message so this doesn't quietly
+        // get missed. Reuses the existing `.system` role which
+        // renders as a dim centered rule (see MessageBubble).
+        guard isInSession, sessionMessages.indices.contains(sessionMessages.count - 1) else { return }
+        sessionMessages.append(Message(
+            role: .system,
+            textContent: "⚠︎ Audio missing for this turn (live mode on, no audio received)",
+            createdAt: Date(),
+        ))
     }
 
     private func _markFailed(id: UUID, error: String) {
@@ -779,6 +849,12 @@ final class RelayViewModel {
 
     func enterLiveMode(trigger: String = "user") {
         isLiveMode = true
+        // Defensive: a stuck `suppressNextGreeting` from an earlier
+        // reconnect-in-live-mode would silently drop audio_start
+        // events for subsequent turns. Toggling live mode is the
+        // user's natural "fix it" gesture, so make sure the flag is
+        // cleared when they do.
+        suppressNextGreeting = false
         ChimeGenerator.playLiveStart()
         audio.startListening()
         startLiveActivity()
@@ -810,6 +886,10 @@ final class RelayViewModel {
 
     func exitLiveMode(trigger: String = "user") {
         isLiveMode = false
+        // Mirror of `enterLiveMode` — belt-and-suspenders clear of
+        // the suppress flag so a user toggling off/on actually
+        // resets the state the stuck-audio bug relies on.
+        suppressNextGreeting = false
         audioGapTask?.cancel()
         audioGapTask = nil
         audio.stopListening()
@@ -1159,6 +1239,15 @@ final class RelayViewModel {
             if suppressNextGreeting && payload.speaker == "operator" { break }
             guard isInSession else { break }
             let role: Message.MessageRole = payload.speaker == "operator" ? .operator : .agent
+            // DIAGNOSTIC: start tracking "did this agent turn produce
+            // audio?" if we're in live mode. Cleared on first
+            // audio_start/audio_chunk; checked on text_done.
+            if role == .agent && isLiveMode && !suppressNextGreeting {
+                audioExpectedForActiveTurn = true
+                audioReceivedForActiveTurn = false
+                missingAudioTimerTask?.cancel()
+                missingAudioTimerTask = nil
+            }
             // Defensive: any prior bubble still marked streaming was
             // orphaned (a cancelled turn that never emitted its text_done).
             // Close it so its thinking dots go away instead of lingering
@@ -1211,9 +1300,46 @@ final class RelayViewModel {
             // bubble now shows the response itself.
             activities.removeAll()
 
+            // DIAGNOSTIC: if we started tracking this turn for audio
+            // (live mode + agent speaker) and nothing arrived during
+            // the stream, wait a short grace window — some turns
+            // emit audio_start AFTER text_done when the TTS pipeline
+            // is slow — then flag it loudly and visibly if still
+            // missing. Removes once the bug is fixed.
+            if audioExpectedForActiveTurn && !audioReceivedForActiveTurn {
+                missingAudioTimerTask?.cancel()
+                let sessIdCopy = activeSessionId ?? "<nil>"
+                let agentCopy = activeAgentName ?? "<nil>"
+                missingAudioTimerTask = Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(2000))
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        guard self.audioExpectedForActiveTurn,
+                              !self.audioReceivedForActiveTurn else { return }
+                        self._reportMissingAudio(sessionId: sessIdCopy, agentName: agentCopy)
+                        self.audioExpectedForActiveTurn = false
+                    }
+                }
+            } else if audioReceivedForActiveTurn {
+                audioExpectedForActiveTurn = false
+            }
+
         case .audioStart(let payload):
             guard isLiveMode else { break }
-            if suppressNextGreeting { break }
+            // The suppress flag only exists to drop the operator's
+            // post-connect greeting that fires on fresh WS. Guard on
+            // speaker so an agent turn's audio_start isn't collateral
+            // damage — otherwise a stuck flag (from a reconnect that
+            // never saw its corresponding audio_done, say) silently
+            // kills audio for every subsequent agent turn. Mirror of
+            // the `.text` handler's logic.
+            if suppressNextGreeting && payload.speaker == "operator" {
+                suppressNextGreeting = false
+                break
+            }
+            // DIAGNOSTIC: audio arrived for this turn — clear the
+            // missing-audio watcher.
+            audioReceivedForActiveTurn = true
             if pendingSessionId != nil {
                 pendingAudioHasStart = true
                 break
@@ -1225,7 +1351,14 @@ final class RelayViewModel {
 
         case .audioChunk(let payload):
             guard isLiveMode else { break }
-            if suppressNextGreeting { break }
+            // Mirror of the .audioStart speaker guard — only drop
+            // operator-greeting audio when the suppress flag is on;
+            // never collateral-damage an agent turn's chunks.
+            if suppressNextGreeting && payload.speaker == "operator" { break }
+            // DIAGNOSTIC: belt-and-suspenders — if audio_start didn't
+            // fire for some reason but chunks did, still count that
+            // as audio received.
+            audioReceivedForActiveTurn = true
             // Cancel any pending gap timer; real audio is arriving and the
             // sync() below will suppress the thinking tone.
             audioGapTask?.cancel()
@@ -1251,7 +1384,13 @@ final class RelayViewModel {
 
         case .audioDone(let payload):
             guard isLiveMode else { break }
-            if suppressNextGreeting {
+            // Clear the suppress flag for the operator greeting's
+            // own audio_done — but if an agent turn's audio_done
+            // arrives first (because the greeting path was skipped
+            // on the server for some reason), fall through to the
+            // normal "turn ended, swap thinking tone" handling
+            // instead of also eating that terminal event.
+            if suppressNextGreeting && payload.speaker == "operator" {
                 suppressNextGreeting = false
                 break
             }
