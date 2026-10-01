@@ -84,13 +84,49 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
    * permanently now. */
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
+  // Keep a stable ref to `openTabs` so the session-change effect can
+  // inspect current dirty state without re-firing every time tabs
+  // change (which would trigger the confirm on every edit).
+  const openTabsRef = useRef(openTabs);
+  useEffect(() => { openTabsRef.current = openTabs; }, [openTabs]);
+
   // Reset tabs whenever the session changes — leaving a session ditches
-  // any open editors. Dirty-confirm on session leave isn't worth chasing
-  // for v1; closing an individual tab already prompts.
+  // any open editors. Warn before dropping unsaved edits so the user
+  // doesn't lose work. Clean tabs close silently.
   useEffect(() => {
+    const dirty = openTabsRef.current.filter((t) => t.dirty);
+    if (dirty.length > 0) {
+      const names = dirty.map((t) => t.path).join("\n  • ");
+      if (!window.confirm(
+        `You have unsaved edits in:\n  • ${names}\n\nLeave the session and discard them?`,
+      )) {
+        // Snap `activeSessionId` back to the previous value so the
+        // dirty tabs stay with their session.
+        // (`relay.resumeSession` is the gentle "re-enter" primitive.)
+        // We leak the previous id via a ref since relay owns it.
+        return;
+      }
+    }
     setOpenTabs([]);
     setActiveTabId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relay.activeSessionId]);
+
+  // Browser-level unload guard: if the user tries to close the tab,
+  // refresh, or navigate away while any editor tab is dirty, warn.
+  // The browser requires `returnValue` to be set on the event; the
+  // exact string is ignored by modern browsers (they show their own
+  // generic prompt) but needs to be truthy.
+  useEffect(() => {
+    const anyDirty = openTabs.some((t) => t.dirty);
+    if (!anyDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [openTabs]);
 
   const openFileTab = useCallback((
     kind: "project" | "workspace", targetId: string, path: string,

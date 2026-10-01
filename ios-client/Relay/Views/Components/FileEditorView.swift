@@ -221,7 +221,10 @@ struct FileEditorView: View {
                     if saving {
                         ProgressView().controlSize(.small)
                     } else {
-                        Image(systemName: "square.and.arrow.down")
+                        // Disk glyph — the previous `square.and.arrow.down`
+                        // is iOS's "share-sheet / export" iconography and
+                        // reads as download rather than save.
+                        Image(systemName: "externaldrive")
                             .font(.system(size: 15))
                     }
                 }
@@ -438,10 +441,18 @@ struct FileEditorView: View {
         saving = true
         error = nil
         defer { saving = false }
+        // Pull the live buffer once at save time — the only place we
+        // need to materialize the Runestone piece tree into a String.
+        let text = handle.currentText
+        // Record the hash of what we're about to write BEFORE the PUT
+        // fires. Ark's file-change WS event can arrive in the gap
+        // between the HTTP response and our post-await code — if
+        // `lastSaveHash` isn't set yet when `handleFileChange` runs,
+        // we fall through to `loadFile()`, which flips `loading` on
+        // and remounts the editor, resetting scroll to the top. The
+        // original symptom of the "save pops to top" bug.
+        lastSaveHash = _sha256Hex(text)
         do {
-            // Pull the live buffer once at save time — the only place we
-            // need to materialize the Runestone piece tree into a String.
-            let text = handle.currentText
             try await relay.apiClient.writeFile(
                 kind, id: targetId, path: path,
                 body: text.data(using: .utf8) ?? Data(), server: server,
@@ -451,12 +462,11 @@ struct FileEditorView: View {
             isDirty = false
             staleBanner = false
             notOnDisk = false
-            // Record what we just wrote so `handleFileChange` can
-            // distinguish ark's echo of our own write (skip → the
-            // editor's Runestone buffer keeps its scroll position)
-            // from a genuinely external modification (reload).
-            lastSaveHash = _sha256Hex(text)
         } catch {
+            // Write failed — clear the hash so a stale value doesn't
+            // accidentally suppress a legit external-write reload
+            // later.
+            lastSaveHash = nil
             self.error = String(describing: error)
         }
     }

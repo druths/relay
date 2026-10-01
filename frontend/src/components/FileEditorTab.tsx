@@ -371,26 +371,31 @@ export function FileEditorTab({
   const save = async () => {
     setSaving(true);
     setError(null);
+    // Compute and record the hash of what we're about to write BEFORE
+    // the PUT fires, not after. Ark's file-change WS event can arrive
+    // in the gap between the PUT's HTTP response and our post-await
+    // code — if `lastSaveHash` isn't set yet when the file-change
+    // effect runs, we fall through to `load()`, which pushes a fresh
+    // `draft` into CodeMirror and resets the viewport to the top. The
+    // original symptom of the "save pops to top" bug.
+    // `crypto.subtle` requires a secure context — on plain HTTP dev
+    // deploys it may be absent; leave the hash unset and let the
+    // effect fall through to the normal reload path if hashing throws.
+    const toWrite = draft;
     try {
-      await writeFile(kind, targetId, path, draft, server);
-      setSavedContent(draft);
+      lastSaveHash.current = await _hashText(toWrite);
+    } catch {
+      lastSaveHash.current = null;
+    }
+    try {
+      await writeFile(kind, targetId, path, toWrite, server);
+      setSavedContent(toWrite);
       setStaleBanner(false);
       setNotOnDisk(false);
-      // Record the hash of what we just wrote so the file-change
-      // watcher below can distinguish ark's echo of our own write
-      // (skip → viewport stays put) from a genuinely external
-      // modification (reload → surface the new content). Cleared
-      // on first match or when a mismatched external write lands.
-      // `crypto.subtle` requires a secure context — on plain HTTP
-      // dev deploys it may be absent; leave the hash unset and let
-      // the effect fall through to the normal reload path (same
-      // behavior as before this feature landed).
-      try {
-        lastSaveHash.current = await _hashText(draft);
-      } catch {
-        lastSaveHash.current = null;
-      }
     } catch (e) {
+      // Write failed — clear the hash so a stale value doesn't
+      // accidentally suppress a legit external-write reload later.
+      lastSaveHash.current = null;
       setError(String(e));
     } finally {
       setSaving(false);

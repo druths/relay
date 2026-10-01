@@ -16,6 +16,13 @@ struct RelayView: View {
     /// When set, present a confirm alert before closing the named tab —
     /// it has unsaved edits and we don't want to silently drop them.
     @State private var pendingCloseTabId: String? = nil
+    /// Dirty tab paths captured when the user leaves a session with
+    /// unsaved edits. Set in the `onChange(of: relay.activeSessionId)`
+    /// handler and surfaces as a confirm alert. Cleared when the user
+    /// confirms discard (which also empties `openFileTabs`) or
+    /// cancels (which keeps the tabs — they stay visible across the
+    /// session change until the user handles them explicitly).
+    @State private var pendingSessionChangeDirtyPaths: [String]? = nil
     @State private var renameSessionId: String?
     @State private var renameText = ""
     @State private var showLabelEditor = false
@@ -253,6 +260,32 @@ struct RelayView: View {
             tabPath: { tid in openFileTabs.first(where: { $0.tabId == tid })?.path },
             onDiscard: { tid in doCloseFileTab(tid) }
         ))
+        .alert(
+            "Unsaved edits",
+            isPresented: Binding(
+                get: { pendingSessionChangeDirtyPaths != nil },
+                set: { if !$0 { pendingSessionChangeDirtyPaths = nil } },
+            ),
+            presenting: pendingSessionChangeDirtyPaths,
+        ) { _ in
+            Button("Discard", role: .destructive) {
+                openFileTabs = []
+                activeTabId = nil
+                pendingSessionChangeDirtyPaths = nil
+            }
+            Button("Keep", role: .cancel) {
+                // Keep the dirty tabs visible across the session
+                // change so the user can navigate back to their
+                // originating session and save them.
+                pendingSessionChangeDirtyPaths = nil
+            }
+        } message: { paths in
+            Text(
+                "You have unsaved edits in:\n• "
+                + paths.joined(separator: "\n• ")
+                + "\n\nDiscard them?"
+            )
+        }
         .task { await relay.connect() }
         .onDisappear { Task { await relay.disconnect() } }
         .onChange(of: scenePhase) { _, phase in
@@ -931,9 +964,21 @@ struct RelayView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onChange(of: relay.activeSessionId) { _, _ in
-            // Ephemeral tabs: leaving the session ditches every open editor.
-            openFileTabs = []
-            activeTabId = nil
+            // Ephemeral tabs: leaving the session ditches every open
+            // editor. If any have unsaved edits, surface an alert
+            // first so the user doesn't lose work. Clean tabs close
+            // silently as before.
+            let dirty = openFileTabs.filter(\.dirty)
+            if dirty.isEmpty {
+                openFileTabs = []
+                activeTabId = nil
+            } else {
+                pendingSessionChangeDirtyPaths = dirty.map(\.path)
+                // Note: the session has ALREADY changed by the time
+                // this fires. On cancel we keep the dirty tabs
+                // visible so the user can navigate back to their
+                // originating session and save them.
+            }
         }
     }
 
