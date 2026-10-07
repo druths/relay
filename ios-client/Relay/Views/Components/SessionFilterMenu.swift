@@ -42,8 +42,8 @@ struct SessionFilterMenu: View {
             // chip. Reserves the same vertical space whether or not a
             // filter is active so the row doesn't shift on selection.
             Text(title.uppercased())
-                .font(theme.labelFont(size: 10))
-                .tracking(1)
+                .font(theme.labelFont(size: 12))
+                .tracking(1.5)
                 .foregroundStyle(theme.textQuaternary)
 
             Menu {

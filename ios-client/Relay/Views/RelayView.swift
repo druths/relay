@@ -554,7 +554,7 @@ struct RelayView: View {
                         .font(theme.headingFont(size: 20))
                         .foregroundStyle(theme.textPrimary)
                     Text(relay.activeAgentName.map { "Session with \($0)" } ?? "Lobby")
-                        .font(theme.monoFont(size: 20))
+                        .font(theme.monoFont(size: 12))
                         .foregroundStyle(theme.textQuaternary)
                 }
 
@@ -688,7 +688,7 @@ struct RelayView: View {
                             Spacer()
 
                             Text(agent.llmProvider)
-                                .font(theme.monoFont(size: 18))
+                                .font(theme.monoFont(size: 10))
                                 .foregroundStyle(theme.textQuaternary)
                         }
                         .padding(.horizontal, 16)
@@ -864,12 +864,12 @@ struct RelayView: View {
 
                             HStack(spacing: 4) {
                                 Text(session.agentName)
-                                    .font(theme.monoFont(size: 18))
+                                    .font(theme.monoFont(size: 11))
                                     .foregroundStyle(theme.textQuaternary)
                                 Text("·")
                                     .foregroundStyle(theme.textQuaternary)
                                 Text(session.status)
-                                    .font(theme.monoFont(size: 18))
+                                    .font(theme.monoFont(size: 11))
                                     .foregroundStyle(theme.textQuaternary)
                             }
 
@@ -877,7 +877,7 @@ struct RelayView: View {
                                 HStack(spacing: 3) {
                                     if let pn = projectName(for: session) {
                                         Text(pn)
-                                            .font(theme.monoFont(size: 18, weight: .medium))
+                                            .font(theme.monoFont(size: 10, weight: .medium))
                                             .foregroundStyle(theme.success)
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 1)
@@ -886,7 +886,7 @@ struct RelayView: View {
                                     }
                                     ForEach(session.labels.prefix(3), id: \.self) { label in
                                         Text(label)
-                                            .font(theme.monoFont(size: 18, weight: .medium))
+                                            .font(theme.monoFont(size: 10, weight: .medium))
                                             .foregroundStyle(theme.primary)
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 1)
@@ -898,7 +898,7 @@ struct RelayView: View {
 
                             if let summary = session.summary {
                                 Text(summary)
-                                    .font(theme.bodyFont(size: 20))
+                                    .font(theme.bodyFont(size: 11))
                                     .foregroundStyle(theme.textTertiary)
                                     .lineLimit(2)
                             }
