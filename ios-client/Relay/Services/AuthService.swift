@@ -47,7 +47,16 @@ final class AuthService {
         }
 
         let loginResponse = try JSONDecoder().decode(LoginResponse.self, from: data)
-        try KeychainService.save(token: loginResponse.access_token)
+        // Keychain save is best-effort — if it fails (e.g. Catalyst
+        // sandbox + missing keychain-access-groups entitlement), the
+        // user is still signed in for this session; they'll just have
+        // to re-enter credentials on next launch. Hard-failing here
+        // on a persistence error would be a worse experience.
+        do {
+            try KeychainService.save(token: loginResponse.access_token)
+        } catch {
+            print("[Auth] Keychain save failed, continuing without persistence: \(error)")
+        }
         token = loginResponse.access_token
         isAuthenticated = true
         print("[Auth] Login successful")

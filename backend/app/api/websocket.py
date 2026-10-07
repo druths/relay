@@ -546,19 +546,6 @@ async def _handle_text(
                         from app.services.agent_manager import resolve_tts_config
                         tts_base_url, tts_key = await resolve_tts_config(tts_agent)
                         tts_provider = get_tts_provider(tts_agent.tts_provider, tts_key, base_url=tts_base_url)
-            elif etype == "text_start" and not is_live_mode:
-                # DIAGNOSTIC (temporary): the backend's live-mode flag is
-                # false when text starts streaming — so TTS is skipped
-                # and the client gets text but no audio. If the user is
-                # on iOS in live mode and seeing text-but-no-audio, this
-                # log line will fire and confirm the "backend is_live_mode
-                # drifted" hypothesis. Remove once the root cause is
-                # fixed.
-                logger.warning(
-                    "[audio-diag] text_start fired with is_live_mode=False "
-                    "(session=%s) — TTS will be skipped",
-                    str(active_session_id)[:8] if active_session_id else "<none>",
-                )
                 if tts_provider:
                     tts_buffer = ""
                     tts_seq = 0

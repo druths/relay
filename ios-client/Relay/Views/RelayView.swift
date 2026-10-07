@@ -107,7 +107,15 @@ struct RelayView: View {
     }
 
     private var isRegular: Bool {
-        horizontalSizeClass == .regular
+        #if targetEnvironment(macCatalyst)
+        // On Mac the "iPad" layout is always the right one — it's a
+        // desktop window with room for the sidebar. Decoupling from
+        // horizontalSizeClass means the window can shrink freely
+        // without the layout collapsing to the phone single-column.
+        return true
+        #else
+        return horizontalSizeClass == .regular
+        #endif
     }
 
     var body: some View {
@@ -207,31 +215,21 @@ struct RelayView: View {
             }
             .environment(\.relayTheme, themeManager.current)
         }
-        .sheet(isPresented: $showFileBrowser) {
+        // Sheet-based file browser — iPhone only. On regular size
+        // class, the file browser renders inline as a column in
+        // `iPadLayout` (see `iPadFileBrowserPanel`), so we gate the
+        // sheet off entirely to avoid double-presenting.
+        .sheet(isPresented: Binding(
+            get: { showFileBrowser && !isRegular },
+            set: { if !$0 { showFileBrowser = false } },
+        )) {
             if let s = activeSession {
-                // On iPad, files open into central-pane tabs (the sheet
-                // dismisses itself after the callback runs); on iPhone we
-                // pass nil and the sheet keeps its inline preview/edit
-                // behavior — there's no central tab area on phone.
+                // Phone layout keeps the inline preview/edit — no
+                // central tab area to route into.
                 FileBrowserView(
                     relay: relay,
                     session: s,
-                    onOpenFile: horizontalSizeClass == .regular
-                        ? { kind, targetId, path, server in
-                            let scope: String = (kind == .project)
-                                ? targetId
-                                : (relay.agents.first(where: { $0.agentId == s.agentId })
-                                    .map { agent in
-                                        agent.llmModel.hasPrefix("ark:")
-                                            ? String(agent.llmModel.dropFirst("ark:".count))
-                                            : agent.llmModel
-                                    } ?? s.agentName)
-                            openFileTab(
-                                kind: kind, targetId: targetId, path: path,
-                                server: server, scope: scope,
-                            )
-                        }
-                        : nil,
+                    onOpenFile: nil,
                 )
                 .environment(\.relayTheme, themeManager.current)
             }
@@ -486,6 +484,64 @@ struct RelayView: View {
             Rectangle().fill(theme.border).frame(width: theme.borderWidth)
 
             iPadMainContent
+
+            if showFileBrowser, let s = activeSession {
+                Rectangle().fill(theme.border).frame(width: theme.borderWidth)
+
+                iPadFileBrowserPanel(session: s)
+                    .frame(width: 340)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: showFileBrowser)
+    }
+
+    /// File browser rendered as a leading column on iPad/Catalyst
+    /// instead of a modal sheet. Mirrors the sheet contents but adds
+    /// a header row with a close affordance so the panel can be
+    /// dismissed without hunting for the folder button again.
+    private func iPadFileBrowserPanel(session s: Session) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Files")
+                    .font(theme.headingFont(size: 16, weight: .semibold))
+                    .foregroundStyle(theme.textPrimary)
+                Spacer()
+                Button(action: { showFileBrowser = false }) {
+                    ThemedIcon(systemName: "xmark")
+                        .font(theme.bodyFont(size: 13, weight: .bold))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .background(theme.elevated)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                }
+                .help("Close files panel")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(theme.border).frame(height: theme.borderWidth)
+            }
+
+            FileBrowserView(
+                relay: relay,
+                session: s,
+                onOpenFile: { kind, targetId, path, server in
+                    let scope: String = (kind == .project)
+                        ? targetId
+                        : (relay.agents.first(where: { $0.agentId == s.agentId })
+                            .map { agent in
+                                agent.llmModel.hasPrefix("ark:")
+                                    ? String(agent.llmModel.dropFirst("ark:".count))
+                                    : agent.llmModel
+                            } ?? s.agentName)
+                    openFileTab(
+                        kind: kind, targetId: targetId, path: path,
+                        server: server, scope: scope,
+                    )
+                },
+            )
+            .environment(\.relayTheme, themeManager.current)
         }
     }
 

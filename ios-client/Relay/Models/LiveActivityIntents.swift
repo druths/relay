@@ -1,6 +1,8 @@
+import Foundation
+#if !targetEnvironment(macCatalyst)
 import AppIntents
 import ActivityKit
-import Foundation
+#endif
 
 extension Notification.Name {
     static let relayToggleMute = Notification.Name("relayToggleMute")
@@ -8,6 +10,7 @@ extension Notification.Name {
     static let relayEnterLive = Notification.Name("relayEnterLive")
 }
 
+#if !targetEnvironment(macCatalyst)
 struct ToggleMuteIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Toggle Mute"
 
@@ -25,3 +28,4 @@ struct ExitLiveIntent: LiveActivityIntent {
         return .result()
     }
 }
+#endif

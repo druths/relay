@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 struct InputBar: View {
     @Bindable var relay: RelayViewModel
@@ -27,6 +28,10 @@ struct InputBar: View {
     @State private var isUploading = false
     /// Fallback focus state when no viewmodel-level binding is provided.
     @State private var localFocus = false
+    /// Mac-only: name of the current audio input, refreshed on route
+    /// changes so the inline picker label stays accurate as the
+    /// machine moves between docks, Bluetooth headsets, etc.
+    @State private var macCurrentInputName: String = "Default"
 
     private var recorderState: AudioRecorderService.State {
         relay.audio.recorderState
@@ -63,12 +68,20 @@ struct InputBar: View {
         )
         .animation(.easeInOut(duration: 0.25), value: relay.isLiveMode)
         .sheet(isPresented: $showInputPicker) {
+            #if targetEnvironment(macCatalyst)
+            // Catalyst gets the CoreAudio-backed picker so USB /
+            // aggregate / virtual devices actually show up, and the
+            // selection binds the engine per-app rather than
+            // swapping the system default.
+            MacInputPickerSheet(audio: relay.audio)
+            #else
             DevicePickerSheet(
                 title: "Input Device",
                 onSelect: { port in
                     relay.audio.setPreferredInput(port)
                 }
             )
+            #endif
         }
         .sheet(isPresented: $showOutputPicker) {
             OutputPickerSheet(
@@ -206,6 +219,17 @@ struct InputBar: View {
         SoundWaveView(meteringLevel: relay.audio.meteringLevel)
             .frame(maxWidth: .infinity)
 
+        #if targetEnvironment(macCatalyst)
+        // Mac laptops roam between configurations (built-in mic,
+        // USB headset, Bluetooth earbuds, external mic). On iOS
+        // AVAudioSession routes implicitly; on Mac the user expects
+        // to pick, so expose an input picker inline while live mode
+        // is on. Output stays on the system default — the macOS
+        // Sound-preferences shortcut button was a weird UX and the
+        // Mac convention is already "set it in Sound settings".
+        macInputButton
+        #endif
+
         muteButton
 
         Button(action: { relay.exitLiveMode() }) {
@@ -217,6 +241,50 @@ struct InputBar: View {
                 .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         }
     }
+
+    #if targetEnvironment(macCatalyst)
+    /// Mac-only inline input-device picker. Shows the current
+    /// system default input and opens `MacInputPickerSheet` (which
+    /// enumerates via CoreAudio and sets the system default) on
+    /// click.
+    private var macInputButton: some View {
+        Button(action: { showInputPicker = true }) {
+            HStack(spacing: 6) {
+                ThemedIcon(systemName: "mic.fill")
+                    .font(theme.bodyFont(size: 14, weight: .semibold))
+                Text(macCurrentInputName)
+                    .font(theme.bodyFont(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                ThemedIcon(systemName: "chevron.down")
+                    .font(theme.bodyFont(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(theme.textSecondary)
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .frame(maxWidth: 180)
+            .background(theme.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        }
+        .help("Choose input device")
+        .task { refreshMacInputName() }
+        // Poll the system default on sheet dismissal so the label
+        // picks up a selection the user just made. The CoreAudio
+        // notification path is noisier than it's worth here.
+        .onChange(of: showInputPicker) { _, open in
+            if !open { refreshMacInputName() }
+        }
+    }
+
+    private func refreshMacInputName() {
+        if let id = MacAudioDevices.systemDefaultInputID(),
+           let dev = MacAudioDevices.inputs().first(where: { $0.id == id }) {
+            macCurrentInputName = dev.name
+            return
+        }
+        macCurrentInputName = "Default"
+    }
+    #endif
 
     // MARK: - Subviews
 

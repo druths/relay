@@ -16,6 +16,15 @@ struct RelayApp: App {
                 .environment(\.relayChatFontSize, themeManager.chatFontSize)
                 .preferredColorScheme(.dark)
                 .overlay { CRTOverlay() }
+                #if targetEnvironment(macCatalyst)
+                // Mac idiom gives UIKit/SwiftUI buttons a bordered
+                // chrome by default, which paints a grey box behind
+                // every icon-only button in the app. Setting `.plain`
+                // at the root cascades through the view hierarchy;
+                // buttons that explicitly set `.borderedProminent`
+                // (Sign In, Discard, etc.) still override.
+                .buttonStyle(.plain)
+                #endif
                 .onOpenURL { url in
                     switch url.host() {
                     case "toggle-mute":

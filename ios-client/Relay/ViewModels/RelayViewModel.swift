@@ -1,4 +1,6 @@
+#if !targetEnvironment(macCatalyst)
 import ActivityKit
+#endif
 import AVFoundation
 import Foundation
 
@@ -107,16 +109,6 @@ final class RelayViewModel {
     var outputMode: OutputMode = .speaker
     var isLiveMode = false
 
-    // DIAGNOSTIC (temporary): track whether the currently-streaming
-    // agent turn produced any audio while live mode is on. If
-    // text_done fires and still no audio has arrived after a short
-    // grace window, we log the audio-relevant state and append a
-    // visible "missing audio" marker to the conversation. Remove
-    // once the live-mode-audio-stops bug is identified and fixed.
-    @ObservationIgnored private var audioExpectedForActiveTurn: Bool = false
-    @ObservationIgnored private var audioReceivedForActiveTurn: Bool = false
-    @ObservationIgnored private var missingAudioTimerTask: Task<Void, Never>?
-
     enum OutputMode: String {
         case speaker, earpiece
     }
@@ -130,7 +122,9 @@ final class RelayViewModel {
     let audio = AudioViewModel()
 
     private var eventTask: Task<Void, Never>?
+    #if !targetEnvironment(macCatalyst)
     private var currentActivity: Activity<RelayActivityAttributes>?
+    #endif
 
     // Pending session — set immediately on sessionEntered so events route correctly
     // before the live-mode audio wait completes and the UI swaps.
@@ -551,39 +545,6 @@ final class RelayViewModel {
     /// system-role message to the conversation so the user can see
     /// at a glance that this is the bug we're hunting. Remove once
     /// the live-mode-audio-stops bug is fixed.
-    private func _reportMissingAudio(sessionId: String, agentName: String) {
-        let session = AVAudioSession.sharedInstance()
-        let snapshot: [String: Any] = [
-            "session_id": sessionId,
-            "agent_name": agentName,
-            "isLiveMode": isLiveMode,
-            "suppressNextGreeting": suppressNextGreeting,
-            "pendingSessionId": pendingSessionId as Any,
-            "pendingAudioChunks_count": pendingAudioChunks.count,
-            "pendingAudioHasStart": pendingAudioHasStart,
-            "audio.isMuted": audio.isMuted,
-            "self.outputMode": "\(outputMode)",
-            "recorder.state": "\(audio.recorderState)",
-            "av.category": session.category.rawValue,
-            "av.mode": session.mode.rawValue,
-            "av.options": "\(session.categoryOptions.rawValue)",
-            "av.output": session.currentRoute.outputs.map(\.portType.rawValue).joined(separator: ","),
-            "connected": connected,
-        ]
-        let line = snapshot.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")
-        print("[audio-diag] MISSING AUDIO after text_done — \(line)")
-
-        // Append a visible system message so this doesn't quietly
-        // get missed. Reuses the existing `.system` role which
-        // renders as a dim centered rule (see MessageBubble).
-        guard isInSession, sessionMessages.indices.contains(sessionMessages.count - 1) else { return }
-        sessionMessages.append(Message(
-            role: .system,
-            textContent: "⚠︎ Audio missing for this turn (live mode on, no audio received)",
-            createdAt: Date(),
-        ))
-    }
-
     private func _markFailed(id: UUID, error: String) {
         if let idx = uploads.firstIndex(where: { $0.id == id }) {
             uploads[idx].status = .failed
@@ -910,7 +871,12 @@ final class RelayViewModel {
     }
 
     // MARK: - Live Activity
+    //
+    // Live Activities are iOS-only (ActivityKit does not ship on Mac
+    // Catalyst). On Catalyst these are no-op stubs so the call sites
+    // elsewhere in this file don't need their own `#if` guards.
 
+    #if !targetEnvironment(macCatalyst)
     private func startLiveActivity() {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("[LiveActivity] Activities not enabled")
@@ -971,6 +937,11 @@ final class RelayViewModel {
 
         currentActivity = nil
     }
+    #else
+    private func startLiveActivity() {}
+    private func updateLiveActivity() {}
+    private func endLiveActivity() {}
+    #endif
 
     // MARK: - Private
 
@@ -1239,15 +1210,6 @@ final class RelayViewModel {
             if suppressNextGreeting && payload.speaker == "operator" { break }
             guard isInSession else { break }
             let role: Message.MessageRole = payload.speaker == "operator" ? .operator : .agent
-            // DIAGNOSTIC: start tracking "did this agent turn produce
-            // audio?" if we're in live mode. Cleared on first
-            // audio_start/audio_chunk; checked on text_done.
-            if role == .agent && isLiveMode && !suppressNextGreeting {
-                audioExpectedForActiveTurn = true
-                audioReceivedForActiveTurn = false
-                missingAudioTimerTask?.cancel()
-                missingAudioTimerTask = nil
-            }
             // Defensive: any prior bubble still marked streaming was
             // orphaned (a cancelled turn that never emitted its text_done).
             // Close it so its thinking dots go away instead of lingering
@@ -1300,30 +1262,6 @@ final class RelayViewModel {
             // bubble now shows the response itself.
             activities.removeAll()
 
-            // DIAGNOSTIC: if we started tracking this turn for audio
-            // (live mode + agent speaker) and nothing arrived during
-            // the stream, wait a short grace window — some turns
-            // emit audio_start AFTER text_done when the TTS pipeline
-            // is slow — then flag it loudly and visibly if still
-            // missing. Removes once the bug is fixed.
-            if audioExpectedForActiveTurn && !audioReceivedForActiveTurn {
-                missingAudioTimerTask?.cancel()
-                let sessIdCopy = activeSessionId ?? "<nil>"
-                let agentCopy = activeAgentName ?? "<nil>"
-                missingAudioTimerTask = Task { [weak self] in
-                    try? await Task.sleep(for: .milliseconds(2000))
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        guard self.audioExpectedForActiveTurn,
-                              !self.audioReceivedForActiveTurn else { return }
-                        self._reportMissingAudio(sessionId: sessIdCopy, agentName: agentCopy)
-                        self.audioExpectedForActiveTurn = false
-                    }
-                }
-            } else if audioReceivedForActiveTurn {
-                audioExpectedForActiveTurn = false
-            }
-
         case .audioStart(let payload):
             guard isLiveMode else { break }
             // The suppress flag only exists to drop the operator's
@@ -1337,9 +1275,6 @@ final class RelayViewModel {
                 suppressNextGreeting = false
                 break
             }
-            // DIAGNOSTIC: audio arrived for this turn — clear the
-            // missing-audio watcher.
-            audioReceivedForActiveTurn = true
             if pendingSessionId != nil {
                 pendingAudioHasStart = true
                 break
@@ -1355,10 +1290,6 @@ final class RelayViewModel {
             // operator-greeting audio when the suppress flag is on;
             // never collateral-damage an agent turn's chunks.
             if suppressNextGreeting && payload.speaker == "operator" { break }
-            // DIAGNOSTIC: belt-and-suspenders — if audio_start didn't
-            // fire for some reason but chunks did, still count that
-            // as audio received.
-            audioReceivedForActiveTurn = true
             // Cancel any pending gap timer; real audio is arriving and the
             // sync() below will suppress the thinking tone.
             audioGapTask?.cancel()

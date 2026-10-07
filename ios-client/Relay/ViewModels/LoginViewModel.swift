@@ -67,7 +67,12 @@ final class LoginViewModel {
         } catch let e as AuthService.AuthError {
             self.error = e.errorDescription
         } catch {
-            self.error = "Connection failed"
+            // Surface the raw error so platform-specific failures
+            // (keychain OSStatus, URLError codes) are debuggable from
+            // the login screen rather than hiding behind a generic
+            // "Connection failed" string.
+            self.error = "Connection failed: \(error)"
+            print("[Login] unexpected error: \(error)")
         }
 
         isLoading = false
