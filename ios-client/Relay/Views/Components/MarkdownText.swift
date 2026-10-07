@@ -83,7 +83,12 @@ private func _markdownTheme(theme: RelayTheme, chatFontSize: CGFloat) -> Markdow
             configuration.label
                 .fixedSize(horizontal: false, vertical: true)
                 .relativeLineSpacing(.em(0.18))
-                .markdownMargin(top: .em(0.25), bottom: .em(0.25))
+                // Full blank line between paragraphs — matches the
+                // HTML `<p>` convention. Previously 0.25em on each
+                // side gave only 0.5em of gap, which read as "two
+                // lines with slightly more leading" rather than a
+                // real paragraph break.
+                .markdownMargin(top: .em(0.6), bottom: .em(0.6))
         }
         .heading1 { configuration in
             configuration.label

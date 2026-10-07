@@ -139,7 +139,12 @@ struct FileEditorView: View {
         }
         .background(theme.elevated)
         .task(id: path) { await loadFile() }
-        .onChange(of: relay.fileChanges.count) { _, _ in handleFileChange() }
+        // Watch the latest change's identity, not the array count:
+        // once `fileChanges` hits its ring-buffer cap (200), count
+        // stops moving even as new events arrive, and the auto-reload
+        // path silently dies. Hashing the last id reacts to every
+        // append.
+        .onChange(of: relay.fileChanges.last?.id) { _, _ in handleFileChange() }
         .onChange(of: isDirty) { _, newValue in onDirtyChange(newValue) }
         // ⌘F to open the find bar (no-op when an external keyboard isn't
         // attached, and harmless on iPhone).

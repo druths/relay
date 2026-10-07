@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// Y-position of the bottom sentinel in the ScrollView's coordinate
+/// space, reported out via a preference so we can tell whether the
+/// user is near the end of the transcript or has scrolled up.
+private struct BottomSentinelKey: PreferenceKey {
+    // Computed, not stored, so Swift 6 strict concurrency doesn't
+    // flag it as nonisolated mutable global state.
+    static var defaultValue: CGFloat { .infinity }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct ConversationLog: View {
     let messages: [Message]
     let activeSessionId: String?
@@ -14,6 +26,21 @@ struct ConversationLog: View {
     var onOpenAttachment: ((FileAttachment) -> Void)? = nil
 
     @Environment(\.relayTheme) private var theme
+
+    /// Measured viewport height of the ScrollView. Updated by a
+    /// GeometryReader background below.
+    @State private var viewportHeight: CGFloat = 0
+    /// Y-position of the bottom sentinel in the ScrollView's
+    /// coordinate space. Updated by the sentinel's preference below.
+    @State private var sentinelY: CGFloat = .infinity
+
+    /// User is "at the bottom" when the sentinel sits within (or
+    /// just below) the visible viewport. 80pt of slack keeps rapid
+    /// streaming deltas from flipping the state off and on when the
+    /// bubble is growing right at the fold.
+    private var isAtBottom: Bool {
+        viewportHeight == 0 || sentinelY <= viewportHeight + 80
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -64,14 +91,84 @@ struct ConversationLog: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 4)
+                .padding(.top, 4)
+
+                // Invisible sentinel at the end of the transcript.
+                // Its Y-position in the ScrollView's coordinate space
+                // tells us whether the user has scrolled away from
+                // the bottom: ≤ viewport height means at-or-near the
+                // bottom; much greater means scrolled up. Reported
+                // via preference so SwiftUI batches it and we're not
+                // mutating @State during view updates.
+                Color.clear
+                    .frame(height: 1)
+                    .background(
+                        GeometryReader { sentinelGeo in
+                            Color.clear.preference(
+                                key: BottomSentinelKey.self,
+                                value: sentinelGeo.frame(in: .named("convo")).minY,
+                            )
+                        }
+                        .allowsHitTesting(false)
+                    )
+                    .allowsHitTesting(false)
+
+                // Breathing room above the input bar. `.scrollTo(id,
+                // anchor: .bottom)` positions the LAST message's
+                // bottom edge at the viewport bottom — but the
+                // thinking-dots strip inside the agent bubble sits at
+                // the bubble's bottom, so without a trailing spacer
+                // below the message the dots end up flush with the
+                // input chrome and get visually clipped. A generous
+                // trailing spacer gives the scroll "room to go
+                // further" so the whole bubble (dots included) sits
+                // comfortably above the fold.
+                Color.clear.frame(height: 60).id("__bottom__")
+            }
+            .coordinateSpace(name: "convo")
+            .background(
+                // Measure the visible scroll area so we know what
+                // "visible" means for the sentinel comparison.
+                // `allowsHitTesting(false)` is critical — Color.clear
+                // IS hit-testable by default, and a background filling
+                // the whole ScrollView would eat the click-drag
+                // mouse-downs that Mac Catalyst needs for text
+                // selection in Markdown bubbles.
+                GeometryReader { outerGeo in
+                    Color.clear
+                        .onAppear { viewportHeight = outerGeo.size.height }
+                        .onChange(of: outerGeo.size.height) { _, h in
+                            viewportHeight = h
+                        }
+                }
+                .allowsHitTesting(false)
+            )
+            .onPreferenceChange(BottomSentinelKey.self) { y in
+                sentinelY = y
             }
             .onChange(of: messages.count) { _, _ in
-                if let last = messages.last {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
+                // New message appended — always follow (user just
+                // acted, or agent is beginning a reply). Animated so
+                // the transition reads smoothly. Target the trailing
+                // spacer rather than the last message so the full
+                // bubble (including the thinking-dots strip at its
+                // bottom) sits comfortably above the input bar.
+                guard messages.last != nil else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("__bottom__", anchor: .bottom)
                 }
+            }
+            .onChange(of: messages.last?.textContent.count ?? 0) { _, _ in
+                // Streaming delta grew the last bubble. Only follow
+                // if the user hasn't scrolled away — reading history
+                // mid-stream should NOT yank them back. Non-animated
+                // scrollTo so rapid-fire tokens don't produce visible
+                // jitter (stacked easing curves look worse than a
+                // hard follow).
+                guard isAtBottom,
+                      let last = messages.last,
+                      last.isStreaming else { return }
+                proxy.scrollTo("__bottom__", anchor: .bottom)
             }
         }
     }
