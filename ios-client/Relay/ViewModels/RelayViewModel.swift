@@ -310,7 +310,7 @@ final class RelayViewModel {
         }
 
         do {
-            try await webSocketService.send(.textInput(text: text))
+            try await webSocketService.send(.textInput(text: text, timezone: TimeZone.current.identifier))
         } catch {
             print("[Relay] Failed to send message: \(error)")
         }
@@ -575,7 +575,7 @@ final class RelayViewModel {
     func sendAudio(_ base64: String, format: String) async {
         print("[STT] sending audio_input: \(base64.count) base64 chars, format=\(format)")
         do {
-            try await webSocketService.send(.audioInput(data: base64, format: format))
+            try await webSocketService.send(.audioInput(data: base64, format: format, timezone: TimeZone.current.identifier))
         } catch {
             print("[STT] Failed to send audio: \(error)")
         }
@@ -1516,6 +1516,25 @@ final class RelayViewModel {
                 ))
             }
             Task { await fetchSessionFacets() }
+
+        case .dateMarker(let payload):
+            // Ark fires this when the current user turn's local date
+            // differs from the previous turn's — append a subtle
+            // divider so the user sees the gap. Only inlined for the
+            // active session; other sessions would pick it up on
+            // resume if we persisted markers in history, which v1
+            // doesn't.
+            guard payload.sessionId == activeSessionId else { break }
+            var meta = MessageMetadata()
+            meta.toDate = payload.toDate
+            meta.elapsedDays = payload.elapsedDays
+            meta.timezone = payload.timezone
+            sessionMessages.append(Message(
+                role: .dateMarker,
+                textContent: "",
+                createdAt: Date(),
+                metadata: meta,
+            ))
 
         case .error(let payload):
             print("[Relay] Server error: \(payload.message)")

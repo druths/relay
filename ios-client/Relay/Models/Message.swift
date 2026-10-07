@@ -71,6 +71,13 @@ struct MessageMetadata: Equatable, Codable {
     /// compare against the previous message's speaker to decide
     /// whether to draw a "different agent" header boundary.
     var speaker: String?
+    /// Date-marker fields: set on `role: .dateMarker` rows (ark day
+    /// boundary). `toDate` is the ISO date of the new turn,
+    /// `elapsedDays` the whole-day gap, `timezone` the IANA zone the
+    /// comparison was computed in.
+    var toDate: String?
+    var elapsedDays: Int?
+    var timezone: String?
 
     enum CodingKeys: String, CodingKey {
         case usage
@@ -82,6 +89,9 @@ struct MessageMetadata: Equatable, Codable {
         case code
         case message
         case speaker
+        case toDate = "to_date"
+        case elapsedDays = "elapsed_days"
+        case timezone
     }
 }
 
@@ -103,6 +113,7 @@ struct Message: Identifiable, Equatable {
         case compaction  // ark session summary — rendered as a divider
         case projectChange = "project_change"  // ark project (re)assign — divider
         case error  // ark RunError — rendered as a red divider
+        case dateMarker = "date_marker"  // ark day-boundary — rendered as a subtle divider
     }
 
     init(

@@ -233,6 +233,7 @@ async def generate_response_stream(
     agent: Agent, text: str, context: list[dict],
     voice_instructions: str | None = None,
     session_id: uuid.UUID | None = None,
+    timezone: str | None = None,
 ) -> AsyncGenerator[str | ResponseMeta, None]:
     """Stream a text response from an agent using its configured LLM provider."""
     base_url, api_key = await resolve_llm_config(agent)
@@ -320,6 +321,7 @@ async def generate_response_stream(
                 previous_session_id=prev_sid,
                 session_context=agent.persona_prompt if not prev_sid else None,
                 project_id=bound_project_id,
+                timezone=timezone,
             ):
                 # Ark surfaces the just-created (or resumed) ark session
                 # id up-front so we can persist it into provider_state

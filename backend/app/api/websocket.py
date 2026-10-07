@@ -189,6 +189,7 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
 
                     elif msg_type == "text_input":
                         text = data["payload"]["text"]
+                        tz = data["payload"].get("timezone")
 
                         await _cancel_active_task(active_task)
                         detach_event = asyncio.Event()  # Fresh event for each task
@@ -196,12 +197,14 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                             _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
                                          voice_mode_instructions if is_live_mode else None,
                                          detach_event=detach_event,
-                                         is_live_mode=is_live_mode)
+                                         is_live_mode=is_live_mode,
+                                         timezone=tz)
                         )
 
                     elif msg_type == "audio_input":
                         audio_data_b64 = data["payload"]["data"]
                         audio_format = data["payload"].get("format", "webm")
+                        tz = data["payload"].get("timezone")
 
                         stt = await get_stt_provider_from_db(db)
                         if not stt:
@@ -239,7 +242,8 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                             _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
                                          voice_mode_instructions if is_live_mode else None,
                                          detach_event=detach_event,
-                                         is_live_mode=is_live_mode)
+                                         is_live_mode=is_live_mode,
+                                         timezone=tz)
                         )
 
                     elif msg_type == "leave_session":
@@ -444,6 +448,7 @@ async def _handle_text(
     voice_mode_instructions: str | None = None,
     detach_event: asyncio.Event | None = None,
     is_live_mode: bool = False,
+    timezone: str | None = None,
 ) -> uuid.UUID | None:
     """Process user text (from typing or STT). Returns updated active_session_id."""
     # Processing indicator
@@ -491,7 +496,7 @@ async def _handle_text(
     detached_session_id = active_session_id
 
     try:
-        async for event in handle_session_message_stream(db, active_session_id, text, voice_mode_instructions):
+        async for event in handle_session_message_stream(db, active_session_id, text, voice_mode_instructions, timezone=timezone):
             # Check if we've been detached (user left mid-stream)
             if not detached and detach_event and detach_event.is_set():
                 detached = True

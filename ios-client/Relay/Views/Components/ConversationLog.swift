@@ -34,6 +34,9 @@ struct ConversationLog: View {
                             } else if message.role == .error {
                                 ErrorDivider(message: message)
                                     .id(message.id)
+                            } else if message.role == .dateMarker {
+                                DateMarkerDivider(message: message)
+                                    .id(message.id)
                             } else {
                                 MessageBubble(
                                     message: message,
@@ -304,5 +307,53 @@ private struct CompactionDivider: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// Renders a `role: .dateMarker` row as a subtle inline divider:
+/// `── Mon, Oct 5 · 6 days later ──`. Deliberately quieter than the
+/// compaction / project-change / error dividers — this is an
+/// ambient time cue, not an event the user needs to act on.
+private struct DateMarkerDivider: View {
+    let message: Message
+    @Environment(\.relayTheme) private var theme
+
+    private var label: String {
+        let dateStr = _formatDate(message.metadata?.toDate)
+        let days = message.metadata?.elapsedDays ?? 0
+        let gap: String
+        switch days {
+        case ...0: gap = ""
+        case 1: gap = " · next day"
+        default: gap = " · \(days) days later"
+        }
+        return dateStr + gap
+    }
+
+    private func _formatDate(_ iso: String?) -> String {
+        guard let iso else { return "" }
+        let parser = DateFormatter()
+        parser.dateFormat = "yyyy-MM-dd"
+        parser.timeZone = TimeZone(identifier: "UTC")
+        guard let d = parser.date(from: iso) else { return iso }
+        let out = DateFormatter()
+        out.dateFormat = "EEE, MMM d"
+        return out.string(from: d)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(theme.border)
+                .frame(height: theme.borderWidth)
+            Text(label)
+                .font(theme.monoFont(size: 10))
+                .foregroundStyle(theme.textQuaternary)
+                .fixedSize(horizontal: true, vertical: false)
+            Rectangle()
+                .fill(theme.border)
+                .frame(height: theme.borderWidth)
+        }
+        .padding(.vertical, 6)
     }
 }

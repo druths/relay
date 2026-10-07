@@ -227,22 +227,33 @@ class ArkClientConnection:
 
     # ── Turn API ────────────────────────────────────────────────────
 
-    async def send_user_message(self, ark_session_id: str, text: str) -> int:
+    async def send_user_message(
+        self, ark_session_id: str, text: str,
+        timezone: str | None = None,
+    ) -> int:
         """Open a turn for `ark_session_id` and send the user message. Returns
         the turn generation the caller should use with `iter_turn_events`;
         events tagged with an older generation (leftovers from a cancelled
-        turn on the same session_id) get filtered out."""
+        turn on the same session_id) get filtered out.
+
+        `timezone` is an optional IANA zone name forwarded verbatim to ark
+        on the `user_message` frame — ark uses it for the "today's date"
+        env-stanza line and the DateMarker gap detection. Omit (or pass
+        `None`) and ark falls back to UTC."""
         await self.ensure_connected()
         async with self._turn_lock:
             gen = self._turn_generation.get(ark_session_id, 0) + 1
             self._turn_generation[ark_session_id] = gen
             self._turn_queues[ark_session_id] = asyncio.Queue()
         assert self._ws is not None
-        await self._ws.send(json.dumps({
+        payload: dict = {
             "type": "user_message",
             "session_id": ark_session_id,
             "text": text,
-        }))
+        }
+        if timezone:
+            payload["timezone"] = timezone
+        await self._ws.send(json.dumps(payload))
         return gen
 
     async def iter_turn_events(self, ark_session_id: str, generation: int):
@@ -643,6 +654,7 @@ class ArkProvider(LLMProvider):
         previous_session_id: str | None = None,
         session_context: str | None = None,
         project_id: str | None = None,
+        timezone: str | None = None,
     ):
         agent = _agent_name(model)
         user_text = _last_user_text(messages)
@@ -678,7 +690,9 @@ class ArkProvider(LLMProvider):
         # Multi-segment assistant text: ark emits multiple delta streams
         # separated by `assistant_message` boundary events around tool calls.
         # Insert a paragraph break before the first delta of each new segment.
-        turn_gen = await conn.send_user_message(ark_session_id, user_text)
+        turn_gen = await conn.send_user_message(
+            ark_session_id, user_text, timezone=timezone,
+        )
         saw_segment_end = False
         usage_in: int | None = None
         usage_out: int | None = None
@@ -740,6 +754,19 @@ class ArkProvider(LLMProvider):
                     # user-visible `agent_activity` WS event. Distinguished
                     # from str deltas by isinstance(chunk, dict).
                     yield {"__activity__": etype, "payload": event}
+                elif etype == "date_marker":
+                    # Ark injects a DateMarker row (and emits this live
+                    # event) when the calendar date in the client's TZ
+                    # differs from the previous user turn's. Surface
+                    # upward so conversation_manager can emit a
+                    # client-facing `date_marker` WS event.
+                    yield {"__date_marker__": {
+                        "from_date": event.get("from_date"),
+                        "to_date": event.get("to_date"),
+                        "elapsed_days": event.get("elapsed_days"),
+                        "timezone": event.get("timezone"),
+                        "event_id": event.get("event_id"),
+                    }}
         except asyncio.CancelledError:
             await conn.send_stop(ark_session_id)
             raise

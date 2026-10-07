@@ -942,6 +942,7 @@ async def handle_session_message(
 async def handle_session_message_stream(
     db: AsyncSession, session_id: uuid.UUID, text: str,
     voice_instructions: str | None = None,
+    timezone: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Process a message inside an agent session, streaming the response."""
     session = await get_session(db, session_id)
@@ -989,7 +990,7 @@ async def handle_session_message_stream(
     # (b) persist the partial response with matching metadata so history
     # replay preserves the "this turn was stopped" signal.
     stopped_reason: str | None = None
-    async for chunk in agent_manager.generate_response_stream(agent, text, context, voice_instructions, session_id=session_id):
+    async for chunk in agent_manager.generate_response_stream(agent, text, context, voice_instructions, session_id=session_id, timezone=timezone):
         if isinstance(chunk, agent_manager.ResponseMeta):
             response_meta = chunk.metadata
             continue
@@ -1011,6 +1012,26 @@ async def handle_session_message_stream(
                     "speaker": agent.name,
                     "kind": chunk["__activity__"],
                     "detail": chunk.get("payload") or {},
+                },
+            }
+            continue
+        # Ark emits a `date_marker` event when the calendar date in
+        # the client's TZ differs from the previous user turn's.
+        # Not persisted on Relay's side (v1) — only live clients see
+        # it. ark holds the authoritative DateMarker row and will
+        # continue to serve it to anyone fetching ark /history
+        # directly.
+        if isinstance(chunk, dict) and "__date_marker__" in chunk:
+            dm = chunk["__date_marker__"]
+            yield {
+                "type": "date_marker",
+                "payload": {
+                    "session_id": str(session_id),
+                    "from_date": dm.get("from_date"),
+                    "to_date": dm.get("to_date"),
+                    "elapsed_days": dm.get("elapsed_days"),
+                    "timezone": dm.get("timezone"),
+                    "event_id": dm.get("event_id"),
                 },
             }
             continue

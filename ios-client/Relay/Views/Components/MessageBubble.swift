@@ -78,6 +78,7 @@ struct MessageBubble: View {
         case .compaction: ""
         case .projectChange: ""
         case .error: ""
+        case .dateMarker: ""
         }
     }
 
@@ -90,6 +91,7 @@ struct MessageBubble: View {
         case .compaction: .clear
         case .projectChange: .clear
         case .error: .clear
+        case .dateMarker: .clear
         }
     }
 

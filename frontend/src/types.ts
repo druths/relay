@@ -156,6 +156,13 @@ export interface MessageMetadata {
    *  flow (no header). Compared between consecutive messages to
    *  decide whether to draw a boundary. */
   speaker?: string;
+  /** Date-marker fields: set on `role: "date_marker"` rows (ark day
+   *  boundary). `to_date` is the ISO date of the new user turn,
+   *  `elapsed_days` the whole-day gap, `timezone` the IANA zone the
+   *  comparison was computed in. */
+  to_date?: string;
+  elapsed_days?: number;
+  timezone?: string | null;
 }
 
 export interface Message {
@@ -474,6 +481,27 @@ export interface WsSessionProjectChanged {
   };
 }
 
+/** Ark day-boundary marker: fires when the current user turn's local
+ *  calendar date differs from the previous user turn's. Rendered as
+ *  an inline divider so the user sees the gap. Not persisted on
+ *  Relay's side in v1 — live only. */
+export interface WsDateMarker {
+  type: "date_marker";
+  payload: {
+    session_id: string;
+    /** ISO-8601 (YYYY-MM-DD) date of the previous user turn. */
+    from_date: string;
+    /** ISO-8601 date of the current user turn. */
+    to_date: string;
+    /** Whole-day gap between `from_date` and `to_date`. */
+    elapsed_days: number;
+    /** IANA zone name the date comparison was computed in. */
+    timezone: string | null;
+    /** Ark-side `messages.id` for durable cursor dedupe. */
+    event_id: number | null;
+  };
+}
+
 export type AgentActivityKind = "thinking" | "tool_call" | "tool_result";
 
 export interface WsAgentActivity {
@@ -521,4 +549,5 @@ export type WsEvent =
   | WsAgentActivity
   | WsSessionProjectChanged
   | WsSessionError
+  | WsDateMarker
   | WsError;

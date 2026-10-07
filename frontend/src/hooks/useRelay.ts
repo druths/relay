@@ -68,6 +68,18 @@ export interface RelayState {
   uploads: UploadItem[];
 }
 
+/// IANA timezone of the browser at the moment of a send. Attached
+/// to each user turn so ark's date-marker + env-stanza "today" line
+/// are correct for the user's local frame of reference. Falls back
+/// to `undefined` on environments without `Intl` support.
+function _resolvedTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function useRelay() {
   const ws = useRef<WebSocket | null>(null);
   const audioPlayer = useAudioPlayer();
@@ -740,6 +752,33 @@ export function useRelay() {
           }
           break;
 
+        case "date_marker":
+          // Ark fires this when the current user turn's local date
+          // differs from the previous turn's — append a subtle
+          // divider so the user sees the gap. Only inlined for the
+          // active session; v1 doesn't persist markers in Relay
+          // history, so inactive sessions wouldn't pick it up anyway.
+          setState((s) => {
+            if (s.activeSessionId !== event.payload.session_id) return s;
+            return {
+              ...s,
+              sessionMessages: [
+                ...s.sessionMessages,
+                {
+                  role: "date_marker",
+                  text_content: "",
+                  created_at: new Date().toISOString(),
+                  metadata: {
+                    to_date: event.payload.to_date,
+                    elapsed_days: event.payload.elapsed_days,
+                    timezone: event.payload.timezone,
+                  },
+                },
+              ],
+            };
+          });
+          break;
+
         case "session_error":
           setState((s) => {
             // Only surface inline if it concerns the currently-open
@@ -886,7 +925,11 @@ export function useRelay() {
       };
     });
 
-    ws.current.send(JSON.stringify({ type: "text_input", payload: { text } }));
+    const tz = _resolvedTimezone();
+    ws.current.send(JSON.stringify({
+      type: "text_input",
+      payload: tz ? { text, timezone: tz } : { text },
+    }));
   }, []);
 
   // Append a user attachment to the conversation log. The file is already
@@ -924,8 +967,14 @@ export function useRelay() {
       return;
     }
     console.log(`[STT] sending audio_input: ${audioBase64.length} base64 chars, format=${format}`);
+    const tz = _resolvedTimezone();
     ws.current.send(
-      JSON.stringify({ type: "audio_input", payload: { data: audioBase64, format } })
+      JSON.stringify({
+        type: "audio_input",
+        payload: tz
+          ? { data: audioBase64, format, timezone: tz }
+          : { data: audioBase64, format },
+      })
     );
   }, []);
 

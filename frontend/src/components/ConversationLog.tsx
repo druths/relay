@@ -195,6 +195,9 @@ export function ConversationLog({
         if (msg.role === "error") {
           return <ErrorDivider key={i} msg={msg} />;
         }
+        if (msg.role === "date_marker") {
+          return <DateMarkerDivider key={i} msg={msg} />;
+        }
         const usage = msg.metadata?.usage;
         const totalTokens =
           (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
@@ -565,6 +568,41 @@ function ProjectChangeDivider({ msg }: { msg: Message }) {
       <div className="flex-1 border-t border-blue-800/50" />
     </div>
   );
+}
+
+/** Renders a `role: "date_marker"` row as a subtle inline divider:
+ *  `── Mon, Oct 5 · 6 days later ──`. Deliberately quieter than the
+ *  compaction / project-change / error dividers — this is an ambient
+ *  time cue, not an event the user needs to act on. */
+function DateMarkerDivider({ msg }: { msg: Message }) {
+  const toDate = msg.metadata?.to_date;
+  const days = msg.metadata?.elapsed_days ?? 0;
+  const dateStr = _formatMarkerDate(toDate);
+  const gap =
+    days <= 0 ? "" : days === 1 ? " · next day" : ` · ${days} days later`;
+  return (
+    <div className="my-3 flex items-center gap-3 px-1">
+      <div className="flex-1 border-t border-gray-800" />
+      <span className="text-[10px] font-mono text-gray-500 whitespace-nowrap">
+        {dateStr}{gap}
+      </span>
+      <div className="flex-1 border-t border-gray-800" />
+    </div>
+  );
+}
+
+function _formatMarkerDate(iso: string | undefined): string {
+  if (!iso) return "";
+  // Parse the ISO date as a local date (not UTC) so the display
+  // reflects the day the user actually experienced. ark already
+  // computed the date in the user's TZ.
+  const parts = iso.split("-").map((n) => parseInt(n, 10));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return iso;
+  const [y, m, d] = parts;
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString(undefined, {
+    weekday: "short", month: "short", day: "numeric",
+  });
 }
 
 function _compactionReasonLabel(reason: string): string {

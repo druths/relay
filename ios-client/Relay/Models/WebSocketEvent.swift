@@ -32,7 +32,35 @@ enum WebSocketEvent {
     case agentActivity(AgentActivityPayload)
     case sessionProjectChanged(SessionProjectChangedPayload)
     case sessionError(SessionErrorPayload)
+    case dateMarker(DateMarkerPayload)
     case error(ErrorPayload)
+}
+
+/// Ark-sourced marker fired when a user turn's local date differs
+/// from the previous user turn's. Rendered as an inline divider in
+/// the conversation so the user sees the gap. Not persisted on
+/// Relay's side — live-only in v1.
+struct DateMarkerPayload: Codable {
+    let sessionId: String?
+    /// ISO-8601 date (YYYY-MM-DD) of the previous user turn.
+    let fromDate: String
+    /// ISO-8601 date of the current user turn.
+    let toDate: String
+    /// Whole-day gap between `fromDate` and `toDate`.
+    let elapsedDays: Int
+    /// IANA zone name the date comparison was computed in.
+    let timezone: String?
+    /// Ark-side messages.id for durable cursor dedupe.
+    let eventId: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case fromDate = "from_date"
+        case toDate = "to_date"
+        case elapsedDays = "elapsed_days"
+        case timezone
+        case eventId = "event_id"
+    }
 }
 
 struct StateUpdatePayload: Codable {
@@ -537,6 +565,8 @@ extension WebSocketEvent {
                 return .sessionProjectChanged(try decoder.decode(SessionProjectChangedPayload.self, from: payloadData))
             case "session_error":
                 return .sessionError(try decoder.decode(SessionErrorPayload.self, from: payloadData))
+            case "date_marker":
+                return .dateMarker(try decoder.decode(DateMarkerPayload.self, from: payloadData))
             case "error":
                 return .error(try decoder.decode(ErrorPayload.self, from: payloadData))
             default:
@@ -649,8 +679,8 @@ enum JSONValue: Codable, Sendable, Equatable {
 // MARK: - Client → Server events
 
 enum ClientEvent {
-    case textInput(text: String)
-    case audioInput(data: String, format: String)
+    case textInput(text: String, timezone: String? = nil)
+    case audioInput(data: String, format: String, timezone: String? = nil)
     case leaveSession
     case resumeSession(sessionId: String)
     case interrupt
@@ -667,10 +697,14 @@ enum ClientEvent {
     func toJSON() -> String? {
         let dict: [String: Any]
         switch self {
-        case .textInput(let text):
-            dict = ["type": "text_input", "payload": ["text": text]]
-        case .audioInput(let data, let format):
-            dict = ["type": "audio_input", "payload": ["data": data, "format": format]]
+        case .textInput(let text, let tz):
+            var payload: [String: Any] = ["text": text]
+            if let tz { payload["timezone"] = tz }
+            dict = ["type": "text_input", "payload": payload]
+        case .audioInput(let data, let format, let tz):
+            var payload: [String: Any] = ["data": data, "format": format]
+            if let tz { payload["timezone"] = tz }
+            dict = ["type": "audio_input", "payload": payload]
         case .leaveSession:
             dict = ["type": "leave_session"]
         case .resumeSession(let sessionId):
