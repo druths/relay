@@ -73,6 +73,29 @@ targets:
         platformFilter: iOS
       - package: Runestone
       - package: MarkdownUI
+    postBuildScripts:
+      - name: Install Catalyst build to /Applications
+        # After every successful Mac Catalyst build, mirror the
+        # product into /Applications so Spotlight / Launchpad /
+        # ⌘Space launch the latest dev iteration. No-op on iOS
+        # builds. Idempotent: wipes the previous copy before
+        # installing.
+        # Gate on `IS_MACCATALYST`, not `PLATFORM_NAME` — on
+        # Catalyst, `PLATFORM_NAME` is `macosx` (same as a native
+        # Mac build); `IS_MACCATALYST=YES` is the only reliable
+        # signal that we're producing a Catalyst product.
+        script: |
+          if [ "$IS_MACCATALYST" != "YES" ]; then
+            exit 0
+          fi
+          BUILT_APP="$BUILT_PRODUCTS_DIR/$WRAPPER_NAME"
+          if [ ! -d "$BUILT_APP" ]; then
+            exit 0
+          fi
+          rm -rf "/Applications/$WRAPPER_NAME"
+          cp -R "$BUILT_APP" "/Applications/"
+          echo "[install-app] copied to /Applications/$WRAPPER_NAME"
+        basedOnDependencyAnalysis: false
 
   RelayWidgetExtension:
     type: app-extension

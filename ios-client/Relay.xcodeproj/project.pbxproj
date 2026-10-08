@@ -76,6 +76,7 @@
 		AEFD9D9C7AE07F18F6BEBEB2 /* ChatMessageField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D179EE498262D338A18559 /* ChatMessageField.swift */; };
 		AF13179EAA0E12FA34792437 /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */; };
 		AF22F88D61DC899B50BF3E52 /* MacInputPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61C31B0F4A8A41B8EECB1E7F /* MacInputPickerSheet.swift */; };
+		B0AE3363280BFEF68E0FCCC4 /* LocalSttSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 317506BA8E6C5F0E9D038348 /* LocalSttSettings.swift */; };
 		B3C6794809BCC03E5DD3D358 /* PixelFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = D26249E8004C02E5E5519D8B /* PixelFace.swift */; };
 		B81D27BE882F438441283A47 /* RelayQuickLaunchWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38FE2FDAE86B55169328875B /* RelayQuickLaunchWidget.swift */; };
 		BD7FCA963D970827354C10EC /* RelayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DA7A3FBBC3B11BBD35A15B /* RelayView.swift */; };
@@ -132,6 +133,7 @@
 		1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingToneService.swift; sourceTree = "<group>"; };
 		20F1A7CF1C37E5D68F02F84B /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
 		2F86BB5CB1497564A48F5733 /* RelayWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = RelayWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		317506BA8E6C5F0E9D038348 /* LocalSttSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalSttSettings.swift; sourceTree = "<group>"; };
 		31CE01E4F023808B5ED73D41 /* RelayViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayViewModel.swift; sourceTree = "<group>"; };
 		359767A5465051721E7F2076 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		361BF127CF429820121827A5 /* StatusOrb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusOrb.swift; sourceTree = "<group>"; };
@@ -263,6 +265,7 @@
 				43D1016F3351DFA80C729268 /* AuthService.swift */,
 				20F1A7CF1C37E5D68F02F84B /* HapticService.swift */,
 				79719ECC3D01B1F82B573722 /* KeychainService.swift */,
+				317506BA8E6C5F0E9D038348 /* LocalSttSettings.swift */,
 				CE56D4B38145F5B9941235A3 /* MacAudioDevices.swift */,
 				7AB9707523AC385AD3004DC1 /* ProgressiveUpload.swift */,
 				1279FA47D6BF5378FDEAB722 /* ProjectsAPI.swift */,
@@ -432,6 +435,7 @@
 				B2BD664DAF308B86A7FDF1AC /* Resources */,
 				EF50208E6B06E9FF6A31ED33 /* Frameworks */,
 				5F3B7ABEA79ECBF792965B47 /* Embed Foundation Extensions */,
+				B208ADB96DCA14D96AA8DABE /* Install Catalyst build to /Applications */,
 			);
 			buildRules = (
 			);
@@ -531,6 +535,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		B208ADB96DCA14D96AA8DABE /* Install Catalyst build to /Applications */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Install Catalyst build to /Applications";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$IS_MACCATALYST\" != \"YES\" ]; then\n  exit 0\nfi\nBUILT_APP=\"$BUILT_PRODUCTS_DIR/$WRAPPER_NAME\"\nif [ ! -d \"$BUILT_APP\" ]; then\n  exit 0\nfi\nrm -rf \"/Applications/$WRAPPER_NAME\"\ncp -R \"$BUILT_APP\" \"/Applications/\"\necho \"[install-app] copied to /Applications/$WRAPPER_NAME\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		32748F3C31C7A2A956DC1AD2 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -580,6 +606,7 @@
 				16CCAE86C115D6B1FAB98D4E /* InputBar.swift in Sources */,
 				DA54A91DE82D7F2B4733AB7B /* KeychainService.swift in Sources */,
 				182B9014B1039798A705E3BB /* LiveActivityIntents.swift in Sources */,
+				B0AE3363280BFEF68E0FCCC4 /* LocalSttSettings.swift in Sources */,
 				87BB2C95CF18E91BC6331B7F /* LoginView.swift in Sources */,
 				8A89EBFBE5068FDB360EA2AD /* LoginViewModel.swift in Sources */,
 				4AFEFC85FC631203F83837BB /* MacAudioDevices.swift in Sources */,

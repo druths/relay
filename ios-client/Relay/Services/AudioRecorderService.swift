@@ -164,7 +164,15 @@ actor AudioRecorderService {
             Task { await onMeteringUpdate?(-160) }
             print("[STT] mic muted")
         } else {
-            if let engine, let fmt = inputBusFormat {
+            // Mirror the start-engine logic for which format the tap
+            // uses — on iOS the explicit mono format; on Catalyst the
+            // input bus's native (often stereo) format.
+            #if targetEnvironment(macCatalyst)
+            let reinstallFormat = inputBusFormat
+            #else
+            let reinstallFormat = tapFormat
+            #endif
+            if let engine, let fmt = reinstallFormat {
                 installTap(on: engine, format: fmt)
                 startMeteringPoll()
             }
@@ -286,7 +294,21 @@ actor AudioRecorderService {
             )
             audioFileURL = url
 
+            // installTap format: on iOS with voice processing, passing
+            // the node's own `outputFormat` object (rather than our
+            // own-constructed mono format) correlates with repeated
+            // `auou/vpio/appl render err: -1` and no actual audio
+            // reaching the tap. The two look identical by sample
+            // rate + channel count, but carry different internal
+            // flags. Keep the explicit mono format on iOS where the
+            // native input is already mono; only Catalyst needs the
+            // native format (its input bus is often stereo and a
+            // mono tap throws setFormat err -10865).
+            #if targetEnvironment(macCatalyst)
             installTap(on: newEngine, format: inputFormat)
+            #else
+            installTap(on: newEngine, format: monoFormat)
+            #endif
             print("[STT][lifecycle] engine started, tap installed (sr=\(nativeSampleRate)Hz, inputCh=\(inputFormat.channelCount), writeCh=1)")
 
             await SilentKeepAlive.shared.start()
