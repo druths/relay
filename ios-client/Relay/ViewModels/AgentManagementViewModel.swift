@@ -56,14 +56,30 @@ final class AgentManagementViewModel {
             let localProvider = UserDefaults.standard.string(forKey: "stt_local_provider")
             let sttProvider = localProvider ?? settings.sttProvider
 
+            // VAD params come from LocalSttSettings (per-device). If
+            // this device has no local value yet, `resolve…` seeds
+            // from the server-provided value for a one-time
+            // migration.
+            let localSilenceDb = LocalSttSettings.resolveSilenceThresholdDb(
+                serverFallback: settings.sttSilenceThresholdDb,
+            )
+            let localSilenceMs = LocalSttSettings.resolveSilenceTimeoutMs(
+                serverFallback: settings.sttSilenceTimeoutMs,
+            )
+            let localMinDur = LocalSttSettings.resolveMinDurationMs(
+                serverFallback: settings.sttMinDurationMs,
+            )
+            let localAttack = LocalSttSettings.resolveAttackDebounceMs(
+                serverFallback: settings.sttAttackDebounceMs,
+            )
             platformForm = [
                 "stt_provider": sttProvider,
                 "stt_api_key": settings.sttApiKey ?? "",
-                "stt_silence_threshold_db": String(settings.sttSilenceThresholdDb),
-                "stt_silence_timeout_ms": String(settings.sttSilenceTimeoutMs),
-                "stt_min_duration_ms": String(settings.sttMinDurationMs),
+                "stt_silence_threshold_db": String(localSilenceDb),
+                "stt_silence_timeout_ms": String(localSilenceMs),
+                "stt_min_duration_ms": String(localMinDur),
                 "stt_no_speech_threshold": String(settings.sttNoSpeechThreshold),
-                "stt_attack_debounce_ms": String(settings.sttAttackDebounceMs),
+                "stt_attack_debounce_ms": String(localAttack),
                 "tts_default_provider": settings.ttsDefaultProvider,
                 "tts_openai_api_key": "",
                 "tts_elevenlabs_api_key": "",
@@ -301,11 +317,22 @@ final class AgentManagementViewModel {
         if !isLocalStt, platformForm["stt_api_key"] != (platform?.sttApiKey ?? "") {
             body["stt_api_key"] = .string(platformForm["stt_api_key"] ?? "")
         }
-        body["stt_silence_threshold_db"] = .double(Double(platformForm["stt_silence_threshold_db"] ?? "-35") ?? -35)
-        body["stt_silence_timeout_ms"] = .int(Int(Double(platformForm["stt_silence_timeout_ms"] ?? "500") ?? 500))
-        body["stt_min_duration_ms"] = .int(Int(Double(platformForm["stt_min_duration_ms"] ?? "400") ?? 400))
+        // VAD params are per-device — write to LocalSttSettings, not
+        // the server. See LocalSttSettings doc comment.
+        LocalSttSettings.setSilenceThresholdDb(
+            Double(platformForm["stt_silence_threshold_db"] ?? "-35") ?? -35,
+        )
+        LocalSttSettings.setSilenceTimeoutMs(
+            Int(Double(platformForm["stt_silence_timeout_ms"] ?? "500") ?? 500),
+        )
+        LocalSttSettings.setMinDurationMs(
+            Int(Double(platformForm["stt_min_duration_ms"] ?? "400") ?? 400),
+        )
+        LocalSttSettings.setAttackDebounceMs(
+            Int(Double(platformForm["stt_attack_debounce_ms"] ?? "300") ?? 300),
+        )
+        // Server-side STT confidence filter remains shared.
         body["stt_no_speech_threshold"] = .double(Double(platformForm["stt_no_speech_threshold"] ?? "0.5") ?? 0.5)
-        body["stt_attack_debounce_ms"] = .int(Int(Double(platformForm["stt_attack_debounce_ms"] ?? "300") ?? 300))
 
         if let provider = platformForm["tts_default_provider"] {
             body["tts_default_provider"] = .string(provider)
@@ -323,11 +350,10 @@ final class AgentManagementViewModel {
         let updated: PlatformSettings = try await apiClient.request("PATCH", path: "/v1/platform/settings", body: AgentUpdateBody(values: body))
         platform = updated
         platformForm["stt_api_key"] = updated.sttApiKey ?? ""
-        platformForm["stt_silence_threshold_db"] = String(updated.sttSilenceThresholdDb)
-        platformForm["stt_silence_timeout_ms"] = String(updated.sttSilenceTimeoutMs)
-        platformForm["stt_min_duration_ms"] = String(updated.sttMinDurationMs)
+        // VAD values stay as whatever the user just entered —
+        // they're saved locally above; don't overwrite with the
+        // server's stale copy.
         platformForm["stt_no_speech_threshold"] = String(updated.sttNoSpeechThreshold)
-        platformForm["stt_attack_debounce_ms"] = String(updated.sttAttackDebounceMs)
         platformForm["tts_default_provider"] = updated.ttsDefaultProvider
         platformForm["tts_openai_api_key"] = ""
         platformForm["tts_elevenlabs_api_key"] = ""

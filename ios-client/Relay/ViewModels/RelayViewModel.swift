@@ -960,12 +960,29 @@ final class RelayViewModel {
             let settings: PlatformSettings = try await apiClient.request("GET", path: "/v1/platform/settings")
             sttSettings = settings
 
-            // Apply STT settings to recorder
+            // VAD params are per-device now (see LocalSttSettings).
+            // `resolve…` returns the local value if set; if the local
+            // store is empty on this install, it seeds from the
+            // server-provided value (one-time migration) and persists
+            // locally. From then on, server values for these keys
+            // are ignored.
+            let silenceDb = LocalSttSettings.resolveSilenceThresholdDb(
+                serverFallback: settings.sttSilenceThresholdDb,
+            )
+            let silenceMs = LocalSttSettings.resolveSilenceTimeoutMs(
+                serverFallback: settings.sttSilenceTimeoutMs,
+            )
+            let minDur = LocalSttSettings.resolveMinDurationMs(
+                serverFallback: settings.sttMinDurationMs,
+            )
+            let attack = LocalSttSettings.resolveAttackDebounceMs(
+                serverFallback: settings.sttAttackDebounceMs,
+            )
             audio.updateSettings(
-                silenceThresholdDb: Float(settings.sttSilenceThresholdDb),
-                silenceTimeoutMs: settings.sttSilenceTimeoutMs,
-                minDurationMs: settings.sttMinDurationMs,
-                attackDebounceMs: settings.sttAttackDebounceMs
+                silenceThresholdDb: Float(silenceDb),
+                silenceTimeoutMs: silenceMs,
+                minDurationMs: minDur,
+                attackDebounceMs: attack,
             )
         } catch {
             print("[Relay] Failed to fetch platform settings: \(error)")

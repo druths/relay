@@ -495,6 +495,8 @@ struct AgentManagementView: View {
                 separator
                 sectionTitle("RECOGNITION TUNING")
                 hintText("Adjust these to reduce false transcriptions from ambient noise.")
+                deviceOnlyBadge
+                hintText("Mic characteristics differ per device — these are stored on this device only.")
 
                 platformSlider("Silence Threshold", key: "stt_silence_threshold_db", range: -50...(-10), step: 1, unit: " dB")
                 hintText("Minimum dB level to detect speech. Higher = less sensitive.")
@@ -553,6 +555,28 @@ struct AgentManagementView: View {
             .frame(height: theme.borderWidth)
             .padding(.top, 24)
             .padding(.bottom, 8)
+    }
+
+    /// Small inline chip flagging that the following section's
+    /// values are stored on this device only, not synced across
+    /// clients. Used above the VAD tuning sliders, which have
+    /// per-device mic characteristics.
+    private var deviceOnlyBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "iphone")
+                .font(.system(size: 10))
+            Text("THIS DEVICE ONLY")
+                .font(theme.monoFont(size: 10, weight: .medium))
+                .tracking(1)
+        }
+        .foregroundStyle(theme.primary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(theme.primary.opacity(0.12))
+        .overlay(
+            Capsule().stroke(theme.primary.opacity(0.35), lineWidth: theme.borderWidth),
+        )
+        .clipShape(Capsule())
     }
 
     /// Small subtitle under a per-agent field indicating whether a platform

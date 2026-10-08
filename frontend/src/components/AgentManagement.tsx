@@ -7,6 +7,7 @@ import {
   type ProviderDefaultsGroup,
 } from "../providerSchemas";
 import { apiFetch } from "../api";
+import { LocalSttSettings } from "../utils/localSttSettings";
 import { type ThemeName, getStoredTheme, applyTheme } from "../theme";
 
 interface Voice {
@@ -77,12 +78,28 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
       .then((r) => r.json())
       .then((data: PlatformSettings) => {
         setPlatform(data);
+        // VAD params are per-device (see LocalSttSettings). If this
+        // browser profile has no local value yet, `resolve…` seeds
+        // from the server-provided value for one-time migration.
+        const silenceDb = LocalSttSettings.resolveSilenceThresholdDb(
+          data.stt_silence_threshold_db,
+        );
+        const silenceMs = LocalSttSettings.resolveSilenceTimeoutMs(
+          data.stt_silence_timeout_ms,
+        );
+        const minDur = LocalSttSettings.resolveMinDurationMs(
+          data.stt_min_duration_ms,
+        );
+        const attack = LocalSttSettings.resolveAttackDebounceMs(
+          data.stt_attack_debounce_ms,
+        );
         setPlatformForm({
           stt_provider: data.stt_provider,
           stt_api_key: data.stt_api_key ?? "",
-          stt_silence_threshold_db: String(data.stt_silence_threshold_db),
-          stt_silence_timeout_ms: String(data.stt_silence_timeout_ms),
-          stt_min_duration_ms: String(data.stt_min_duration_ms),
+          stt_silence_threshold_db: String(silenceDb),
+          stt_silence_timeout_ms: String(silenceMs),
+          stt_min_duration_ms: String(minDur),
+          stt_attack_debounce_ms: String(attack),
           stt_no_speech_threshold: String(data.stt_no_speech_threshold),
           tts_default_provider: data.tts_default_provider ?? "none",
           tts_openai_api_key: "",
@@ -304,9 +321,20 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
       if (platformForm.stt_api_key !== (platform?.stt_api_key ?? "")) {
         body.stt_api_key = platformForm.stt_api_key;
       }
-      body.stt_silence_threshold_db = parseFloat(platformForm.stt_silence_threshold_db || "-35");
-      body.stt_silence_timeout_ms = parseInt(platformForm.stt_silence_timeout_ms || "500");
-      body.stt_min_duration_ms = parseInt(platformForm.stt_min_duration_ms || "400");
+      // VAD params are per-device — write to LocalSttSettings, not
+      // the server. See localSttSettings.ts doc comment.
+      LocalSttSettings.setSilenceThresholdDb(
+        parseFloat(platformForm.stt_silence_threshold_db || "-35"),
+      );
+      LocalSttSettings.setSilenceTimeoutMs(
+        parseInt(platformForm.stt_silence_timeout_ms || "500"),
+      );
+      LocalSttSettings.setMinDurationMs(
+        parseInt(platformForm.stt_min_duration_ms || "400"),
+      );
+      LocalSttSettings.setAttackDebounceMs(
+        parseInt(platformForm.stt_attack_debounce_ms || "300"),
+      );
       body.stt_no_speech_threshold = parseFloat(platformForm.stt_no_speech_threshold || "0.5");
       const res = await apiFetch(`/v1/platform/settings`, {
         method: "PATCH",
@@ -316,12 +344,12 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
       if (!res.ok) throw new Error(await res.text());
       const updated: PlatformSettings = await res.json();
       setPlatform(updated);
+      // VAD values stay as whatever the user just entered — they're
+      // saved locally above; don't overwrite with the server's
+      // stale copy.
       setPlatformForm((f) => ({
         ...f,
         stt_api_key: updated.stt_api_key ?? "",
-        stt_silence_threshold_db: String(updated.stt_silence_threshold_db),
-        stt_silence_timeout_ms: String(updated.stt_silence_timeout_ms),
-        stt_min_duration_ms: String(updated.stt_min_duration_ms),
         stt_no_speech_threshold: String(updated.stt_no_speech_threshold),
       }));
     } catch (err) {
@@ -853,13 +881,26 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
               </div>
             </fieldset>
 
-            {/* Recognition Tuning */}
+            {/* Recognition Tuning — per-device, see
+                LocalSttSettings. */}
             <fieldset className="space-y-4">
               <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 Recognition Tuning
               </legend>
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full
+                           bg-blue-500/15 text-blue-300 text-[10px] font-mono tracking-wider
+                           border border-blue-500/30"
+              >
+                <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden>
+                  <path d="M5 2a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V2zm1 1v10h4V3H6z"/>
+                </svg>
+                THIS DEVICE ONLY
+              </span>
               <p className="text-xs text-gray-600">
-                Adjust these to reduce false transcriptions from ambient noise.
+                Mic characteristics differ per device — these are
+                stored in this browser only. Adjust to reduce false
+                transcriptions from ambient noise.
               </p>
 
               {/* Silence Threshold */}

@@ -19,9 +19,15 @@ export interface Agent {
 export interface PlatformSettings {
   stt_provider: string;
   stt_api_key: string | null;
-  stt_silence_threshold_db: number;
-  stt_silence_timeout_ms: number;
-  stt_min_duration_ms: number;
+  // VAD params. Returned by the server for one-time per-device
+  // migration seeding, but the authoritative store is now the
+  // client's `localStorage` (see `utils/localSttSettings.ts`).
+  // Mark optional because the server will stop sending these
+  // eventually.
+  stt_silence_threshold_db?: number;
+  stt_silence_timeout_ms?: number;
+  stt_min_duration_ms?: number;
+  stt_attack_debounce_ms?: number;
   stt_no_speech_threshold: number;
   tts_default_provider: string;
   tts_openai_api_key: string | null;

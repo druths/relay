@@ -126,16 +126,18 @@ async def update_platform_settings(
         await _set_setting(db, "stt_provider", body.stt_provider)
     if body.stt_api_key is not None:
         await _set_setting(db, "stt_api_key", body.stt_api_key)
-    if body.stt_silence_threshold_db is not None:
-        await _set_setting(db, "stt_silence_threshold_db", str(body.stt_silence_threshold_db))
-    if body.stt_silence_timeout_ms is not None:
-        await _set_setting(db, "stt_silence_timeout_ms", str(body.stt_silence_timeout_ms))
-    if body.stt_min_duration_ms is not None:
-        await _set_setting(db, "stt_min_duration_ms", str(body.stt_min_duration_ms))
+    # VAD parameters (silence threshold / timeout / min duration /
+    # attack debounce) are now per-device: each client stores its
+    # own in UserDefaults / localStorage and tunes to its mic. We
+    # silently drop them on PATCH so older clients that still send
+    # don't 400, but their value never affects any other device.
+    # The GET response still returns these keys for a one-time
+    # client migration seed (new client reads server values once
+    # into its local store), then clients ignore the server for
+    # these keys from then on. Remove from GET after all clients
+    # have migrated.
     if body.stt_no_speech_threshold is not None:
         await _set_setting(db, "stt_no_speech_threshold", str(body.stt_no_speech_threshold))
-    if body.stt_attack_debounce_ms is not None:
-        await _set_setting(db, "stt_attack_debounce_ms", str(body.stt_attack_debounce_ms))
     if body.tts_default_provider is not None:
         await _set_setting(db, "tts_default_provider", body.tts_default_provider)
     if body.tts_openai_api_key is not None:
