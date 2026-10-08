@@ -125,6 +125,13 @@ struct ConversationLog: View {
                 // comfortably above the fold.
                 Color.clear.frame(height: 60).id("__bottom__")
             }
+            // Enable text selection for every Text/Markdown
+            // descendant via the environment. `MarkdownText` already
+            // sets it on its own `Markdown` view, but on Mac
+            // Catalyst a scoped-up setting at the ScrollView root
+            // propagates more reliably through MarkdownUI's internal
+            // wrapping than the per-view setting alone.
+            .textSelection(.enabled)
             .coordinateSpace(name: "convo")
             .background(
                 // Measure the visible scroll area so we know what

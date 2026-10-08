@@ -49,8 +49,9 @@ struct ChatMessageField: UIViewRepresentable {
     /// Fires only on the trimmed empty↔non-empty edge. Use for send
     /// button enable/disable — won't fire on intermediate keystrokes.
     var onHasContentChange: ((Bool) -> Void)? = nil
-    /// Fires when the user presses Cmd+Return — the multi-line send
-    /// shortcut. Plain Return inserts a newline.
+    /// Fires when the user presses Return (send). Cmd+Return and
+    /// Shift+Return both insert a literal newline at the cursor
+    /// instead.
     var onSubmit: (() -> Void)? = nil
     /// Fires only when the field's preferred height changes (e.g. a new
     /// soft-wrapped line, an explicit \n, deletion that drops a line).
@@ -81,9 +82,6 @@ struct ChatMessageField: UIViewRepresentable {
         v.placeholderLabel.textColor = placeholderColor
         v.minLines = minLines
         v.maxLines = maxLines
-        v.onSubmitCommand = { [weak coord = context.coordinator] in
-            coord?.parent.onSubmit?()
-        }
         handle.view = v
         // Report the initial measurement once SwiftUI has placed us and
         // we have a real width. Without this the parent stays at its
@@ -190,6 +188,24 @@ struct ChatMessageField: UIViewRepresentable {
                 focused.wrappedValue = false
             }
         }
+
+        /// Intercept the Return key as "send". Cmd-Return inserts a
+        /// literal newline — handled by `ChatTextView.keyCommands`
+        /// below (which runs before `shouldChangeTextIn` for
+        /// modifier chords), so Cmd-Return never reaches this
+        /// method with a "\n" replacement. Any "\n" we see here is
+        /// a plain Return press.
+        func textView(
+            _ tv: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText text: String,
+        ) -> Bool {
+            if text == "\n" {
+                parent.onSubmit?()
+                return false
+            }
+            return true
+        }
     }
 }
 
@@ -200,9 +216,6 @@ final class ChatTextView: UITextView {
     let placeholderLabel = UILabel()
     var minLines: Int = 1
     var maxLines: Int = 6
-    /// Closure invoked when the user presses Cmd+Return — wired up by
-    /// the SwiftUI wrapper's coordinator to call its `onSubmit`.
-    var onSubmitCommand: (() -> Void)?
 
     init() {
         super.init(frame: .zero, textContainer: nil)
@@ -258,18 +271,28 @@ final class ChatTextView: UITextView {
 
     override var keyCommands: [UIKeyCommand]? {
         var cmds = super.keyCommands ?? []
-        let send = UIKeyCommand(
-            input: "\r",
-            modifierFlags: .command,
-            action: #selector(_handleSubmitCommand),
-        )
-        send.wantsPriorityOverSystemBehavior = true
-        cmds.append(send)
+        // Both Cmd-Return and Shift-Return insert a literal newline
+        // at the cursor, mirroring the pattern most chat clients use
+        // for multi-line input (iMessage, Slack, Linear, etc.). The
+        // web client already treats Shift-Return as newline via the
+        // native textarea; mirroring both chords here keeps muscle
+        // memory consistent across platforms. Plain Return is
+        // intercepted by the delegate's `shouldChangeTextIn` and
+        // triggers submit.
+        for mods: UIKeyModifierFlags in [.command, .shift] {
+            let cmd = UIKeyCommand(
+                input: "\r",
+                modifierFlags: mods,
+                action: #selector(_handleInsertNewline),
+            )
+            cmd.wantsPriorityOverSystemBehavior = true
+            cmds.append(cmd)
+        }
         return cmds
     }
 
-    @objc private func _handleSubmitCommand() {
-        onSubmitCommand?()
+    @objc private func _handleInsertNewline() {
+        insertText("\n")
     }
 
     private static let defaultFont = UIFont.preferredFont(forTextStyle: .body)

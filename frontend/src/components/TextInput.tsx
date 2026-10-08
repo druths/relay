@@ -70,11 +70,31 @@ export function TextInput({
   };
 
   const handleKey = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key !== "Enter") return;
+    // Cmd/Ctrl+Enter → insert a literal newline at the cursor,
+    // matching the iOS/Catalyst chord. Textareas don't do this by
+    // default (unlike Shift+Enter), so we splice "\n" in ourselves
+    // and move the caret past it.
+    if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
-      handleSend();
+      const el = e.currentTarget as HTMLTextAreaElement;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const next = el.value.slice(0, start) + "\n" + el.value.slice(end);
+      el.value = next;
+      el.selectionStart = start + 1;
+      el.selectionEnd = start + 1;
+      // Fire an input event so React's onChange picks up the
+      // mutation and re-renders bindings.
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
     }
-    // Shift+Enter inserts a newline (default textarea behavior)
+    // Shift+Enter inserts a newline via the textarea's default
+    // behavior — no preventDefault, no handling here.
+    if (e.shiftKey) return;
+    // Plain Enter sends.
+    e.preventDefault();
+    handleSend();
   };
 
   // Auto-resize textarea to fit content, capped at 6 lines

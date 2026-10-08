@@ -16,7 +16,12 @@ struct MessageBubble: View {
     var onOpenAttachment: ((FileAttachment) -> Void)? = nil
 
     @Environment(\.relayTheme) private var theme
+    @Environment(\.relayChatFontSize) private var chatFontSize
     @State private var animating = false
+    /// When set, present the raw-text sheet so the user can pick
+    /// out partial text to copy. Set from the context-menu
+    /// "Copy…" action.
+    @State private var showCopySheet = false
 
     private var isUser: Bool { message.role == .user }
     private var isSystem: Bool { message.role == .system }
@@ -96,6 +101,13 @@ struct MessageBubble: View {
     }
 
     var body: some View {
+        bodyContent
+            .contextMenu { copyMenuItems }
+            .sheet(isPresented: $showCopySheet) { copySheet }
+    }
+
+    @ViewBuilder
+    private var bodyContent: some View {
         if isSystem {
             HStack(spacing: 8) {
                 Rectangle().fill(theme.border).frame(height: theme.borderWidth)
@@ -111,6 +123,57 @@ struct MessageBubble: View {
         } else {
             messageBody
         }
+    }
+
+    /// Long-press / right-click actions. "Copy message" grabs the
+    /// whole text in one shot; "Copy…" opens a sheet where the raw
+    /// markdown is selectable (works around MarkdownUI's unreliable
+    /// text selection on Mac Catalyst). Nothing shown for system
+    /// divider rows — they're a few words of status, not content.
+    @ViewBuilder
+    private var copyMenuItems: some View {
+        if !isSystem, !message.textContent.isEmpty {
+            Button(action: _copyMessageToPasteboard) {
+                Label("Copy message", systemImage: "doc.on.doc")
+            }
+            Button { showCopySheet = true } label: {
+                Label("Copy…", systemImage: "text.quote")
+            }
+        }
+    }
+
+    /// Modal sheet that renders the message as plain monospaced
+    /// text with SwiftUI selection enabled. Because this bypasses
+    /// MarkdownUI entirely, click-drag selection is reliable on
+    /// every platform, letting the user grab partial content.
+    private var copySheet: some View {
+        NavigationStack {
+            ScrollView {
+                Text(message.textContent)
+                    .font(theme.monoFont(size: 13))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+            .navigationTitle("Copy")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { showCopySheet = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        _copyMessageToPasteboard()
+                        showCopySheet = false
+                    } label: {
+                        Label("Copy All", systemImage: "doc.on.doc")
+                    }
+                }
+            }
+        }
+    }
+
+    private func _copyMessageToPasteboard() {
+        UIPasteboard.general.string = message.textContent
     }
 
     /// Bubble-less rendering for agent contributions. Full-width
@@ -189,7 +252,24 @@ struct MessageBubble: View {
                 HStack(alignment: .bottom, spacing: 6) {
                     VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
                         if !message.textContent.isEmpty {
-                            MarkdownText(text: message.textContent)
+                            if isUser {
+                                // Render user messages as plain Text,
+                                // not Markdown — chat convention is
+                                // WYSIWYG: a single newline is a
+                                // line break, not a paragraph join.
+                                // The user types chat, not formatted
+                                // docs, so losing `**bold**` here is
+                                // a worthy trade for preserving the
+                                // literal newlines they typed.
+                                Text(message.textContent)
+                                    .font(theme.bodyFont(size: chatFontSize))
+                                    .foregroundStyle(theme.textSecondary)
+                                    .multilineTextAlignment(.leading)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                MarkdownText(text: message.textContent)
+                            }
                         }
                         ForEach(message.attachments) { att in
                             AttachmentPill(attachment: att, onOpen: onOpenAttachment)
