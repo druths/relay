@@ -25,6 +25,8 @@ struct InputBar: View {
     @State private var showInputPicker = false
     @State private var showOutputPicker = false
     @State private var showFilePicker = false
+    @State private var showCameraPicker = false
+    @State private var showPhotoPicker = false
     @State private var isUploading = false
     /// Fallback focus state when no viewmodel-level binding is provided.
     @State private var localFocus = false
@@ -99,9 +101,12 @@ struct InputBar: View {
     private var chatContent: some View {
         goLiveButton
 
-        if relay.activeSessionId != nil {
-            attachButton
-        }
+        // Attach menu is always visible in chat mode — lobby or
+        // session — so the + is a stable fixture of the input bar.
+        // Uploads in the lobby ride on the same chat-attachment
+        // path and surface to whichever agent the user ends up
+        // routed into.
+        attachButton
 
         ChatMessageField(
             handle: handle,
@@ -162,12 +167,32 @@ struct InputBar: View {
         return true
     }
 
+    /// Attach menu — a `+` button that opens Photos / Camera /
+    /// Files. On Mac Catalyst the camera + photo-library options
+    /// aren't meaningful (no camera; no Photos library picker), so
+    /// the menu collapses to just Files there.
     private var attachButton: some View {
-        Button {
-            showFilePicker = true
+        Menu {
+            #if !targetEnvironment(macCatalyst)
+            Button {
+                showPhotoPicker = true
+            } label: {
+                Label("Photos", systemImage: "photo.on.rectangle")
+            }
+            Button {
+                showCameraPicker = true
+            } label: {
+                Label("Camera", systemImage: "camera")
+            }
+            #endif
+            Button {
+                showFilePicker = true
+            } label: {
+                Label("Files", systemImage: "folder")
+            }
         } label: {
-            Image(systemName: "paperclip")
-                .font(theme.bodyFont(size: 18, weight: .semibold))
+            Image(systemName: "plus")
+                .font(theme.bodyFont(size: 20, weight: .semibold))
                 .foregroundStyle(theme.textSecondary)
                 .frame(width: 44, height: 44)
                 .background(theme.elevated)
@@ -186,6 +211,40 @@ struct InputBar: View {
             case .failure(let err):
                 print("[Relay] File picker error: \(err)")
             }
+        }
+        #if !targetEnvironment(macCatalyst)
+        .sheet(isPresented: $showCameraPicker) {
+            CameraPicker { data, filename in
+                Task { await uploadInMemoryBatch([(data, filename, "image/jpeg")]) }
+            }
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoLibraryPicker(selectionLimit: 10) { picks in
+                let batch = picks.map { ($0.data, $0.filename, "image/jpeg") }
+                Task { await uploadInMemoryBatch(batch) }
+            }
+            .ignoresSafeArea()
+        }
+        #endif
+    }
+
+    /// Common upload path for the Camera / Photos results — the data
+    /// is already in memory (no security-scoped URL to dance with),
+    /// so we skip `handleFiles`' file-reading preamble and feed the
+    /// bytes straight into the shared upload registry.
+    private func uploadInMemoryBatch(
+        _ items: [(data: Data, filename: String, mime: String)],
+    ) async {
+        guard !items.isEmpty else { return }
+        isUploading = true
+        defer { isUploading = false }
+        for item in items {
+            _ = await relay.uploadChatAttachment(
+                data: item.data,
+                filename: item.filename,
+                mimeType: item.mime,
+            )
         }
     }
 

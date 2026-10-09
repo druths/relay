@@ -30,6 +30,8 @@ targets:
           NSAllowsArbitraryLoads: true
         NSMicrophoneUsageDescription: "Relay needs microphone access for voice input."
         NSSpeechRecognitionUsageDescription: "Relay uses speech recognition to transcribe your voice input."
+        NSCameraUsageDescription: "Relay uses the camera when you attach a photo from the + menu."
+        NSPhotoLibraryUsageDescription: "Relay reads selected photos when you attach images from the + menu."
         UIBackgroundModes:
           - audio
         NSSupportsLiveActivities: true

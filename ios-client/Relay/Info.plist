@@ -34,8 +34,12 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Relay uses the camera when you attach a photo from the + menu.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Relay needs microphone access for voice input.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Relay reads selected photos when you attach images from the + menu.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Relay uses speech recognition to transcribe your voice input.</string>
 	<key>NSSupportsLiveActivities</key>

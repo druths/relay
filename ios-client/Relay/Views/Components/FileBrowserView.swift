@@ -175,6 +175,11 @@ private struct FileTreeView: View {
     @State private var selectedPath: String?
     @State private var uploading = false
     @State private var showFilePicker = false
+    /// Target directory for the next upload. Set to "" by the
+    /// toolbar's Upload button (root), or to a specific path by a
+    /// directory row's "Upload Here…" menu item. Consumed by
+    /// `uploadFiles` after the file-picker closes.
+    @State private var pendingUploadDir = ""
     @State private var showMkdirAlert = false
     @State private var mkdirName = ""
     @State private var showNewFileAlert = false
@@ -462,6 +467,12 @@ private struct FileTreeView: View {
                 } label: {
                     Label("New Folder…", systemImage: "folder.badge.plus")
                 }
+                Button {
+                    pendingUploadDir = childPath
+                    showFilePicker = true
+                } label: {
+                    Label("Upload Here…", systemImage: "arrow.up.doc")
+                }
             }
             Button {
                 renamePath = childPath
@@ -491,7 +502,10 @@ private struct FileTreeView: View {
                 system: uploading ? "circle.dotted" : "arrow.up.doc",
                 title: uploading ? "Uploading…" : "Upload",
                 disabled: uploading,
-            ) { showFilePicker = true }
+            ) {
+                pendingUploadDir = ""  // toolbar always targets root
+                showFilePicker = true
+            }
             if onOpenFile != nil {
                 // New file relies on the parent's `onOpenFile` to land in a
                 // central-pane tab (iPad). On iPhone (where the callback is
@@ -550,6 +564,10 @@ private struct FileTreeView: View {
     private func uploadFiles(_ urls: [URL]) async {
         uploading = true
         defer { uploading = false }
+        // Snapshot the target before kicking off the async loop —
+        // the state var could get overwritten mid-upload by another
+        // menu action.
+        let targetDir = pendingUploadDir
         for url in urls {
             guard url.startAccessingSecurityScopedResource() else { continue }
             defer { url.stopAccessingSecurityScopedResource() }
@@ -562,7 +580,7 @@ private struct FileTreeView: View {
                 // file browser. Errors land in the row's status; no
                 // panel-level error banner needed for the routine case.
                 _ = await relay.uploadBrowserFile(
-                    kind: kind, targetId: targetId, targetDir: "",
+                    kind: kind, targetId: targetId, targetDir: targetDir,
                     filename: url.lastPathComponent,
                     data: data, mimeType: mime, server: server,
                 )
@@ -570,7 +588,15 @@ private struct FileTreeView: View {
                 self.error = String(describing: error)
             }
         }
-        await loadRoot()
+        // Refresh the directory we uploaded into. Root uploads
+        // reload the whole tree; sub-folder uploads refresh just
+        // that subtree so the user sees the new rows in place
+        // without collapsing their current expansion state.
+        if targetDir.isEmpty {
+            await loadRoot()
+        } else {
+            load(path: targetDir)
+        }
     }
 
     /// Called from a row tap. Probes the file first — if the backend

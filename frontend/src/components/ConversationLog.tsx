@@ -94,6 +94,216 @@ function _formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// ── Attachment preview dispatch ────────────────────────────────────
+//
+// Mirrors the iOS/Catalyst `AttachmentPreview` view. For images and
+// text-ish files we render an inline preview above the pill-style
+// caption; for anything else we fall through to the legacy pill
+// unchanged.
+
+const _TEXT_PREVIEW_EXTS = new Set<string>([
+  "txt", "md", "markdown", "py", "js", "jsx", "ts", "tsx",
+  "swift", "json", "yaml", "yml", "toml", "html", "htm", "css",
+  "sh", "zsh", "sql", "csv", "log", "ini", "cfg", "conf",
+  "rb", "go", "rs", "c", "h", "cpp", "hpp", "java", "kt",
+  "xml", "env", "gitignore",
+]);
+
+type _AttachmentKind = "image" | "text" | "other";
+
+function _attachmentKind(att: FileAttachment): _AttachmentKind {
+  if (att.mime_type?.startsWith("image/")) return "image";
+  if (att.mime_type?.startsWith("text/")) return "text";
+  const ext = att.filename.split(".").pop()?.toLowerCase() ?? "";
+  if (ext && _TEXT_PREVIEW_EXTS.has(ext)) return "text";
+  return "other";
+}
+
+/** Dispatches on type. Image → inline thumbnail; text → first
+ *  ~1500 chars; other → the legacy pill. */
+function AttachmentPreview({
+  attachment,
+  onOpen,
+}: {
+  attachment: FileAttachment;
+  onOpen?: (att: FileAttachment) => void;
+}) {
+  const kind = _attachmentKind(attachment);
+  if (kind === "image") {
+    return <ImageAttachmentPreview attachment={attachment} onOpen={onOpen} />;
+  }
+  if (kind === "text") {
+    return <TextAttachmentPreview attachment={attachment} onOpen={onOpen} />;
+  }
+  return <AttachmentPill attachment={attachment} onOpen={onOpen} />;
+}
+
+/** Image attachment: fetches the bytes via auth'd `apiFetch`, builds
+ *  a blob URL, renders inline capped at 360×240px. Click opens the
+ *  image in a new tab (via the same download helper's blob URL so
+ *  the browser treats it as an inline preview). Browser's native
+ *  right-click menu covers "Save image as…" for free. */
+function ImageAttachmentPreview({
+  attachment,
+  onOpen,
+}: {
+  attachment: FileAttachment;
+  onOpen?: (att: FileAttachment) => void;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    let revoked = false;
+    let obj: string | null = null;
+    (async () => {
+      try {
+        const resp = await apiFetch(attachment.url);
+        if (!resp.ok) {
+          setErr(true);
+          return;
+        }
+        const blob = await resp.blob();
+        if (revoked) return;
+        obj = URL.createObjectURL(blob);
+        setSrc(obj);
+      } catch {
+        setErr(true);
+      }
+    })();
+    return () => {
+      revoked = true;
+      if (obj) URL.revokeObjectURL(obj);
+    };
+  }, [attachment.url]);
+
+  return (
+    <div className="inline-flex flex-col items-start gap-1">
+      {src ? (
+        <img
+          src={src}
+          alt={attachment.filename}
+          className="max-w-[360px] max-h-[240px] object-contain rounded border border-gray-700 cursor-pointer"
+          onClick={() => _downloadAttachment(attachment)}
+          title="Click to download · right-click for more"
+        />
+      ) : err ? (
+        <div className="w-60 h-40 flex items-center justify-center text-xs text-gray-500 bg-gray-900/40 rounded border border-gray-700">
+          Couldn't load image
+        </div>
+      ) : (
+        <div className="w-60 h-40 flex items-center justify-center text-xs text-gray-500 bg-gray-900/40 rounded border border-gray-700">
+          Loading…
+        </div>
+      )}
+      <AttachmentPill attachment={attachment} onOpen={onOpen} />
+    </div>
+  );
+}
+
+/** Text attachment: fetches the bytes, decodes as UTF-8, shows the
+ *  first ~1500 chars / 20 lines in a monospace box with a fade
+ *  gradient on truncation. */
+function TextAttachmentPreview({
+  attachment,
+  onOpen,
+}: {
+  attachment: FileAttachment;
+  onOpen?: (att: FileAttachment) => void;
+}) {
+  const [preview, setPreview] = useState<string | null>(null);
+  const [truncated, setTruncated] = useState(false);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await apiFetch(attachment.url);
+        if (!resp.ok) {
+          setErr(true);
+          return;
+        }
+        const text = await resp.text();
+        if (cancelled) return;
+        const { snippet, wasTruncated } = _truncatePreview(text);
+        setPreview(snippet);
+        setTruncated(wasTruncated);
+      } catch {
+        setErr(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.url]);
+
+  const canOpen =
+    !!onOpen && !!attachment.kind && !!attachment.path;
+  const handleTap = () => {
+    if (canOpen && onOpen) onOpen(attachment);
+    else _downloadAttachment(attachment);
+  };
+
+  return (
+    <div className="inline-flex flex-col items-start gap-1 max-w-[480px]">
+      {preview != null ? (
+        <div className="relative w-full">
+          <pre
+            onClick={handleTap}
+            className="font-mono text-[11px] leading-relaxed text-gray-300 bg-gray-900/60 rounded border border-gray-700 p-3 max-w-[480px] whitespace-pre-wrap break-words cursor-pointer m-0 overflow-hidden"
+          >{preview}</pre>
+          {truncated && (
+            <div
+              className="absolute bottom-0 left-0 right-0 h-6 rounded-b pointer-events-none"
+              style={{
+                background: "linear-gradient(to bottom, rgba(17,24,39,0) 0%, rgba(17,24,39,0.95) 100%)",
+              }}
+            />
+          )}
+        </div>
+      ) : err ? (
+        <div className="w-60 h-16 flex items-center justify-center text-xs text-gray-500 bg-gray-900/40 rounded border border-gray-700">
+          Couldn't load preview
+        </div>
+      ) : (
+        <div className="w-60 h-20 flex items-center justify-center text-xs text-gray-500 bg-gray-900/40 rounded border border-gray-700">
+          Loading…
+        </div>
+      )}
+      <AttachmentPill attachment={attachment} onOpen={onOpen} />
+    </div>
+  );
+}
+
+const _PREVIEW_MAX_CHARS = 1500;
+const _PREVIEW_MAX_LINES = 20;
+
+function _truncatePreview(s: string): { snippet: string; wasTruncated: boolean } {
+  const lines: string[] = [];
+  let chars = 0;
+  let wasTruncated = false;
+  const srcLines = s.split("\n");
+  for (const line of srcLines) {
+    if (lines.length >= _PREVIEW_MAX_LINES) {
+      wasTruncated = true;
+      break;
+    }
+    if (chars + line.length > _PREVIEW_MAX_CHARS) {
+      const remaining = _PREVIEW_MAX_CHARS - chars;
+      if (remaining > 0) lines.push(line.slice(0, remaining));
+      wasTruncated = true;
+      break;
+    }
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  // Also flag truncation when the source had more lines than we read
+  // (e.g. we hit the line cap before the char cap).
+  if (!wasTruncated && srcLines.length > lines.length) wasTruncated = true;
+  return { snippet: lines.join("\n"), wasTruncated };
+}
+
 async function _downloadAttachment(att: FileAttachment) {
   // The download endpoint requires the bearer token, which can't be attached
   // to a plain <a href>. Fetch as Blob and trigger a synthetic click.
@@ -265,9 +475,9 @@ export function ConversationLog({
               </ReactMarkdown>
             )}
             {msg.attachments && msg.attachments.length > 0 && (
-              <div className={`flex flex-col gap-1 ${msg.text_content ? "mt-2" : ""}`}>
+              <div className={`flex flex-col gap-2 ${msg.text_content ? "mt-2" : ""}`}>
                 {msg.attachments.map((att, ai) => (
-                  <AttachmentPill
+                  <AttachmentPreview
                     key={ai}
                     attachment={att}
                     onOpen={onOpenAttachment}

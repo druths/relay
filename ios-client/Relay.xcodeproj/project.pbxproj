@@ -47,6 +47,7 @@
 		5550A6B2CF4052B1F564AE69 /* thinking_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = 3644EB5E1C3E31588DA8D14B /* thinking_1.wav */; };
 		55A6DB951D19BD6889B77075 /* live_start_1.wav in Resources */ = {isa = PBXBuildFile; fileRef = D5AEC3C080AB67D402F85445 /* live_start_1.wav */; };
 		58B4C922AF47D2AF01829870 /* Project.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95916EC95C1B32173720A5D2 /* Project.swift */; };
+		5B5BD14383EB05CE11EC186E /* MediaPickers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42BB4F0099C6BE5F9955F63A /* MediaPickers.swift */; };
 		5F50790D164B3A0797AFC1B3 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C249E903D59B7D654EA775C5 /* AccountStore.swift */; };
 		60324D4F56D4721206FA302D /* StatusIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F065FC446C9EC4F808468D10 /* StatusIndicator.swift */; };
 		604F6C89F33E6C1080964919 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = E99230868B22A5498D4052BB /* Session.swift */; };
@@ -72,6 +73,7 @@
 		A1265EA794B82F430E6CD9B8 /* RelayColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C16E77EE957B8D8F2CB9659 /* RelayColors.swift */; };
 		A4EA4E59387250DED44FA16C /* SilentKeepAlive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 912432D794E9D1FE7165651C /* SilentKeepAlive.swift */; };
 		A80820F384AD84A776B054FE /* FileBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A2AF0162AC0ED1386CFA0C /* FileBrowserView.swift */; };
+		A8C498951229FBF2FA6C70D1 /* AttachmentPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE22B563795B80016241D873 /* AttachmentPreview.swift */; };
 		AC91A1044DB20F944BE1B76C /* PixelIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63EC72F424782C30F8E737D8 /* PixelIcon.swift */; };
 		AEFD9D9C7AE07F18F6BEBEB2 /* ChatMessageField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D179EE498262D338A18559 /* ChatMessageField.swift */; };
 		AF13179EAA0E12FA34792437 /* AudioRecorderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1EE68C63C1E3A212F733304 /* AudioRecorderService.swift */; };
@@ -147,6 +149,7 @@
 		3BEC5064987E5F1370CC3C0B /* CRTOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CRTOverlay.swift; sourceTree = "<group>"; };
 		3C90A06111D3088C0334A02A /* AgentManagementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManagementViewModel.swift; sourceTree = "<group>"; };
 		3DAFE76391BC23000E406FF9 /* ProviderSchemas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSchemas.swift; sourceTree = "<group>"; };
+		42BB4F0099C6BE5F9955F63A /* MediaPickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPickers.swift; sourceTree = "<group>"; };
 		43D1016F3351DFA80C729268 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		4B5FF3D9A36195329B8AAA1D /* Relay.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Relay.entitlements; sourceTree = "<group>"; };
 		4B71D1E2344D1C02A44198F5 /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
@@ -183,6 +186,7 @@
 		A4B91201A57C774C0B32FB7D /* DevicePickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicePickerSheet.swift; sourceTree = "<group>"; };
 		A54D9305405BD042B6817944 /* SessionList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionList.swift; sourceTree = "<group>"; };
 		A807EC3870D8644C1B4DD413 /* LiveActivityIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityIntents.swift; sourceTree = "<group>"; };
+		AE22B563795B80016241D873 /* AttachmentPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentPreview.swift; sourceTree = "<group>"; };
 		B2640FB004F58617990C7498 /* Relay.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Relay.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2A4D843321C18FA4239E7A1 /* PressStart2P-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "PressStart2P-Regular.ttf"; sourceTree = "<group>"; };
 		B6D4C97F298DF8083BE24410 /* RelayActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayActivityAttributes.swift; sourceTree = "<group>"; };
@@ -227,6 +231,7 @@
 				990911AEA0E3DD0DF5C3C264 /* AgentActivityStrip.swift */,
 				C8A2B156D6CB688CB354D3D5 /* AgentManagementView.swift */,
 				E587D02A8BB568FC7933144B /* AgentSelector.swift */,
+				AE22B563795B80016241D873 /* AttachmentPreview.swift */,
 				54D179EE498262D338A18559 /* ChatMessageField.swift */,
 				39259E18CFD57385CB9604D8 /* CompactingChip.swift */,
 				692688A835BFFA0EC6600223 /* ConversationLog.swift */,
@@ -238,6 +243,7 @@
 				0EB4DDCF19266F408F07CFD1 /* InputBar.swift */,
 				61C31B0F4A8A41B8EECB1E7F /* MacInputPickerSheet.swift */,
 				6E3E6922C9E8819987A2C44C /* MarkdownText.swift */,
+				42BB4F0099C6BE5F9955F63A /* MediaPickers.swift */,
 				EACEBD78D17A8220B9722E73 /* MessageBubble.swift */,
 				D26249E8004C02E5E5519D8B /* PixelFace.swift */,
 				50167414A32C6226B7563E20 /* ProjectManagerView.swift */,
@@ -584,6 +590,7 @@
 				029C2B8AB2DA8C802D01577D /* AgentSelector.swift in Sources */,
 				00337DC03CB4A9F80D948D21 /* AppConfig.swift in Sources */,
 				D8870AE87B8F8567AACD3235 /* AppViewModel.swift in Sources */,
+				A8C498951229FBF2FA6C70D1 /* AttachmentPreview.swift in Sources */,
 				283437E21EA7160F42795ECB /* AudioPlayerService.swift in Sources */,
 				AF13179EAA0E12FA34792437 /* AudioRecorderService.swift in Sources */,
 				45E17BA3AD68410A2FC2E05A /* AudioSessionManager.swift in Sources */,
@@ -612,6 +619,7 @@
 				4AFEFC85FC631203F83837BB /* MacAudioDevices.swift in Sources */,
 				AF22F88D61DC899B50BF3E52 /* MacInputPickerSheet.swift in Sources */,
 				92B9D0910332ED2BD5DCA849 /* MarkdownText.swift in Sources */,
+				5B5BD14383EB05CE11EC186E /* MediaPickers.swift in Sources */,
 				2048A53811C9D508B316978D /* Message.swift in Sources */,
 				169573B70C346C140DF559AC /* MessageBubble.swift in Sources */,
 				B3C6794809BCC03E5DD3D358 /* PixelFace.swift in Sources */,

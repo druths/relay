@@ -207,7 +207,7 @@ struct MessageBubble: View {
                 MarkdownText(text: message.textContent)
             }
             ForEach(message.attachments) { att in
-                AttachmentPill(attachment: att, onOpen: onOpenAttachment)
+                AttachmentPreview(attachment: att, onOpen: onOpenAttachment)
             }
             HStack(alignment: .center, spacing: 6) {
                 if message.isStreaming {
@@ -272,7 +272,7 @@ struct MessageBubble: View {
                             }
                         }
                         ForEach(message.attachments) { att in
-                            AttachmentPill(attachment: att, onOpen: onOpenAttachment)
+                            AttachmentPreview(attachment: att, onOpen: onOpenAttachment)
                         }
                     }
 
@@ -357,7 +357,7 @@ private func _isEditorOpenable(_ path: String) -> Bool {
     return !ext.isEmpty && _editorOpenableExts.contains(ext)
 }
 
-private struct AttachmentPill: View {
+struct AttachmentPill: View {
     let attachment: FileAttachment
     var onOpen: ((FileAttachment) -> Void)? = nil
 
@@ -516,12 +516,12 @@ private struct AttachmentPill: View {
     }
 }
 
-private struct FileURLRef: Identifiable {
+struct FileURLRef: Identifiable {
     let url: URL
     var id: String { url.absoluteString }
 }
 
-private struct ShareSheet: UIViewControllerRepresentable {
+struct ShareSheet: UIViewControllerRepresentable {
     let url: URL
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
@@ -531,7 +531,7 @@ private struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
-private struct QuickLookPreview: UIViewControllerRepresentable {
+struct QuickLookPreview: UIViewControllerRepresentable {
     let url: URL
 
     func makeUIViewController(context: Context) -> UINavigationController {
