@@ -204,7 +204,25 @@ struct MessageBubble: View {
                 .padding(.top, 6)
             }
             if !message.textContent.isEmpty {
-                MarkdownText(text: message.textContent)
+                // In-flight stream: render as plain Text, not
+                // MarkdownUI. MarkdownUI re-parses the entire string
+                // via cmark-gfm on every delta — fine for short
+                // replies, O(n²) + stalling for long ones. Partially-
+                // streamed markdown (unclosed code fences, half-
+                // formed tables) looks worse than the raw text
+                // anyway. Swap to MarkdownText once text_done fires.
+                // Mirrors what the web client does.
+                if message.isStreaming {
+                    Text(message.textContent)
+                        .font(theme.bodyFont(size: chatFontSize))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else {
+                    MarkdownText(text: message.textContent)
+                }
             }
             ForEach(message.attachments) { att in
                 AttachmentPreview(attachment: att, onOpen: onOpenAttachment)
@@ -261,6 +279,17 @@ struct MessageBubble: View {
                                 // docs, so losing `**bold**` here is
                                 // a worthy trade for preserving the
                                 // literal newlines they typed.
+                                Text(message.textContent)
+                                    .font(theme.bodyFont(size: chatFontSize))
+                                    .foregroundStyle(theme.textSecondary)
+                                    .multilineTextAlignment(.leading)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else if message.isStreaming {
+                                // Operator messages can stream too;
+                                // same cmark-cost reason as the agent
+                                // branch, same workaround. Swap to
+                                // MarkdownText on text_done.
                                 Text(message.textContent)
                                     .font(theme.bodyFont(size: chatFontSize))
                                     .foregroundStyle(theme.textSecondary)

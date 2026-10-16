@@ -33,6 +33,10 @@ struct ConversationLog: View {
     /// Y-position of the bottom sentinel in the ScrollView's
     /// coordinate space. Updated by the sentinel's preference below.
     @State private var sentinelY: CGFloat = .infinity
+    /// Rate-limiter for streaming scroll-follow. True while a
+    /// coalesced scrollTo is pending so a token-storm doesn't
+    /// enqueue dozens of layout passes in the same frame.
+    @State private var scrollFollowPending = false
 
     /// User is "at the bottom" when the sentinel sits within (or
     /// just below) the visible viewport. 80pt of slack keeps rapid
@@ -168,14 +172,27 @@ struct ConversationLog: View {
             .onChange(of: messages.last?.textContent.count ?? 0) { _, _ in
                 // Streaming delta grew the last bubble. Only follow
                 // if the user hasn't scrolled away — reading history
-                // mid-stream should NOT yank them back. Non-animated
-                // scrollTo so rapid-fire tokens don't produce visible
-                // jitter (stacked easing curves look worse than a
-                // hard follow).
+                // mid-stream should NOT yank them back.
                 guard isAtBottom,
                       let last = messages.last,
                       last.isStreaming else { return }
-                proxy.scrollTo("__bottom__", anchor: .bottom)
+                // Coalesce bursts: on a fast stream (~30 tok/s) every
+                // delta would otherwise schedule a layout pass across
+                // the whole ScrollView, stealing frames from
+                // whatever else the user is doing (editing a file,
+                // scrolling the sidebar). Cap scroll-follow at
+                // ~20Hz by holding a "pending" flag and letting one
+                // scroll per 50ms window actually fire.
+                guard !scrollFollowPending else { return }
+                scrollFollowPending = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(50))
+                    scrollFollowPending = false
+                    // Re-check: user may have scrolled away during
+                    // the pending window.
+                    guard isAtBottom else { return }
+                    proxy.scrollTo("__bottom__", anchor: .bottom)
+                }
             }
         }
     }
