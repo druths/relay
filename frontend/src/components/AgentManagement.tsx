@@ -7,7 +7,7 @@ import {
   type ProviderDefaultsGroup,
 } from "../providerSchemas";
 import { apiFetch } from "../api";
-import { LocalSttSettings } from "../utils/localSttSettings";
+import { LocalSttSettings, getLocalSttProvider, setLocalSttProvider } from "../utils/localSttSettings";
 import { type ThemeName, getStoredTheme, applyTheme } from "../theme";
 
 interface Voice {
@@ -93,8 +93,12 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         const attack = LocalSttSettings.resolveAttackDebounceMs(
           data.stt_attack_debounce_ms,
         );
+        // If this browser has opted into local Whisper, surface it
+        // as the selected provider in the dropdown — otherwise show
+        // whatever the server has configured.
+        const localProvider = getLocalSttProvider();
         setPlatformForm({
-          stt_provider: data.stt_provider,
+          stt_provider: localProvider === "whisper" ? "whisper-web" : data.stt_provider,
           stt_api_key: data.stt_api_key ?? "",
           stt_silence_threshold_db: String(silenceDb),
           stt_silence_timeout_ms: String(silenceMs),
@@ -316,9 +320,20 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     setSavingPlatform(true);
     try {
       const body: Record<string, unknown> = {};
-      if (platformForm.stt_provider) body.stt_provider = platformForm.stt_provider;
+      // On-device Whisper (`whisper-web`) is client-only — never
+      // sent to the server. Instead we flip the per-device
+      // `stt_local_provider` flag; the live-mode flow checks that
+      // flag at segment time to decide local vs cloud routing.
+      const selectedProvider = platformForm.stt_provider ?? "openai";
+      const isLocalWhisper = selectedProvider === "whisper-web";
+      if (isLocalWhisper) {
+        setLocalSttProvider("whisper");
+      } else {
+        setLocalSttProvider(null);
+        if (platformForm.stt_provider) body.stt_provider = platformForm.stt_provider;
+      }
       // Send API key only if changed from the masked original; empty string clears.
-      if (platformForm.stt_api_key !== (platform?.stt_api_key ?? "")) {
+      if (!isLocalWhisper && platformForm.stt_api_key !== (platform?.stt_api_key ?? "")) {
         body.stt_api_key = platformForm.stt_api_key;
       }
       // VAD params are per-device — write to LocalSttSettings, not
@@ -859,9 +874,39 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                 }
                 className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
               >
-                {(schemas?.stt ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
+                {/* Filter out `client_only` providers (e.g. Apple
+                    on-device via SFSpeechRecognizer) — those have no
+                    web equivalent and selecting them would silently
+                    fail. iOS/Catalyst keeps showing them because
+                    they intercept audio locally before it hits the
+                    WS. */}
+                {(schemas?.stt ?? [])
+                  .filter((p) => !p.client_only)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                {/* Web-only on-device option. Lives in this
+                    component rather than the backend-driven schema
+                    because the model + runtime are entirely
+                    client-side (transformers.js + WebGPU). */}
+                <option value="whisper-web">On-device (Whisper Turbo)</option>
+                {/* Stale save from an iOS/Catalyst session: a
+                    `client_only` provider is in the form. Render an
+                    inert "— on-device, iOS only —" option so the
+                    select has a value to display, and the user
+                    sees why they can't actually use it on web. */}
+                {(() => {
+                  const current = platformForm.stt_provider ?? "openai";
+                  const match = (schemas?.stt ?? []).find((p) => p.id === current);
+                  if (match?.client_only) {
+                    return (
+                      <option key={current} value={current} disabled>
+                        {match.label} — iOS/Catalyst only
+                      </option>
+                    );
+                  }
+                  return null;
+                })()}
               </select>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">API Key</label>

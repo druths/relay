@@ -42,6 +42,33 @@ function _writeNumber(key: string, value: number) {
   }
 }
 
+/** Per-device STT provider override. When set to `"whisper"`, the
+ *  web client transcribes mic segments locally via
+ *  `useWhisperLocal` and sends text_input instead of audio_input.
+ *  Mirrors the `stt_local_provider` key iOS uses for Apple
+ *  on-device STT. */
+const _LOCAL_PROVIDER_KEY = "stt_local_provider";
+
+export type LocalSttProvider = "whisper" | null;
+
+export function getLocalSttProvider(): LocalSttProvider {
+  try {
+    const v = localStorage.getItem(_LOCAL_PROVIDER_KEY);
+    return v === "whisper" ? "whisper" : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setLocalSttProvider(v: LocalSttProvider): void {
+  try {
+    if (v === null) localStorage.removeItem(_LOCAL_PROVIDER_KEY);
+    else localStorage.setItem(_LOCAL_PROVIDER_KEY, v);
+  } catch {
+    /* private window — ignore */
+  }
+}
+
 export const LocalSttSettings = {
   getSilenceThresholdDb: (): number | null => _readNumber(KEYS.silenceThresholdDb),
   getSilenceTimeoutMs: (): number | null => _readNumber(KEYS.silenceTimeoutMs),

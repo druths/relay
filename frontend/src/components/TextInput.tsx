@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, type KeyboardEvent } from "react";
+import { useRef, useState, useEffect, type KeyboardEvent, type ReactNode } from "react";
 
 // 11x9 pixel grid for ⏎ return arrow — matches iOS PixelIcons.returnArrow
 const RETURN_GRID = [
@@ -50,10 +50,15 @@ interface TextInputProps {
    *  the next prompt while the current turn winds down. */
   busy?: boolean;
   onStop?: () => void;
+  /** Extra chip(s) to render at the leading edge of the input bar,
+   *  before the attach button. Used for the live-mode mic toggle
+   *  so it inherits the same `items-end` baseline as the paperclip
+   *  instead of hovering outside the bar. */
+  leftActions?: ReactNode;
 }
 
 export function TextInput({
-  onSend, disabled, sessionId, onUpload, busy, onStop,
+  onSend, disabled, sessionId, onUpload, busy, onStop, leftActions,
 }: TextInputProps) {
   const [value, setValue] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -121,6 +126,7 @@ export function TextInput({
 
   return (
     <div className="flex gap-2 p-4 border-t border-gray-800 input-bar items-end">
+      {leftActions}
       {onUpload && (
         <>
           <input

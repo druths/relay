@@ -18,6 +18,7 @@ import { copyToClipboard } from "./utils/clipboard";
 import type { Agent } from "./types";
 import { FileEditorTab } from "./components/FileEditorTab";
 import { UploadProgressStrip } from "./components/UploadProgressStrip";
+import { LiveModeControls } from "./components/LiveModeControls";
 
 function App() {
   const [authed, setAuthed] = useState(isAuthenticated());
@@ -1169,6 +1170,14 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                   onCancel={relay.cancelUpload}
                   onDismiss={relay.dismissUpload}
                 />
+                {relay.isLiveMode && (
+                  <LiveModeControls
+                    onCapture={(data, format) => relay.sendAudio(data, format)}
+                    onLocalText={(text) => relay.sendMessage(text)}
+                    onBargeIn={relay.sendInterrupt}
+                    disabled={!relay.connected}
+                  />
+                )}
                 <TextInput
                   onSend={relay.sendMessage}
                   disabled={
@@ -1181,6 +1190,35 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
                   onStop={busy && sessId
                     ? () => relay.stopSession(sessId)
                     : undefined}
+                  leftActions={
+                    <button
+                      type="button"
+                      aria-label={relay.isLiveMode ? "Turn off live mode" : "Turn on live mode"}
+                      aria-pressed={relay.isLiveMode}
+                      disabled={!relay.connected}
+                      onClick={() =>
+                        relay.isLiveMode ? relay.exitLiveMode() : relay.enterLiveMode()
+                      }
+                      title={relay.isLiveMode ? "Live mode on — click to turn off" : "Turn on live mode"}
+                      className={
+                        "rounded-lg h-9 px-3 transition-colors flex items-center justify-center disabled:opacity-50 " +
+                        (relay.isLiveMode
+                          ? "bg-red-500 text-white hover:bg-red-400"
+                          : "bg-gray-800 text-gray-300 hover:bg-gray-700")
+                      }
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path d="M7 4a3 3 0 016 0v5a3 3 0 11-6 0V4z" />
+                        <path d="M5.5 9.5a.75.75 0 00-1.5 0 6 6 0 005.25 5.954V17h-2a.75.75 0 000 1.5h5.5a.75.75 0 000-1.5h-2v-1.546A6 6 0 0016 9.5a.75.75 0 00-1.5 0 4.5 4.5 0 11-9 0z" />
+                      </svg>
+                    </button>
+                  }
                 />
               </>
             );

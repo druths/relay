@@ -1088,6 +1088,48 @@ export function useRelay() {
     audioPlayerRef.current.setMuted(!audioPlayerRef.current.muted);
   }, []);
 
+  // ── Live mode (web push-to-talk) ────────────────────────────────
+  //
+  // Flips two things on in lockstep: the AudioPlayer (so TTS chunks
+  // actually play) and the backend's per-connection `is_live_mode`
+  // flag (so the agent is routed through voice-mode instructions
+  // and TTS fires). Exiting flips both back off. Mic capture itself
+  // lives in a separate hook (`useLiveMic`) that `LiveModeControls`
+  // owns; this view-model slice just coordinates the player + WS.
+  const [isLiveMode, setIsLiveMode] = useState(false);
+
+  const enterLiveMode = useCallback(() => {
+    audioPlayerRef.current.setMuted(false);
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(
+        JSON.stringify({ type: "set_live_mode", payload: { enabled: true } }),
+      );
+    }
+    setIsLiveMode(true);
+  }, []);
+
+  const exitLiveMode = useCallback(() => {
+    audioPlayerRef.current.setMuted(true);
+    audioPlayerRef.current.stop();
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(
+        JSON.stringify({ type: "set_live_mode", payload: { enabled: false } }),
+      );
+    }
+    setIsLiveMode(false);
+  }, []);
+
+  /// Barge-in: the user started speaking while the agent was still
+  /// talking. Tell the backend to cancel the active agent turn,
+  /// and stop any in-flight TTS playback locally so the user
+  /// doesn't hear the agent's trailing words. Mirrors what iOS
+  /// does when VAD trips mid-playback.
+  const sendInterrupt = useCallback(() => {
+    audioPlayerRef.current.stop();
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    ws.current.send(JSON.stringify({ type: "interrupt" }));
+  }, []);
+
   // ── Upload registry helpers ─────────────────────────────────────
   //
   // Small state-mutation primitives used by both origins (chat and
@@ -1297,6 +1339,10 @@ export function useRelay() {
     stopAudio,
     muted: audioPlayer.muted,
     toggleMute,
+    isLiveMode,
+    enterLiveMode,
+    exitLiveMode,
+    sendInterrupt,
     compactSession,
     setSessionProject,
     stopSession,
