@@ -1,6 +1,4 @@
-#if !targetEnvironment(macCatalyst)
 import ActivityKit
-#endif
 import AVFoundation
 import Foundation
 
@@ -122,9 +120,7 @@ final class RelayViewModel {
     let audio = AudioViewModel()
 
     private var eventTask: Task<Void, Never>?
-    #if !targetEnvironment(macCatalyst)
     private var currentActivity: Activity<RelayActivityAttributes>?
-    #endif
 
     // Pending session — set immediately on sessionEntered so events route correctly
     // before the live-mode audio wait completes and the UI swaps.
@@ -871,12 +867,7 @@ final class RelayViewModel {
     }
 
     // MARK: - Live Activity
-    //
-    // Live Activities are iOS-only (ActivityKit does not ship on Mac
-    // Catalyst). On Catalyst these are no-op stubs so the call sites
-    // elsewhere in this file don't need their own `#if` guards.
 
-    #if !targetEnvironment(macCatalyst)
     private func startLiveActivity() {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("[LiveActivity] Activities not enabled")
@@ -937,11 +928,6 @@ final class RelayViewModel {
 
         currentActivity = nil
     }
-    #else
-    private func startLiveActivity() {}
-    private func updateLiveActivity() {}
-    private func endLiveActivity() {}
-    #endif
 
     // MARK: - Private
 

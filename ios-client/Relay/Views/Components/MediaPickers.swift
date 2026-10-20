@@ -6,9 +6,7 @@ import UIKit
 /// input bar can offer a Camera option. Image-only (no video) for
 /// v1. On image capture, the delegate hands back raw JPEG bytes via
 /// `onCaptured` so the caller can feed `relay.uploadChatAttachment`
-/// without needing to understand UIImage. Catalyst doesn't expose
-/// a camera and should never present this — gate the entry point
-/// with `#if !targetEnvironment(macCatalyst)`.
+/// without needing to understand UIImage.
 struct CameraPicker: UIViewControllerRepresentable {
     /// Fires on capture with (jpegData, filename). The filename is
     /// synthesized from the capture timestamp.

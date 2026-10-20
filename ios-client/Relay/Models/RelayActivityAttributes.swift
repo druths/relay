@@ -1,4 +1,3 @@
-#if !targetEnvironment(macCatalyst)
 import ActivityKit
 import Foundation
 
@@ -9,4 +8,3 @@ struct RelayActivityAttributes: ActivityAttributes {
         var status: String
     }
 }
-#endif

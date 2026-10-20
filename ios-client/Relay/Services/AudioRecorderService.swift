@@ -34,11 +34,7 @@ actor AudioRecorderService {
     private var engine: AVAudioEngine?
     private var audioFile: AVAudioFile?
     private var audioFileURL: URL?
-    /// Mono format for file writes (we only persist channel 0).
     private var tapFormat: AVAudioFormat?
-    /// Native input bus format (may be stereo on Catalyst with
-    /// voice processing). Required by `installTap(format:)`.
-    private var inputBusFormat: AVAudioFormat?
     private var meteringTask: Task<Void, Never>?
     private var interruptionObserver: NSObjectProtocol?
     private var isActive = false
@@ -139,23 +135,6 @@ actor AudioRecorderService {
         try? AVAudioSession.sharedInstance().setPreferredInput(port)
     }
 
-    #if targetEnvironment(macCatalyst)
-    /// Catalyst-only: switch the Mac's input device. Swaps the
-    /// system default via CoreAudio (other apps will follow) and,
-    /// if we're currently listening, tears the engine down and
-    /// restarts it so AVAudioSession picks up the new default on
-    /// reactivation. A nil `device` is a no-op (nothing to pick).
-    func setMacInputDevice(_ device: MacAudioDevices.Device?) async {
-        guard let device else { return }
-        guard MacAudioDevices.setSystemDefaultInput(device) else { return }
-        if isActive {
-            print("[STT][mac] input changed to \(device.name) — restarting engine")
-            await cleanup()
-            await startListening()
-        }
-    }
-    #endif
-
     func setMuted(_ muted: Bool) {
         if muted {
             stopMeteringPoll()
@@ -164,15 +143,7 @@ actor AudioRecorderService {
             Task { await onMeteringUpdate?(-160) }
             print("[STT] mic muted")
         } else {
-            // Mirror the start-engine logic for which format the tap
-            // uses — on iOS the explicit mono format; on Catalyst the
-            // input bus's native (often stereo) format.
-            #if targetEnvironment(macCatalyst)
-            let reinstallFormat = inputBusFormat
-            #else
-            let reinstallFormat = tapFormat
-            #endif
-            if let engine, let fmt = reinstallFormat {
+            if let engine, let fmt = tapFormat {
                 installTap(on: engine, format: fmt)
                 startMeteringPoll()
             }
@@ -218,56 +189,15 @@ actor AudioRecorderService {
 
             let newEngine = AVAudioEngine()
 
-            // Enable voice processing (NS + AEC) — iOS only. On Mac
-            // Catalyst, voice processing wraps `inputNode` in an
-            // AUVoiceProcessor that builds a mic+reference aggregate
-            // whose channel-0 is often the suppressed-mic or AEC
-            // reference signal (near-zero) rather than usable mic
-            // audio, which pushes the metering below the dead-input
-            // threshold and causes a restart storm. On Mac the user
-            // is expected to use headphones; without AEC, speaker →
-            // mic feedback is possible but survivable, and the mic
-            // actually works.
-            //
-            // Either way we need to TOUCH `inputNode` before
-            // `prepare()`: AVAudioEngine lazily attaches it, and a
-            // graph with neither input nor output asserts "inputNode
-            // != nullptr || outputNode != nullptr". On iOS the
-            // `setVoiceProcessingEnabled` call did this for us; on
-            // Catalyst we attach it explicitly.
-            #if !targetEnvironment(macCatalyst)
+            // Enable voice processing (NS + AEC) — must be called before prepare()
             try? newEngine.inputNode.setVoiceProcessingEnabled(true)
-            #else
-            _ = newEngine.inputNode
-            #endif
 
-            // Note: on Mac Catalyst we don't bind the engine's input
-            // Audio Unit to a specific CoreAudio device, because
-            // voice processing wraps `inputNode.audioUnit` in an
-            // AUVoiceProcessor that builds an internal aggregate.
-            // Setting `kAudioOutputUnitProperty_CurrentDevice`
-            // forces that aggregate to use our device for both input
-            // AND output, which fails for any input-only device
-            // (AUVoiceProcessor initialize err=-10875). Device
-            // selection on Catalyst goes through the CoreAudio
-            // system default instead; see MacAudioDevices.
             newEngine.prepare()
             try newEngine.start()
             engine = newEngine
 
-            // The tap format MUST match the input node's native
-            // output format — on Mac Catalyst with voice processing,
-            // that's typically stereo at the hardware sample rate,
-            // and requesting a mono tap throws setFormat error
-            // -10865. We install at the native format and downmix
-            // to channel 0 only when building the write buffer; the
-            // existing tap callback already memcpy's just the first
-            // channel.
-            let inputFormat = newEngine.inputNode.outputFormat(forBus: 0)
-            inputBusFormat = inputFormat
-            let nativeSampleRate = inputFormat.sampleRate
-            // Mono format used for the file-write buffer (we feed
-            // just channel 0 into it) and for the output WAV.
+            // Request mono Float32 tap at the hardware sample rate.
+            let nativeSampleRate = newEngine.inputNode.outputFormat(forBus: 0).sampleRate
             guard let monoFormat = AVAudioFormat(
                 standardFormatWithSampleRate: nativeSampleRate, channels: 1
             ) else { throw NSError(domain: "AudioRecorder", code: -1, userInfo: nil) }
@@ -294,22 +224,8 @@ actor AudioRecorderService {
             )
             audioFileURL = url
 
-            // installTap format: on iOS with voice processing, passing
-            // the node's own `outputFormat` object (rather than our
-            // own-constructed mono format) correlates with repeated
-            // `auou/vpio/appl render err: -1` and no actual audio
-            // reaching the tap. The two look identical by sample
-            // rate + channel count, but carry different internal
-            // flags. Keep the explicit mono format on iOS where the
-            // native input is already mono; only Catalyst needs the
-            // native format (its input bus is often stereo and a
-            // mono tap throws setFormat err -10865).
-            #if targetEnvironment(macCatalyst)
-            installTap(on: newEngine, format: inputFormat)
-            #else
             installTap(on: newEngine, format: monoFormat)
-            #endif
-            print("[STT][lifecycle] engine started, tap installed (sr=\(nativeSampleRate)Hz, inputCh=\(inputFormat.channelCount), writeCh=1)")
+            print("[STT][lifecycle] engine started, tap installed (sr=\(nativeSampleRate)Hz mono)")
 
             await SilentKeepAlive.shared.start()
             startMeteringPoll()
@@ -579,17 +495,8 @@ actor AudioRecorderService {
             print("[STT][health] tick=\(meteringTick) db=\(String(format: "%.1f", currentMeteringLevel))dB speech=\(speechDetected)")
         }
 
-        // Dead-input detection: currentMeteringLevel stuck far below threshold.
-        // iOS-only — this watchdog is sized for Bluetooth HFP
-        // interruption recovery on iPhone. On Mac Catalyst it fires
-        // on ordinary silence (nobody speaking during TTS playback)
-        // and the resulting AudioSession teardown chops TTS audio.
-        #if targetEnvironment(macCatalyst)
-        let runDeadInputWatchdog = false
-        #else
-        let runDeadInputWatchdog = true
-        #endif
-        if runDeadInputWatchdog, !speechDetected, currentMeteringLevel <= deadInputThreshold {
+        // Dead-input detection: currentMeteringLevel stuck far below threshold
+        if !speechDetected, currentMeteringLevel <= deadInputThreshold {
             deadInputTicks += 1
             if deadInputTicks >= deadInputTickLimit {
                 print("[STT][dead-input] stuck at \(String(format: "%.1f", currentMeteringLevel))dB — full reset")

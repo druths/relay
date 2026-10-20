@@ -107,15 +107,7 @@ struct RelayView: View {
     }
 
     private var isRegular: Bool {
-        #if targetEnvironment(macCatalyst)
-        // On Mac the "iPad" layout is always the right one — it's a
-        // desktop window with room for the sidebar. Decoupling from
-        // horizontalSizeClass means the window can shrink freely
-        // without the layout collapsing to the phone single-column.
-        return true
-        #else
-        return horizontalSizeClass == .regular
-        #endif
+        horizontalSizeClass == .regular
     }
 
     var body: some View {

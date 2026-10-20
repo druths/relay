@@ -96,12 +96,6 @@ final class AudioViewModel {
     func setPreferredInput(_ port: AVAudioSessionPortDescription) {
         Task { await recorder.setPreferredInput(port) }
     }
-
-    #if targetEnvironment(macCatalyst)
-    func setMacInputDevice(_ device: MacAudioDevices.Device?) {
-        Task { await recorder.setMacInputDevice(device) }
-    }
-    #endif
 }
 
 // Extension to set properties on the actor
