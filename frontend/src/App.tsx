@@ -1091,11 +1091,13 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
             activeAgentName={relay.activeAgentName}
             diagnostics={diagnostics}
             onOpenAttachment={(att) => {
-              // Resolve the ark scope to a Relay agent so we can hand
-              // openFileTab the shapes it expects: agent_id for the
-              // API path, llm_base_url for the ark server, and
-              // agent_name for fileChanges scope matching.
-              if (att.kind !== "workspace" || !att.scope || !att.path) return;
+              if (!att.kind || !att.scope || !att.path) return;
+              if (att.kind === "project") {
+                openFileTab("project", att.scope, att.path, att.server ?? undefined, att.scope);
+                return;
+              }
+              // Workspace files are addressed by Relay agent_id; scope is
+              // the ark agent name.
               const agent = relay.agents.find((a) => {
                 const arkName = (a.llm_model ?? "").replace(/^ark:/, "");
                 return arkName === att.scope;

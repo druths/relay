@@ -1358,37 +1358,12 @@ final class RelayViewModel {
             }
 
         case .agentFile(let payload):
-            // Agent pushed a workspace file via ark's share_with_client tool.
-            // Render as an agent message with a single attachment whose URL
-            // routes through Relay's ark passthrough.
+            // Same attachment shape the backend sends in session history.
             guard isInSession, payload.sessionId == activeSessionId else { break }
-            let filename = (payload.path.split(separator: "/").last).map(String.init) ?? payload.path
-            let encodedAgent = payload.agentName
-                .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? payload.agentName
-            let encodedPath = payload.path
-                .split(separator: "/")
-                .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
-                .joined(separator: "/")
-            let attachment = FileAttachment(
-                fileId: nil,
-                filename: filename,
-                mimeType: "application/octet-stream",
-                sizeBytes: payload.size ?? 0,
-                url: "/v1/files/ark/\(encodedAgent)/\(encodedPath)",
-                // Workspace reference — lets MessageBubble render this
-                // pill as tap-to-open-in-editor for openable
-                // extensions (history replay populates the same
-                // fields server-side from File.storage_path, so the
-                // affordance is consistent between live and reloaded
-                // views).
-                kind: "workspace",
-                scope: payload.agentName,
-                path: payload.path
-            )
             sessionMessages.append(Message(
                 role: .agent,
                 textContent: payload.description ?? "",
-                attachments: [attachment]
+                attachments: [payload.attachment]
             ))
 
         case .projectFileChanged(let payload):

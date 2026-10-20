@@ -1152,32 +1152,36 @@ struct RelayView: View {
     /// Bails out silently if the attachment lacks a ref or its ark
     /// scope doesn't match any known agent.
     private func openAttachmentInEditor(_ att: FileAttachment) {
-        guard att.kind == "workspace",
-              let arkAgentName = att.scope,
-              let path = att.path,
-              let agent = relay.agents.first(where: { a in
-                  let name = a.llmModel.hasPrefix("ark:")
-                      ? String(a.llmModel.dropFirst("ark:".count))
-                      : a.llmModel
-                  return name == arkAgentName
-              })
-        else { return }
-        let server = agent.llmBaseUrl
+        guard let scope = att.scope, let path = att.path else { return }
+        let kind: APIClient.FsKind
+        let targetId: String
+        let server: String?
+        switch att.kind {
+        case "project":
+            // Project files are addressed by project_id (the scope).
+            kind = .project
+            targetId = scope
+            server = att.server
+        case "workspace":
+            // Workspace files are addressed by Relay agent_id; scope is
+            // the ark agent name.
+            guard let agent = relay.agents.first(where: { a in
+                let name = a.llmModel.hasPrefix("ark:")
+                    ? String(a.llmModel.dropFirst("ark:".count))
+                    : a.llmModel
+                return name == scope
+            }) else { return }
+            kind = .workspace
+            targetId = agent.agentId
+            server = agent.llmBaseUrl
+        default:
+            return
+        }
         if horizontalSizeClass == .regular {
-            openFileTab(
-                kind: .workspace,
-                targetId: agent.agentId,
-                path: path,
-                server: server,
-                scope: arkAgentName,
-            )
+            openFileTab(kind: kind, targetId: targetId, path: path, server: server, scope: scope)
         } else {
             attachmentEditorRequest = AttachmentEditorRequest(
-                kind: .workspace,
-                targetId: agent.agentId,
-                path: path,
-                server: server,
-                scope: arkAgentName,
+                kind: kind, targetId: targetId, path: path, server: server, scope: scope,
             )
         }
     }

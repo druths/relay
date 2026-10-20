@@ -44,6 +44,79 @@ async def get_agent_by_name(db: AsyncSession, name: str) -> Agent | None:
     return result.scalars().first()
 
 
+async def get_ark_agent(db: AsyncSession, ark_name: str) -> Agent | None:
+    """Find a live ark-backed agent by display name, falling back to its
+    ark-side name (`llm_model`, optionally `ark:`-prefixed)."""
+    base = select(Agent).where(Agent.deleted_at.is_(None), Agent.llm_provider == "ark")
+    for clause in (
+        Agent.name.ilike(ark_name),
+        Agent.llm_model.in_([ark_name, f"ark:{ark_name}"]),
+    ):
+        result = await db.execute(base.where(clause).order_by(Agent.agent_id.desc()))
+        agent = result.scalars().first()
+        if agent is not None:
+            return agent
+    return None
+
+
+@dataclass(frozen=True)
+class ArkFileRef:
+    """Decoded agent-shared file location.
+
+    Encoded in `File.storage_path` as `ark:<agent>:<path>` (workspace) or
+    `ark-project:<agent>:<project_id>:<path>` (project root)."""
+    agent_name: str
+    path: str
+    project_id: str | None = None
+
+    @property
+    def storage_path(self) -> str:
+        if self.project_id:
+            return f"ark-project:{self.agent_name}:{self.project_id}:{self.path}"
+        return f"ark:{self.agent_name}:{self.path}"
+
+    @classmethod
+    def parse(cls, storage_path: str) -> "ArkFileRef | None":
+        if storage_path.startswith("ark-project:"):
+            agent, _, rest = storage_path[len("ark-project:"):].partition(":")
+            project_id, _, path = rest.partition(":")
+            return cls(agent, path, project_id) if agent and project_id and path else None
+        if storage_path.startswith("ark:"):
+            agent, _, path = storage_path[len("ark:"):].partition(":")
+            return cls(agent, path) if agent and path else None
+        return None
+
+
+async def ark_server_id(db: AsyncSession, ark_name: str) -> str | None:
+    from app.services.llm.ark import _server_id_for
+    agent = await get_ark_agent(db, ark_name)
+    if agent is None:
+        return None
+    base_url, api_key = await resolve_llm_config(agent)
+    return _server_id_for(base_url, api_key) if base_url else None
+
+
+def file_attachment(f: Any, server: str | None = None) -> dict:
+    """Wire shape for a `files` row, shared by history replay and the live
+    `agent_file` event. Agent-shared ark files also carry the editor ref
+    (`kind`/`scope`/`path`/`server`) clients need for tap-to-open."""
+    from urllib.parse import quote
+    out: dict = {
+        "file_id": str(f.file_id),
+        "filename": f.filename,
+        "mime_type": f.mime_type,
+        "size_bytes": f.size_bytes,
+        "url": f"/v1/files/{f.file_id}/{quote(f.filename)}",
+    }
+    ref = ArkFileRef.parse(f.storage_path) if f.role == "agent" else None
+    if ref is not None:
+        out["kind"] = "project" if ref.project_id else "workspace"
+        out["scope"] = ref.project_id or ref.agent_name
+        out["path"] = ref.path
+        out["server"] = server
+    return out
+
+
 async def get_agent_by_id(db: AsyncSession, agent_id: uuid.UUID) -> Agent | None:
     # `populate_existing()` forces SQLAlchemy to refresh attributes on any
     # object that's already in the identity map. Without it, long-lived
@@ -485,12 +558,18 @@ async def _ark_catch_up_dispatch(event: dict) -> None:
     elif kind == "SharedFile":
         path = data.get("path")
         if path:
+            # Pass `root` + `project_id` through so the persist path
+            # picks the right storage scheme. Legacy rows (ark
+            # without the dual-root support) omit these — they
+            # round-trip as workspace, same as before.
             await _handle_ark_event(
                 event={
                     "type": "file_available",
                     "path": path,
                     "description": data.get("description"),
                     "size": data.get("size") or 0,
+                    "root": data.get("root"),
+                    "project_id": data.get("project_id"),
                 },
                 relay_session_id=relay_sid, user_id=user_id, agent_name=agent_name,
                 is_catch_up=True,
@@ -513,27 +592,25 @@ async def _handle_ark_event(
 
     if etype == "file_available":
         path = event.get("path")
-        size = event.get("size") or 0
         if not path:
             return
-        existing = await _file_already_persisted(relay_session_id, path)
-        if existing is None:
-            file_id = await _persist_agent_shared_file(
-                user_id=user_id, session_id_str=relay_session_id,
-                agent_name=agent_name, path=path, size=size,
-            )
-        else:
-            file_id = existing
-        if not is_catch_up:
+        # ark tags project-root shares with `root: "project"` + `project_id`.
+        project_id = event.get("project_id") if event.get("root") == "project" else None
+        ref = ArkFileRef(agent_name=agent_name, path=path, project_id=project_id)
+        row = await _get_or_persist_shared_file(
+            user_id=user_id, session_id_str=relay_session_id,
+            ref=ref, size=event.get("size") or 0,
+        )
+        if row is not None and not is_catch_up:
+            from app.db.database import async_session
+            async with async_session() as db:
+                server = await ark_server_id(db, agent_name)
             await _broadcast_to_user(user_id, {
                 "type": "agent_file",
                 "payload": {
                     "session_id": relay_session_id,
-                    "agent_name": agent_name,
-                    "path": path,
                     "description": event.get("description"),
-                    "size": size,
-                    "file_id": file_id,
+                    "attachment": file_attachment(row, server),
                 },
             })
         await _maybe_mark_unread(user_id, relay_session_id)
@@ -714,22 +791,6 @@ async def _handle_ark_event(
         return
 
 
-async def _file_already_persisted(session_id_str: str, path: str) -> str | None:
-    """Return the file_id of an existing File row for this session+path, or
-    None. Used to dedupe between WS-driven and catch-up-driven inserts."""
-    from app.db.database import async_session
-    from app.models.file import File as FileModel
-    import uuid as _uuid
-    storage_path_substr = f":{path}"  # ark storage paths are ark:<agent>:<path>
-    async with async_session() as db:
-        result = await db.execute(
-            select(FileModel.file_id).where(
-                FileModel.session_id == _uuid.UUID(session_id_str),
-                FileModel.storage_path.like(f"ark:%{storage_path_substr}"),
-            ).limit(1)
-        )
-        row = result.scalar_one_or_none()
-        return str(row) if row else None
 
 
 async def _message_already_persisted(
@@ -957,34 +1018,42 @@ async def _mirror_session_project(
         logger.exception("Failed to mirror session project change")
 
 
-async def _persist_agent_shared_file(
-    *, user_id: str, session_id_str: str, agent_name: str, path: str, size: int,
-) -> str | None:
-    """Record an agent-pushed file as a `files` row so session history can
-    replay it. Returns the new file_id (string) or None on failure."""
+async def _get_or_persist_shared_file(
+    *, user_id: str, session_id_str: str, ref: ArkFileRef, size: int,
+):
+    """Return the `files` row for this agent share, creating it on first
+    sight. Keyed on the exact storage_path so WS and catch-up deliveries of
+    the same share collapse to one row. Returns None on failure."""
     from app.db.database import async_session
     from app.db.redis import invalidate_session_cache
     from app.models.file import File as FileModel
-    import uuid as _uuid
 
-    filename = path.rsplit("/", 1)[-1] or "file"
-    storage_path = f"ark:{agent_name}:{path}"
+    session_uuid = uuid.UUID(session_id_str)
     try:
         async with async_session() as db:
+            result = await db.execute(
+                select(FileModel).where(
+                    FileModel.session_id == session_uuid,
+                    FileModel.storage_path == ref.storage_path,
+                ).limit(1)
+            )
+            existing = result.scalars().first()
+            if existing is not None:
+                return existing
             db_file = FileModel(
-                file_id=_uuid.uuid4(),
-                session_id=_uuid.UUID(session_id_str),
+                file_id=uuid.uuid4(),
+                session_id=session_uuid,
                 user_id=user_id,
-                filename=filename,
+                filename=ref.path.rsplit("/", 1)[-1] or "file",
                 mime_type="application/octet-stream",
                 size_bytes=int(size or 0),
-                storage_path=storage_path,
+                storage_path=ref.storage_path,
                 role="agent",
             )
             db.add(db_file)
             await db.commit()
-            await invalidate_session_cache(session_id_str)
-            return str(db_file.file_id)
+        await invalidate_session_cache(session_id_str)
+        return db_file
     except Exception:
         logger.exception("Failed to persist agent-shared file")
         return None

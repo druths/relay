@@ -128,6 +128,9 @@ export interface FileAttachment {
   scope?: string;
   /** Path relative to the workspace or project root. */
   path?: string;
+  /** ark server_id hosting the file; required to open project files
+   *  when more than one ark is configured. */
+  server?: string | null;
 }
 
 export interface MessageMetadata {
@@ -361,10 +364,8 @@ export interface WsAgentFile {
   type: "agent_file";
   payload: {
     session_id: string;
-    agent_name: string;
-    path: string;
     description?: string | null;
-    size?: number | null;
+    attachment: FileAttachment;
   };
 }
 

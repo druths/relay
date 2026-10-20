@@ -255,17 +255,13 @@ struct ErrorPayload: Codable {
 
 struct AgentFilePayload: Codable {
     let sessionId: String
-    let agentName: String
-    let path: String
     let description: String?
-    let size: Int?
+    let attachment: FileAttachment
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
-        case agentName = "agent_name"
-        case path
         case description
-        case size
+        case attachment
     }
 }
 

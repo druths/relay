@@ -536,27 +536,8 @@ export function useRelay() {
           break;
 
         case "agent_file": {
-          // The agent shared a workspace file. Render it as an agent message
-          // with a file attachment so it appears inline in the conversation.
-          const path = event.payload.path;
-          const filename = path.split("/").pop() || path;
-          const attachment = {
-            file_id: "",  // we don't have a Relay file_id for agent-pushed files
-            filename,
-            mime_type: "application/octet-stream",
-            size_bytes: event.payload.size ?? 0,
-            // Relay-internal proxy URL: /v1/files supports ark fetch only by
-            // file_id, so we use a direct path-based variant here. The download
-            // route below interprets `agent/path` form.
-            url: `/v1/files/ark/${encodeURIComponent(event.payload.agent_name)}/${path.split("/").map(encodeURIComponent).join("/")}`,
-            // Workspace reference — enables tap-to-open-in-editor for
-            // openable file types. History replay populates these
-            // fields from File.storage_path server-side, so the
-            // behavior is consistent between live and reloaded views.
-            kind: "workspace" as const,
-            scope: event.payload.agent_name,
-            path,
-          };
+          // Same attachment shape the backend sends in session history.
+          const { attachment } = event.payload;
           setState((s) => {
             if (s.activeSessionId !== event.payload.session_id) return s;
             return {

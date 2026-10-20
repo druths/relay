@@ -6,8 +6,7 @@ struct FileAttachment: Identifiable, Equatable, Codable {
     var filename: String
     var mimeType: String
     var sizeBytes: Int
-    /// Either a Relay-internal URL (`/v1/files/<id>/<name>`) or an
-    /// ark-passthrough URL (`/v1/files/ark/<agent>/<workspace-path>`).
+    /// Relay-internal download URL (`/v1/files/<id>/<name>`).
     var url: String
     /// Optional workspace/project reference. When present, the pill
     /// becomes tap-to-open-in-editor for openable extensions and falls
@@ -19,6 +18,9 @@ struct FileAttachment: Identifiable, Equatable, Codable {
     var scope: String? = nil
     /// Path relative to the workspace or project root.
     var path: String? = nil
+    /// ark server_id hosting the file; required to open project files
+    /// when more than one ark is configured.
+    var server: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case fileId = "file_id"
@@ -29,6 +31,7 @@ struct FileAttachment: Identifiable, Equatable, Codable {
         case kind
         case scope
         case path
+        case server
     }
 }
 
@@ -139,37 +142,12 @@ struct Message: Identifiable, Equatable {
 // For decoding session history messages from the server.
 // Attachments may appear on either a real text message or a synthetic
 // upload/agent-share entry whose text_content is empty.
-struct ServerAttachment: Codable {
-    let fileId: String
-    let filename: String
-    let mimeType: String
-    let sizeBytes: Int
-    let url: String
-    /// Optional workspace/project reference — server sets these on
-    /// agent-shared files (File rows whose storage_path is
-    /// `ark:<agent>:<path>`). Absent on user uploads and legacy rows.
-    let kind: String?
-    let scope: String?
-    let path: String?
-
-    enum CodingKeys: String, CodingKey {
-        case fileId = "file_id"
-        case filename
-        case mimeType = "mime_type"
-        case sizeBytes = "size_bytes"
-        case url
-        case kind
-        case scope
-        case path
-    }
-}
-
 struct ServerMessage: Codable {
     let messageId: String?
     let role: String
     let textContent: String
     let createdAt: String?
-    let attachments: [ServerAttachment]?
+    let attachments: [FileAttachment]?
     let metadata: MessageMetadata?
 
     enum CodingKeys: String, CodingKey {
@@ -205,18 +183,6 @@ struct ServerMessage: Codable {
         case "error": messageRole = .error
         default: messageRole = .operator
         }
-        let mapped = (attachments ?? []).map {
-            FileAttachment(
-                fileId: $0.fileId,
-                filename: $0.filename,
-                mimeType: $0.mimeType,
-                sizeBytes: $0.sizeBytes,
-                url: $0.url,
-                kind: $0.kind,
-                scope: $0.scope,
-                path: $0.path,
-            )
-        }
         let parsedDate: Date? = {
             guard let s = createdAt else { return nil }
             return Self._iso.date(from: s) ?? Self._isoNoFrac.date(from: s)
@@ -225,7 +191,7 @@ struct ServerMessage: Codable {
             role: messageRole,
             textContent: textContent,
             createdAt: parsedDate,
-            attachments: mapped,
+            attachments: attachments ?? [],
             metadata: metadata,
         )
     }

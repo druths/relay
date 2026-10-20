@@ -31,6 +31,7 @@ from app.db.redis import get_provider_state
 from app.models.agent import Agent
 from app.models.file import File
 from app.models.session import Session
+from app.services.agent_manager import ArkFileRef, get_ark_agent, resolve_llm_config
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,6 @@ async def upload_file(
     if ark_target is not None:
         agent, ark_sid = ark_target
         name = _ark_agent_name(agent)
-        from app.services.agent_manager import resolve_llm_config
         base_url, api_key = await resolve_llm_config(agent)
         base = (base_url or "").rstrip("/")
         if not base:
@@ -182,43 +182,28 @@ async def upload_file(
     )
 
 
-@router.get("/ark/{agent_name}/{ark_path:path}")
-async def download_ark_file_passthrough(
-    agent_name: str,
-    ark_path: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Stream a workspace file from ark on demand, by agent name + workspace
-    path. Used when an agent pushes a file via `file_available` — there's no
-    Relay-side File row to look up, just the workspace path. Registered before
-    the file-id route so the `ark` prefix is matched literally rather than
-    being parsed as a UUID."""
-    agent_result = await db.execute(
-        select(Agent)
-            .where(Agent.deleted_at.is_(None), Agent.llm_provider == "ark", Agent.name.ilike(agent_name))
-            .order_by(Agent.agent_id.desc())
-    )
-    agent = agent_result.scalars().first()
-    if agent is None:
-        alt_result = await db.execute(
-            select(Agent).where(
-                Agent.deleted_at.is_(None),
-                Agent.llm_provider == "ark",
-                Agent.llm_model.in_([agent_name, f"ark:{agent_name}"]),
-            ).order_by(Agent.agent_id.desc())
-        )
-        agent = alt_result.scalars().first()
+async def _resolve_ark_agent(db: AsyncSession, agent_name: str) -> Agent:
+    agent = await get_ark_agent(db, agent_name)
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Ark agent {agent_name} not found")
+    return agent
 
-    from app.services.agent_manager import resolve_llm_config
+
+async def _stream_from_ark(
+    db: AsyncSession, ref: ArkFileRef, filename: str,
+) -> StreamingResponse:
+    """Stream an ark workspace or project file through to the client."""
+    agent = await _resolve_ark_agent(db, ref.agent_name)
     base_url, api_key = await resolve_llm_config(agent)
     base = (base_url or "").rstrip("/")
     if not base:
         raise HTTPException(status_code=500, detail="Ark agent missing base_url")
-    url = f"{base}/agents/{_ark_agent_name(agent)}/files/{ark_path}"
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    if ref.project_id:
+        url = f"{base}/projects/{ref.project_id}/files/{ref.path}"
+    else:
+        url = f"{base}/agents/{_ark_agent_name(agent)}/files/{ref.path}"
 
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     client = httpx.AsyncClient(timeout=60)
     try:
         req = client.build_request("GET", url, headers=headers)
@@ -232,9 +217,6 @@ async def download_ark_file_passthrough(
         await client.aclose()
         raise HTTPException(status_code=502, detail=f"Ark download failed: {exc}")
 
-    filename = ark_path.split("/")[-1] or "file"
-    media_type = resp.headers.get("content-type", "application/octet-stream")
-
     async def _stream():
         try:
             async for chunk in resp.aiter_bytes():
@@ -245,9 +227,22 @@ async def download_ark_file_passthrough(
 
     return StreamingResponse(
         _stream(),
-        media_type=media_type,
+        media_type=resp.headers.get("content-type", "application/octet-stream"),
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/ark/{agent_name}/{ark_path:path}")
+async def download_ark_file_passthrough(
+    agent_name: str,
+    ark_path: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream an agent workspace file by name + path. Registered before the
+    file-id route so the `ark` prefix is matched literally. Older iOS builds
+    still build these URLs for shared files."""
+    ref = ArkFileRef(agent_name=agent_name, path=ark_path)
+    return await _stream_from_ark(db, ref, ark_path.split("/")[-1] or "file")
 
 
 @router.get("/{file_id}/{filename}")
@@ -262,68 +257,9 @@ async def download_file(
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if db_file.storage_path.startswith(ARK_SCHEME):
-        # ark:<agent>:<workspace-relative-path>
-        rest = db_file.storage_path[len(ARK_SCHEME):]
-        agent_name, _, ark_path = rest.partition(":")
-        if not agent_name or not ark_path:
-            raise HTTPException(status_code=500, detail="Malformed ark storage_path")
-
-        # Look up the agent so we can find the base_url + api_key.
-        agent_result = await db.execute(
-            select(Agent)
-                .where(Agent.deleted_at.is_(None), Agent.llm_provider == "ark", Agent.name.ilike(agent_name))
-                .order_by(Agent.agent_id.desc())
-        )
-        agent = agent_result.scalars().first()
-        # Fallback: match by llm_model (the actual ark name) in case the
-        # display name differs.
-        if agent is None:
-            alt_result = await db.execute(
-                select(Agent).where(
-                    Agent.deleted_at.is_(None),
-                    Agent.llm_provider == "ark",
-                    Agent.llm_model.in_([agent_name, f"ark:{agent_name}"]),
-                ).order_by(Agent.agent_id.desc())
-            )
-            agent = alt_result.scalars().first()
-        if agent is None:
-            raise HTTPException(status_code=404, detail=f"Ark agent {agent_name} not found")
-
-        from app.services.agent_manager import resolve_llm_config
-        base_url, api_key = await resolve_llm_config(agent)
-        base = (base_url or "").rstrip("/")
-        if not base:
-            raise HTTPException(status_code=500, detail="Ark agent missing base_url")
-        url = f"{base}/agents/{_ark_agent_name(agent)}/files/{ark_path}"
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-
-        client = httpx.AsyncClient(timeout=60)
-        try:
-            req = client.build_request("GET", url, headers=headers)
-            resp = await client.send(req, stream=True)
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            await resp.aclose()
-            await client.aclose()
-            raise HTTPException(status_code=exc.response.status_code, detail="Ark download failed")
-        except Exception as exc:
-            await client.aclose()
-            raise HTTPException(status_code=502, detail=f"Ark download failed: {exc}")
-
-        async def _stream():
-            try:
-                async for chunk in resp.aiter_bytes():
-                    yield chunk
-            finally:
-                await resp.aclose()
-                await client.aclose()
-
-        return StreamingResponse(
-            _stream(),
-            media_type=db_file.mime_type,
-            headers={"Content-Disposition": f'attachment; filename="{db_file.filename}"'},
-        )
+    ref = ArkFileRef.parse(db_file.storage_path)
+    if ref is not None:
+        return await _stream_from_ark(db, ref, db_file.filename)
 
     file_path = Path(db_file.storage_path)
     if not file_path.exists():
