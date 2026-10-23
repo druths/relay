@@ -29,9 +29,6 @@ export interface PlatformSettings {
   stt_min_duration_ms?: number;
   stt_attack_debounce_ms?: number;
   stt_no_speech_threshold: number;
-  tts_default_provider: string;
-  tts_openai_api_key: string | null;
-  tts_elevenlabs_api_key: string | null;
 }
 
 export interface Session {

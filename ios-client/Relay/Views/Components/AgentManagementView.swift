@@ -432,23 +432,6 @@ struct AgentManagementView: View {
     private var ttsTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                sectionTitle("DEFAULT PROVIDER")
-                pickerMenuPlatform("tts_default_provider", options: [("none", "None"), ("openai", "OpenAI"), ("elevenlabs", "ElevenLabs")])
-                hintText("The default TTS provider used when creating new agents.")
-
-                separator
-                sectionTitle("OPENAI TTS")
-                sectionLabel("API Key")
-                platformTextField("tts_openai_api_key", placeholder: "sk-... (falls back to env var)", secure: true)
-                hintText("Platform-wide OpenAI API key for text-to-speech.")
-
-                separator
-                sectionTitle("ELEVENLABS")
-                sectionLabel("API Key")
-                platformTextField("tts_elevenlabs_api_key", placeholder: "xi-... (falls back to env var)", secure: true)
-                hintText("Platform-wide ElevenLabs API key for text-to-speech.")
-
-                separator
                 sectionTitle("LIVE VOICE MODE")
                 sectionLabel("Voice Instructions")
                 hintText("Injected into the agent system prompt when live mode is active. Use this to encourage concise, conversational responses without markdown.")

@@ -22,7 +22,7 @@ interface Props {
   onAgentsChanged: () => void;
 }
 
-type Tab = "agents" | "defaults" | "tts" | "stt" | "appearance";
+type Tab = "agents" | "defaults" | "stt" | "appearance";
 
 export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
   const [tab, setTab] = useState<Tab>("agents");
@@ -105,9 +105,6 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
           stt_min_duration_ms: String(minDur),
           stt_attack_debounce_ms: String(attack),
           stt_no_speech_threshold: String(data.stt_no_speech_threshold),
-          tts_default_provider: data.tts_default_provider ?? "none",
-          tts_openai_api_key: "",
-          tts_elevenlabs_api_key: "",
         });
       })
       .catch(console.error);
@@ -374,35 +371,6 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     }
   };
 
-  // ── Save TTS platform settings ──
-  const handleSaveTtsPlatform = async () => {
-    setSavingPlatform(true);
-    try {
-      const body: Record<string, unknown> = {};
-      if (platformForm.tts_default_provider) body.tts_default_provider = platformForm.tts_default_provider;
-      if (platformForm.tts_openai_api_key) body.tts_openai_api_key = platformForm.tts_openai_api_key;
-      if (platformForm.tts_elevenlabs_api_key) body.tts_elevenlabs_api_key = platformForm.tts_elevenlabs_api_key;
-      const res = await apiFetch(`/v1/platform/settings`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const updated: PlatformSettings = await res.json();
-      setPlatform(updated);
-      setPlatformForm((f) => ({
-        ...f,
-        tts_default_provider: updated.tts_default_provider ?? "none",
-        tts_openai_api_key: "",
-        tts_elevenlabs_api_key: "",
-      }));
-    } catch (err) {
-      console.error("TTS platform settings save failed:", err);
-    } finally {
-      setSavingPlatform(false);
-    }
-  };
-
   const llmSchema = findSchema(schemas?.llm, form.llm_provider ?? "openai");
   const ttsSchema = findSchema(schemas?.tts, form.tts_provider ?? "none");
 
@@ -433,16 +401,6 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                 }`}
               >
                 Provider Defaults
-              </button>
-              <button
-                onClick={() => setTab("tts")}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  tab === "tts"
-                    ? "bg-gray-800 text-white"
-                    : "text-gray-400 hover:text-gray-300"
-                }`}
-              >
-                Text to Speech
               </button>
               <button
                 onClick={() => setTab("stt")}
@@ -768,94 +726,6 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         {/* ════════ Provider Defaults Tab ════════ */}
         {tab === "defaults" && (
           <ProviderDefaultsTab currentTheme={currentTheme} />
-        )}
-
-        {/* ════════ Text to Speech Tab ════════ */}
-        {tab === "tts" && (
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-2xl">
-            {/* Default Provider */}
-            <fieldset className="space-y-3">
-              <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                Default Provider
-              </legend>
-              <select
-                value={platformForm.tts_default_provider ?? "none"}
-                onChange={(e) =>
-                  setPlatformForm((f) => ({ ...f, tts_default_provider: e.target.value }))
-                }
-                className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-              >
-                <option value="none">None</option>
-                <option value="openai">OpenAI</option>
-                <option value="elevenlabs">ElevenLabs</option>
-              </select>
-              <p className="text-xs text-gray-600">
-                The default TTS provider used when agents do not specify their own.
-              </p>
-            </fieldset>
-
-            {/* OpenAI TTS */}
-            <fieldset className="space-y-3">
-              <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                OpenAI TTS
-              </legend>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">API Key</label>
-                <input
-                  type="password"
-                  value={platformForm.tts_openai_api_key ?? ""}
-                  onChange={(e) =>
-                    setPlatformForm((f) => ({ ...f, tts_openai_api_key: e.target.value }))
-                  }
-                  placeholder={
-                    platform?.tts_openai_api_key
-                      ? `${platform.tts_openai_api_key} (leave blank to keep)`
-                      : "sk-… (falls back to env var)"
-                  }
-                  className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                />
-              </div>
-              <p className="text-xs text-gray-600">
-                Platform-wide OpenAI API key for text-to-speech. Agents without their own key will fall back to this.
-              </p>
-            </fieldset>
-
-            {/* ElevenLabs */}
-            <fieldset className="space-y-3">
-              <legend className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                ElevenLabs
-              </legend>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">API Key</label>
-                <input
-                  type="password"
-                  value={platformForm.tts_elevenlabs_api_key ?? ""}
-                  onChange={(e) =>
-                    setPlatformForm((f) => ({ ...f, tts_elevenlabs_api_key: e.target.value }))
-                  }
-                  placeholder={
-                    platform?.tts_elevenlabs_api_key
-                      ? `${platform.tts_elevenlabs_api_key} (leave blank to keep)`
-                      : "xi-… (falls back to env var)"
-                  }
-                  className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
-                />
-              </div>
-              <p className="text-xs text-gray-600">
-                Platform-wide ElevenLabs API key for text-to-speech. Agents without their own key will fall back to this.
-              </p>
-            </fieldset>
-
-            <button
-              onClick={handleSaveTtsPlatform}
-              disabled={savingPlatform}
-              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg px-4 py-2
-                         text-sm font-medium transition-colors"
-              style={currentTheme !== "default" ? { backgroundColor: "var(--primary)", color: "var(--bg)" } : undefined}
-            >
-              {savingPlatform ? "Saving…" : "Save Settings"}
-            </button>
-          </div>
         )}
 
         {/* ════════ Speech to Text Tab ════════ */}

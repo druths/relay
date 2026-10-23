@@ -80,9 +80,6 @@ final class AgentManagementViewModel {
                 "stt_min_duration_ms": String(localMinDur),
                 "stt_no_speech_threshold": String(settings.sttNoSpeechThreshold),
                 "stt_attack_debounce_ms": String(localAttack),
-                "tts_default_provider": settings.ttsDefaultProvider,
-                "tts_openai_api_key": "",
-                "tts_elevenlabs_api_key": "",
                 "voice_mode_instructions": settings.voiceModeInstructions,
             ]
             savedPlatformForm = platformForm
@@ -334,15 +331,6 @@ final class AgentManagementViewModel {
         // Server-side STT confidence filter remains shared.
         body["stt_no_speech_threshold"] = .double(Double(platformForm["stt_no_speech_threshold"] ?? "0.5") ?? 0.5)
 
-        if let provider = platformForm["tts_default_provider"] {
-            body["tts_default_provider"] = .string(provider)
-        }
-        if let key = platformForm["tts_openai_api_key"], !key.isEmpty {
-            body["tts_openai_api_key"] = .string(key)
-        }
-        if let key = platformForm["tts_elevenlabs_api_key"], !key.isEmpty {
-            body["tts_elevenlabs_api_key"] = .string(key)
-        }
         if let instructions = platformForm["voice_mode_instructions"] {
             body["voice_mode_instructions"] = .string(instructions)
         }
@@ -354,9 +342,6 @@ final class AgentManagementViewModel {
         // they're saved locally above; don't overwrite with the
         // server's stale copy.
         platformForm["stt_no_speech_threshold"] = String(updated.sttNoSpeechThreshold)
-        platformForm["tts_default_provider"] = updated.ttsDefaultProvider
-        platformForm["tts_openai_api_key"] = ""
-        platformForm["tts_elevenlabs_api_key"] = ""
         platformForm["voice_mode_instructions"] = updated.voiceModeInstructions
         savedPlatformForm = platformForm
     }
