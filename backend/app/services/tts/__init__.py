@@ -53,6 +53,15 @@ PROVIDER_SCHEMAS: list[dict] = [
         ],
     },
     {
+        "id": "deepgram",
+        "label": "Deepgram (Aura)",
+        "fields": [
+            {"key": "tts_api_key", "label": "API Key", "type": "password",
+             "placeholder": "Deepgram key (uses platform key if blank)",
+             "platform_key": "tts_deepgram_api_key"},
+        ],
+    },
+    {
         "id": "neutts",
         "label": "NeuTTS (self-hosted)",
         "fields": [
@@ -106,6 +115,14 @@ def get_tts_provider(provider_name: str, api_key: str | None = None, base_url: s
             return None
         return GoogleTTSProvider(api_key=api_key)
 
+    if provider_name == "deepgram":
+        from app.services.tts.deepgram import DeepgramTTSProvider, _key_for
+
+        if _key_for(api_key) is None:
+            logger.warning("get_tts_provider: Deepgram has no API key")
+            return None
+        return DeepgramTTSProvider(api_key=api_key)
+
     # "none" or unknown provider
     logger.debug("get_tts_provider: unknown provider=%s", provider_name)
     return None
@@ -146,5 +163,10 @@ async def fetch_voices_async(provider_name: str, api_key: str, model_id: str | N
         from app.services.tts.google import GoogleTTSProvider
 
         return await GoogleTTSProvider.fetch_voices(api_key)
+
+    if provider_name == "deepgram":
+        from app.services.tts.deepgram import DeepgramTTSProvider
+
+        return await DeepgramTTSProvider.fetch_voices(api_key)
 
     return []

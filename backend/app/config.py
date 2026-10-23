@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     elevenlabs_api_key: str = ""
     google_tts_api_key: str = ""
+    deepgram_api_key: str = ""
     neutts_url: str = "http://neutts:8000"
     auth_username: str = "admin"
     auth_password: str = "changeme"
