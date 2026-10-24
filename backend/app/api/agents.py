@@ -427,6 +427,10 @@ async def update_agent_config(
     if body.voice_id is not None:
         agent.voice_id = body.voice_id
     if body.tts_provider is not None:
+        # A per-agent key belongs to the provider it was entered for; keeping
+        # it across a switch shadows the new provider's platform key.
+        if body.tts_provider != agent.tts_provider and body.tts_api_key is None:
+            agent.tts_api_key = None
         agent.tts_provider = body.tts_provider
     if body.persona_prompt is not None:
         agent.persona_prompt = body.persona_prompt
