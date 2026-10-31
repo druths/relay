@@ -72,8 +72,7 @@ struct AgentManagementView: View {
             await vm.loadPlatformSettings()
             if let first = sortedAgents.first {
                 vm.selectAgent(first)
-                await vm.fetchTtsModels()
-                await vm.fetchVoices()
+                await vm.reloadTtsOptions()
             }
         }
     }
@@ -206,7 +205,7 @@ struct AgentManagementView: View {
 
     private func agentPill(_ agent: Agent) -> some View {
         let isActive = !vm.isNewAgent && vm.selectedAgentId == agent.agentId
-        return Button(action: { vm.selectAgent(agent); Task { await vm.fetchTtsModels(); await vm.fetchVoices() } }) {
+        return Button(action: { vm.selectAgent(agent); Task { await vm.reloadTtsOptions() } }) {
             HStack(spacing: 6) {
                 StatusIndicator(color: statusColor(agent.status))
                 if agent.isOperator {
@@ -299,7 +298,7 @@ struct AgentManagementView: View {
                 formTextField(field.key, placeholder: field.placeholder, secure: field.fieldType == .password)
                     .onChange(of: vm.form[field.key]) { _, _ in
                         if field.key == "base_url" {
-                            Task { await vm.fetchTtsModels(); await vm.fetchVoices() }
+                            Task { await vm.reloadTtsOptions() }
                         }
                     }
                 platformDefaultHint(for: field)
@@ -319,7 +318,7 @@ struct AgentManagementView: View {
                 }
             } label: {
                 HStack {
-                    Text(vm.voices.first { $0.id == vm.form["voice_id"] }?.name ?? (vm.voices.isEmpty ? "No voices available" : "Select voice..."))
+                    Text(vm.voices.first { $0.id == vm.form["voice_id"] }?.name ?? (vm.isLoadingVoices ? "Loading voices..." : vm.voices.isEmpty ? "No voices available" : "Select voice..."))
                         .font(theme.bodyFont(size: 21))
                         .foregroundStyle(theme.textSecondary)
                         .lineLimit(1)
@@ -629,10 +628,7 @@ struct AgentManagementView: View {
             ForEach(options, id: \.0) { option in
                 Button(option.1) {
                     vm.form[key] = option.0
-                    Task {
-                        await vm.fetchTtsModels()
-                        await vm.fetchVoices()
-                    }
+                    Task { await vm.reloadTtsOptions() }
                 }
             }
         } label: {

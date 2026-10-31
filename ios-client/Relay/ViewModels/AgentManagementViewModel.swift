@@ -25,6 +25,10 @@ final class AgentManagementViewModel {
     var isNewAgent = false
     var form: [String: String] = [:]
     var voices: [Voice] = []
+    var isLoadingVoices = false
+    /// Bumped per voice fetch so a slow, superseded response can't
+    /// overwrite the list for the current provider/agent.
+    private var voicesGeneration = 0
     var ttsModels: [(id: String, name: String)] = []
     var isSaving = false
 
@@ -168,12 +172,26 @@ final class AgentManagementViewModel {
 
     // MARK: - Voices
 
+    /// Reload models and voices after the agent, provider, or key changes.
+    /// The old voice list is cleared synchronously so it can't be picked
+    /// while the new one loads.
+    func reloadTtsOptions() async {
+        voices = []
+        isLoadingVoices = (form["tts_provider"] ?? "none") != "none"
+        await fetchTtsModels()
+        await fetchVoices()
+    }
+
     func fetchVoices() async {
+        voicesGeneration += 1
+        let generation = voicesGeneration
+        voices = []
         let provider = form["tts_provider"] ?? "none"
         guard provider != "none" else {
-            voices = []
+            isLoadingVoices = false
             return
         }
+        isLoadingVoices = true
 
         let apiKey = form["tts_api_key"] ?? ""
         let isRealKey = !apiKey.isEmpty && !apiKey.contains("\u{2022}")
@@ -194,12 +212,10 @@ final class AgentManagementViewModel {
         }
         let qs = params.isEmpty ? "" : "?\(params.joined(separator: "&"))"
 
-        do {
-            let fetched: [Voice] = try await apiClient.request("GET", path: "/v1/agents/tts/voices/\(provider)\(qs)")
-            voices = fetched
-        } catch {
-            voices = []
-        }
+        let fetched: [Voice] = (try? await apiClient.request("GET", path: "/v1/agents/tts/voices/\(provider)\(qs)")) ?? []
+        guard generation == voicesGeneration else { return }
+        voices = fetched
+        isLoadingVoices = false
     }
 
     // MARK: - Save Agent

@@ -64,6 +64,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [voices, setVoices] = useState<Voice[]>([]);
+  const [voicesLoading, setVoicesLoading] = useState(false);
 
   // ── Platform settings state ──
   const [platform, setPlatform] = useState<PlatformSettings | null>(null);
@@ -180,10 +181,15 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
 
   // Fetch voices when TTS provider, API key, or model changes
   useEffect(() => {
+    // Drop the previous provider/agent's list right away so it can't be
+    // picked while the new one loads.
+    setVoices([]);
     if (ttsProvider === "none") {
-      setVoices([]);
+      setVoicesLoading(false);
       return;
     }
+    setVoicesLoading(true);
+    let cancelled = false;
     // Pass the agent's per-agent key if it's a real key (not masked "••••…")
     const isRealKey = ttsFormKey && !ttsFormKey.includes("\u2022");
     const params = new URLSearchParams();
@@ -200,10 +206,14 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
     const timer = setTimeout(() => {
       apiFetch(`/v1/agents/tts/voices/${ttsProvider}${qs}`)
         .then((r) => r.json())
-        .then((data: Voice[]) => setVoices(data))
-        .catch(() => setVoices([]));
+        .then((data: Voice[]) => { if (!cancelled) setVoices(data); })
+        .catch(() => { if (!cancelled) setVoices([]); })
+        .finally(() => { if (!cancelled) setVoicesLoading(false); });
     }, 300);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [ttsProvider, ttsFormKey, ttsModelId, selectedId, isNew]);
 
   const setField = (key: string, value: string) =>
@@ -596,7 +606,9 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                         voices.length === 0 ? "opacity-50 cursor-not-allowed" : ""
                       }`}
                     >
-                      {voices.length === 0 ? (
+                      {voicesLoading ? (
+                        <option value="">Loading voices…</option>
+                      ) : voices.length === 0 ? (
                         <option value="">No voices available — check API key</option>
                       ) : (
                         <>
