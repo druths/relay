@@ -331,7 +331,7 @@ async def get_tts_voices(
                 resp = await client.get(url)
                 resp.raise_for_status()
                 data = resp.json()
-                # Kokoro returns {"voices": ["name1", "name2", ...]}
+                # Some servers return {"voices": ["name1", "name2", ...]}
                 voice_list = data.get("voices", data) if isinstance(data, dict) else data
                 if isinstance(voice_list, list) and voice_list and isinstance(voice_list[0], str):
                     return [{"id": v, "name": v, "description": ""} for v in voice_list]

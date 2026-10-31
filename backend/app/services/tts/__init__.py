@@ -30,7 +30,7 @@ PROVIDER_SCHEMAS: list[dict] = [
              "placeholder": "sk-… (blank for local TTS)",
              "platform_key": "tts_openai_api_key"},
             {"key": "base_url", "label": "Base URL", "type": "text",
-             "placeholder": "Blank for OpenAI, or http://kokoro:8880 for local",
+             "placeholder": "Blank for OpenAI, or an OpenAI-compatible server URL",
              "platform_key": "tts_openai_base_url"},
         ],
     },
@@ -61,15 +61,6 @@ PROVIDER_SCHEMAS: list[dict] = [
              "platform_key": "tts_deepgram_api_key"},
         ],
     },
-    {
-        "id": "neutts",
-        "label": "NeuTTS (self-hosted)",
-        "fields": [
-            {"key": "base_url", "label": "Server URL", "type": "text",
-             "placeholder": "Blank to use default neutts:8000",
-             "platform_key": "tts_neutts_base_url"},
-        ],
-    },
 ]
 
 
@@ -86,7 +77,7 @@ def get_tts_provider(provider_name: str, api_key: str | None = None, base_url: s
     if provider_name == "openai":
         from app.services.tts.openai import OpenAITTSProvider, _get_client
 
-        # Local TTS (e.g., Kokoro) doesn't need an API key
+        # A self-hosted OpenAI-compatible server may not need an API key
         if not base_url and _get_client(api_key) is None:
             logger.warning("get_tts_provider: OpenAI client is None (no key)")
             return None
@@ -101,11 +92,6 @@ def get_tts_provider(provider_name: str, api_key: str | None = None, base_url: s
             return None
         logger.info("get_tts_provider: ElevenLabs client ready")
         return ElevenLabsTTSProvider(api_key=api_key)
-
-    if provider_name == "neutts":
-        from app.services.tts.neutts import NeuTTSProvider
-
-        return NeuTTSProvider(base_url=base_url)
 
     if provider_name == "google":
         from app.services.tts.google import GoogleTTSProvider, _get_client as _get_google_client
@@ -150,14 +136,6 @@ async def fetch_voices_async(provider_name: str, api_key: str, model_id: str | N
         from app.services.tts.elevenlabs import ElevenLabsTTSProvider
 
         return await ElevenLabsTTSProvider.fetch_voices(api_key, model_id=model_id)
-
-    if provider_name == "neutts":
-        from app.services.tts.neutts import NeuTTSProvider
-
-        # `api_key` slot is unused for NeuTTS; the optional override URL is
-        # carried via the agent's voice_settings.base_url which we don't have
-        # access to here. Server URL falls back to settings/env.
-        return await NeuTTSProvider.fetch_voices()
 
     if provider_name == "google":
         from app.services.tts.google import GoogleTTSProvider

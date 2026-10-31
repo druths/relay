@@ -44,7 +44,7 @@ class OpenAITTSProvider(TTSProvider):
         ]
 
     async def synthesize(self, text: str, voice_id: str, voice_settings: dict) -> bytes:
-        # Use custom base_url if set (e.g., Kokoro local TTS)
+        # Custom base_url points at a self-hosted OpenAI-compatible server
         base_url = self._base_url or voice_settings.get("base_url")
         if base_url:
             from openai import AsyncOpenAI

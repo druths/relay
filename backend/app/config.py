@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = ""
     google_tts_api_key: str = ""
     deepgram_api_key: str = ""
-    neutts_url: str = "http://neutts:8000"
     auth_username: str = "admin"
     auth_password: str = "changeme"
     auth_jwt_secret: str = "relay-dev-secret-change-in-production"
