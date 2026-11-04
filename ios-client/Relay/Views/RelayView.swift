@@ -625,8 +625,11 @@ struct RelayView: View {
                         .padding(.horizontal, 16)
                     }
 
-                    // Sessions section
-                    if !relay.sessions.isEmpty {
+                    // Sessions section. A search or filter re-fetches
+                    // `relay.sessions`, so keep the section (and its
+                    // search field) up while one is active even when it
+                    // matches nothing.
+                    if !relay.sessions.isEmpty || sidebarFiltering {
                         sidebarSessionsSection
                     }
                 }
@@ -770,6 +773,14 @@ struct RelayView: View {
             .map { SessionFilterMenu.Option(value: $0, label: $0) }
     }
 
+    private var sidebarFiltering: Bool {
+        !sidebarSearchQuery.isEmpty || sidebarLabelFilter != nil || sidebarProjectFilter != nil
+    }
+
+    private var menuFiltering: Bool {
+        !menuSearchQuery.isEmpty || menuLabelFilter != nil || menuProjectFilter != nil
+    }
+
     private var sidebarSessionsSection: some View {
         let filtered = relay.sessions.filter { session in
             if let filter = sidebarLabelFilter, !session.labels.contains(filter) { return false }
@@ -836,6 +847,14 @@ struct RelayView: View {
             .padding(.horizontal, 16)
 
             VStack(spacing: 2) {
+                if filtered.isEmpty {
+                    Text("No matching sessions")
+                        .font(theme.bodyFont(size: 13))
+                        .foregroundStyle(theme.textQuaternary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 ForEach(filtered.prefix(15)) { session in
                     let isActive = relay.activeSessionId == session.sessionId
                     Button {
@@ -1409,7 +1428,7 @@ struct RelayView: View {
                     }
                 }
 
-                if !relay.sessions.isEmpty {
+                if !relay.sessions.isEmpty || menuFiltering {
                     // Session filters (Project + Label) — same
                     // dropdowns as the iPad sidebar. Row hides when
                     // neither facet has values.
@@ -1494,6 +1513,13 @@ struct RelayView: View {
                             }
                         }
                     ) {
+                        // A List hides an empty section's header, which
+                        // holds the search field — always give it a row.
+                        if filteredSessions.isEmpty {
+                            Text("No matching sessions")
+                                .font(theme.bodyFont(size: 14))
+                                .foregroundStyle(theme.textQuaternary)
+                        }
                         ForEach(filteredSessions.prefix(10)) { session in
                             Button(action: {
                                 showMenu = false
