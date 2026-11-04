@@ -790,6 +790,9 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                   return null;
                 })()}
               </select>
+              {/* On-device Whisper never calls a server provider, so it
+                  has no key to set. */}
+              {platformForm.stt_provider !== "whisper-web" && (
               <div>
                 <label className="block text-xs text-gray-500 mb-1">API Key</label>
                 <input
@@ -806,6 +809,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                   className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
                 />
               </div>
+              )}
             </fieldset>
 
             {/* Recognition Tuning — per-device, see
