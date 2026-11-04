@@ -111,6 +111,8 @@ final class AgentManagementViewModel {
             "model_id": agent.voiceSettings["model_id"]?.stringValue ?? "eleven_multilingual_v2",
             "stability": agent.voiceSettings["stability"]?.stringValue ?? "0.5",
             "similarity_boost": agent.voiceSettings["similarity_boost"]?.stringValue ?? "0.75",
+            // Normalised to an integer string: JSON may decode it as a double.
+            "expressivity": String(Int(Double(agent.voiceSettings["expressivity"]?.stringValue ?? "0") ?? 0)),
         ]
         savedForm = form
     }
@@ -134,6 +136,7 @@ final class AgentManagementViewModel {
             "model_id": "eleven_multilingual_v2",
             "stability": "0.5",
             "similarity_boost": "0.75",
+            "expressivity": "0",
         ]
         savedForm = form
     }
@@ -382,6 +385,8 @@ final class AgentManagementViewModel {
                 "similarity_boost": .double(Double(form["similarity_boost"] ?? "0.75") ?? 0.75),
                 "model_id": .string(form["model_id"] ?? "eleven_multilingual_v2"),
             ]
+        case "deepgram" where (form["voice_id"] ?? "").hasPrefix("flux-"):
+            return ["expressivity": .int(Int(form["expressivity"] ?? "0") ?? 0)]
         default:
             return [:]
         }

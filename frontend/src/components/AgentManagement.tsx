@@ -129,6 +129,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         model_id: "eleven_multilingual_v2",
         stability: "0.5",
         similarity_boost: "0.75",
+        expressivity: "0",
       });
     } else if (selected) {
       setForm({
@@ -147,6 +148,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         model_id: String(selected.voice_settings?.model_id ?? "eleven_multilingual_v2"),
         stability: String(selected.voice_settings?.stability ?? 0.5),
         similarity_boost: String(selected.voice_settings?.similarity_boost ?? 0.75),
+        expressivity: String(selected.voice_settings?.expressivity ?? 0),
       });
     }
     setConfirmDelete(false);
@@ -236,6 +238,9 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
             similarity_boost: parseFloat(form.similarity_boost || "0.75"),
             model_id: form.model_id || "eleven_multilingual_v2",
           };
+        }
+        if (provider === "deepgram" && (form.voice_id ?? "").startsWith("flux-")) {
+          return { expressivity: parseInt(form.expressivity || "0", 10) };
         }
         return {};
       };
@@ -641,6 +646,24 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                       />
                     </div>
                   </>
+                )}
+                {/* Expressivity is a Flux-only (beta) control; Aura
+                    voices ignore it, so it only shows for a Flux voice. */}
+                {ttsProvider === "deepgram" && (form.voice_id ?? "").startsWith("flux-") && (
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Expressivity</label>
+                    <select
+                      value={form.expressivity ?? "0"}
+                      onChange={(e) => setField("expressivity", e.target.value)}
+                      className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+                    >
+                      <option value="-2">−2 · Calm</option>
+                      <option value="-1">−1</option>
+                      <option value="0">0 · Voice default</option>
+                      <option value="1">+1</option>
+                      <option value="2">+2 · Animated</option>
+                    </select>
+                  </div>
                 )}
                 {ttsProvider === "elevenlabs" && (
                   <>

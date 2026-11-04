@@ -130,7 +130,7 @@ final class RelayViewModel {
     // Agent audio that arrives while waiting for operator audio to finish.
     // Flushed to the player only after the UI has swapped to the session view.
     private var pendingAudioHasStart = false
-    private var pendingAudioChunks: [(data: String, sequence: Int)] = []
+    private var pendingAudioChunks: [AudioChunkPayload] = []
     private var pendingAudioHasDone = false
 
     // Suppress the operator greeting sent on every fresh WebSocket connection.
@@ -1070,7 +1070,7 @@ final class RelayViewModel {
                         pendingAudioHasStart = false
                     }
                     for chunk in pendingAudioChunks {
-                        await audio.player.enqueue(data: chunk.data, sequence: chunk.sequence)
+                        await audio.player.enqueue(chunk)
                     }
                     pendingAudioChunks = []
                     if pendingAudioHasDone {
@@ -1298,11 +1298,11 @@ final class RelayViewModel {
             audioGapTask?.cancel()
             audioGapTask = nil
             if pendingSessionId != nil {
-                pendingAudioChunks.append((data: payload.data, sequence: payload.sequence))
+                pendingAudioChunks.append(payload)
                 break
             }
             print("[TTS][relay] audio_chunk seq=\(payload.sequence) (\(payload.data.count) b64 chars)")
-            Task { await audio.player.enqueue(data: payload.data, sequence: payload.sequence) }
+            Task { await audio.player.enqueue(payload) }
             syncThinkingTone()
             // Gap timer: if no chunk arrives within 300 ms, the player will
             // have drained and sync will restore the thinking tone (only if

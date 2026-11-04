@@ -106,6 +106,9 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
     active_session_id: uuid.UUID | None = None
     lobby_history: list[dict] = []  # In-memory conversation history for the LLM Operator
     is_live_mode = False
+    # Client can play raw PCM (`audio_chunk` format "pcm16"), so streaming
+    # TTS providers may be used. Declared with set_live_mode.
+    pcm_stream_ok = False
     # Signal to detach in-flight task (let it finish in background)
     detach_event = asyncio.Event()
     voice_mode_instructions: str | None = None
@@ -185,6 +188,7 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                                 voice_mode_instructions if is_live_mode else None,
                                 detach_event=detach_event,
                                 is_live_mode=is_live_mode,
+                                stream_audio=pcm_stream_ok,
                                 timezone=tz)
                         )
 
@@ -217,6 +221,7 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
 
                     elif msg_type == "set_live_mode":
                         is_live_mode = data["payload"].get("enabled", False)
+                        pcm_stream_ok = is_live_mode and bool(data["payload"].get("pcm_stream"))
                         if is_live_mode:
                             raw = await _get_setting(db, "voice_mode_instructions")
                             voice_mode_instructions = raw or None
@@ -236,6 +241,7 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                                 voice_mode_instructions if is_live_mode else None,
                                 detach_event=detach_event,
                                 is_live_mode=is_live_mode,
+                                stream_audio=pcm_stream_ok,
                                 timezone=tz)
                         )
 
@@ -512,8 +518,12 @@ async def _handle_text(
     detach_event: asyncio.Event | None = None,
     is_live_mode: bool = False,
     timezone: str | None = None,
+    stream_audio: bool = False,
 ) -> uuid.UUID | None:
-    """Process user text (from typing or STT). Returns updated active_session_id."""
+    """Process user text (from typing or STT). Returns updated active_session_id.
+
+    `stream_audio`: the client plays raw PCM, so a provider with a streaming
+    connection speaks the whole reply over it instead of per sentence."""
     # Processing indicator
     await websocket.send_json({
         "type": "state_update",
@@ -554,6 +564,30 @@ async def _handle_text(
     tts_buffer = ""
     tts_seq = 0
     tts_tasks: list[asyncio.Task] = []
+    # Set while a reply is being spoken over a streaming connection:
+    # sentences go here and `_stream_tts_turn` sends them on.
+    tts_queue: asyncio.Queue | None = None
+    # Speaker whose speech is still being synthesized/streamed after its
+    # text_done. The reply loop doesn't wait for it — the message must be
+    # persisted (it comes after text_done) even if the user barges in while
+    # it's being spoken — so its audio_done is sent by `finish_speech`.
+    speech_speaker: str | None = None
+
+    async def finish_speech() -> None:
+        """Wait out the previous message's speech and close it with
+        audio_done, before another message's audio starts or the turn ends."""
+        nonlocal tts_tasks, speech_speaker
+        if speech_speaker is None:
+            return
+        if tts_tasks:
+            await asyncio.gather(*tts_tasks, return_exceptions=True)
+        tts_tasks = []
+        async with ws_lock:
+            await websocket.send_json({
+                "type": "audio_done",
+                "payload": {"speaker": speech_speaker},
+            })
+        speech_speaker = None
 
     detached = False
     detached_session_id = active_session_id
@@ -568,6 +602,7 @@ async def _handle_text(
                     t.cancel()
                 tts_tasks = []
                 tts_provider = None
+                speech_speaker = None
                 logger.info("[WS] detached — finishing stream in background for session %s", detached_session_id)
 
             etype = event["type"]
@@ -594,6 +629,7 @@ async def _handle_text(
                     lobby_history.append({"role": "assistant", "content": event["payload"]["text"]})
                 await websocket.send_json(event)
                 if is_live_mode:
+                    await finish_speech()
                     await _tts_for_text(websocket, db, event["payload"]["text"], speaker)
             else:
                 await websocket.send_json(event)
@@ -603,6 +639,7 @@ async def _handle_text(
             # live mode. In text mode nobody listens to the bytes, and
             # every synth call blocks the WS thread for ~500ms+ per call.
             if etype == "text_start" and is_live_mode:
+                await finish_speech()
                 session = await get_session(db, active_session_id) if active_session_id else None
                 if session:
                     tts_agent = await agent_manager.get_agent_by_id(db, session.agent_id)
@@ -619,16 +656,25 @@ async def _handle_text(
                     tts_seq = 0
                     tts_tasks = []
                     tts_semaphore = asyncio.Semaphore(2)
+                    tts_queue = None
                     async with ws_lock:
                         await websocket.send_json({
                             "type": "audio_start",
                             "payload": {"speaker": event["payload"]["speaker"]},
                         })
+                    if stream_audio:
+                        tts_queue = asyncio.Queue()
+                        tts_tasks.append(asyncio.create_task(
+                            _stream_tts_turn(websocket, ws_lock, tts_provider, tts_agent, tts_queue)
+                        ))
 
             elif etype == "text_delta" and tts_provider and tts_agent:
                 tts_buffer += event["payload"]["delta"]
                 sentences, tts_buffer = _extract_sentences(tts_buffer)
                 for sentence in sentences:
+                    if tts_queue is not None:
+                        tts_queue.put_nowait(sentence)
+                        continue
                     seq = tts_seq
                     tts_seq += 1
                     task = asyncio.create_task(
@@ -637,22 +683,24 @@ async def _handle_text(
                     tts_tasks.append(task)
 
             elif etype == "text_done" and tts_provider and tts_agent:
-                if tts_buffer.strip():
+                if tts_queue is not None:
+                    if tts_buffer.strip():
+                        tts_queue.put_nowait(tts_buffer)
+                    tts_queue.put_nowait(None)
+                    tts_queue = None
+                elif tts_buffer.strip():
                     seq = tts_seq
                     tts_seq += 1
                     task = asyncio.create_task(
                         _synth_and_send(websocket, ws_lock, tts_provider, tts_agent, tts_buffer, seq, tts_semaphore)
                     )
                     tts_tasks.append(task)
-                if tts_tasks:
-                    await asyncio.gather(*tts_tasks)
-                async with ws_lock:
-                    await websocket.send_json({
-                        "type": "audio_done",
-                        "payload": {"speaker": event["payload"]["speaker"]},
-                    })
+                speech_speaker = event["payload"]["speaker"]
                 tts_provider = None
                 tts_agent = None
+
+        if not detached:
+            await finish_speech()
 
     except asyncio.CancelledError:
         # Cancelled mid-turn — clean up in-flight TTS tasks silently
@@ -711,12 +759,17 @@ def _extract_sentences(buffer: str) -> tuple[list[str], str]:
     return chunks, parts[-1]
 
 
-def _clean_for_tts(text: str) -> str:
+def _clean_for_tts(text: str, *, keep_end_punct: bool = False) -> str:
     """Strip markdown and formatting artifacts before TTS synthesis.
 
     List item prefixes are stripped; newlines remain so streaming chunks
     (already split per-line by _extract_sentences) sound natural, and
     _tts_for_text benefits from provider-level newline pauses.
+
+    `keep_end_punct`: for streaming providers, which find sentence
+    boundaries (and when to start speaking) from the punctuation. A chunk
+    without any — a list item, a heading — gets a period so it doesn't run
+    into the next one.
     """
     text = _TTS_FENCED_CODE_RE.sub('', text)
     text = _TTS_HEADING_RE.sub('', text)
@@ -728,8 +781,100 @@ def _clean_for_tts(text: str) -> str:
     text = _TTS_ELLIPSIS_RE.sub(',', text)
     text = _TTS_EMOJI_RE.sub('', text)
     text = re.sub(r' {2,}', ' ', text)
+    if keep_end_punct:
+        text = text.strip()
+        return text + "." if text and text[-1] not in ".!?:;," else text
     text = _TTS_TRAILING_PUNCT_RE.sub('', text)
     return text.strip()
+
+
+async def _stream_tts_turn(
+    websocket: WebSocket,
+    lock: asyncio.Lock,
+    provider,
+    agent,
+    queue: asyncio.Queue,
+) -> None:
+    """Speak one reply over the provider's streaming connection.
+
+    Sentences arrive on `queue` (None ends the reply) and are sent as they
+    come; PCM is forwarded as `pcm16` audio_chunks as soon as it's
+    generated. Providers without streaming, or a stream that won't open,
+    fall back to per-sentence MP3 so the reply is still spoken. Never
+    raises: a TTS failure must not fail the turn.
+    """
+    seq = 0
+
+    async def send_chunk(data: bytes, fmt: str, sample_rate: int | None = None) -> None:
+        nonlocal seq
+        payload = {
+            "speaker": agent.name,
+            "data": base64.b64encode(data).decode(),
+            "format": fmt,
+            "sequence": seq,
+        }
+        if sample_rate:
+            payload["sample_rate"] = sample_rate
+        seq += 1
+        async with lock:
+            await websocket.send_json({"type": "audio_chunk", "payload": payload})
+
+    try:
+        stream = await provider.open_stream(agent.voice_id, agent.voice_settings)
+    except Exception as exc:
+        logger.warning("TTS stream failed to open, falling back to per-sentence: %r", exc)
+        stream = None
+
+    try:
+        if stream is None:
+            while (text := await queue.get()) is not None:
+                clean = _clean_for_tts(text)
+                if not clean:
+                    continue
+                try:
+                    audio = await provider.synthesize(clean, agent.voice_id, agent.voice_settings)
+                except Exception as exc:
+                    logger.warning("TTS synthesis failed (%d chars): %r", len(clean), exc)
+                    continue
+                await send_chunk(audio, "mp3")
+            return
+
+        async def forward_audio() -> None:
+            # Frames can split a 16-bit sample; carry the odd byte over so
+            # every chunk the client gets is whole samples.
+            carry = b""
+            async for pcm in stream.audio():
+                pcm = carry + pcm
+                carry = pcm[-1:] if len(pcm) % 2 else b""
+                if carry:
+                    pcm = pcm[:-1]
+                if pcm:
+                    await send_chunk(pcm, "pcm16", stream.sample_rate)
+
+        reader = asyncio.create_task(forward_audio())
+        try:
+            sent_any = False
+            while (text := await queue.get()) is not None:
+                if reader.done():
+                    break  # stream died; surfaced below
+                clean = _clean_for_tts(text, keep_end_punct=True)
+                if clean:
+                    await stream.send(clean + " ")
+                    sent_any = True
+            if sent_any and not reader.done():
+                await stream.finish()
+            if sent_any:
+                await reader
+        finally:
+            reader.cancel()
+            try:
+                await stream.aclose()
+            except Exception:
+                pass
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("TTS stream failed mid-reply after %d chunks: %r", seq, exc)
 
 
 async def _synth_and_send(

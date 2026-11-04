@@ -3,6 +3,21 @@ import { useCallback, useRef, useState } from "react";
 interface QueueItem {
   seq: number;
   data: string;
+  format: string;
+  sampleRate?: number;
+}
+
+/// Lead time when a PCM stream (re)starts from an empty schedule. Streamed
+/// chunks are small and arrive just ahead of playback, so a little slack
+/// absorbs network jitter instead of clicking on every late chunk.
+const PCM_JITTER_S = 0.08;
+
+function _pcm16ToBuffer(ctx: AudioContext, bytes: Uint8Array, sampleRate: number): AudioBuffer {
+  const samples = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 1);
+  const buffer = ctx.createBuffer(1, samples.length, sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 0x8000;
+  return buffer;
 }
 
 export function useAudioPlayer() {
@@ -45,14 +60,20 @@ export function useAudioPlayer() {
           bytes[i] = binary.charCodeAt(i);
         }
 
-        // Decode MP3 → AudioBuffer
-        const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+        const isPcm = item.format === "pcm16";
+        const audioBuffer = isPcm
+          ? _pcm16ToBuffer(ctx, bytes, item.sampleRate ?? 24000)
+          : await ctx.decodeAudioData(bytes.buffer.slice(0));
 
         // Schedule for gapless playback
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(ctx.destination);
-        const startTime = Math.max(ctx.currentTime, nextTimeRef.current);
+        const underrun = nextTimeRef.current < ctx.currentTime;
+        const startTime = Math.max(
+          ctx.currentTime + (isPcm && underrun ? PCM_JITTER_S : 0),
+          nextTimeRef.current,
+        );
         source.start(startTime);
         nextTimeRef.current = startTime + audioBuffer.duration;
       }
@@ -83,9 +104,9 @@ export function useAudioPlayer() {
   }, []);
 
   const enqueue = useCallback(
-    (data: string, sequence: number) => {
+    (data: string, sequence: number, format = "mp3", sampleRate?: number) => {
       if (mutedRef.current || !ctxRef.current) return;
-      queueRef.current.push({ seq: sequence, data });
+      queueRef.current.push({ seq: sequence, data, format, sampleRate });
       queueRef.current.sort((a, b) => a.seq - b.seq);
       drainQueue();
     },

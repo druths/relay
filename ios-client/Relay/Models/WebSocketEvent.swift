@@ -237,8 +237,16 @@ struct AudioStartPayload: Codable {
 struct AudioChunkPayload: Codable {
     let speaker: String
     let data: String
+    /// "mp3" (one decodable file per chunk) or "pcm16" (raw 16-bit mono
+    /// little-endian samples at `sampleRate`, from streaming TTS).
     let format: String
     let sequence: Int
+    let sampleRate: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case speaker, data, format, sequence
+        case sampleRate = "sample_rate"
+    }
 }
 
 struct AudioDonePayload: Codable {
@@ -708,7 +716,9 @@ enum ClientEvent {
         case .interrupt:
             dict = ["type": "interrupt", "payload": [:]]
         case .setLiveMode(let enabled):
-            dict = ["type": "set_live_mode", "payload": ["enabled": enabled]]
+            // `pcm_stream`: the player handles raw PCM chunks, so the server
+            // may speak replies over a streaming TTS connection.
+            dict = ["type": "set_live_mode", "payload": ["enabled": enabled, "pcm_stream": enabled]]
         case .renameSession(let sessionId, let name):
             dict = ["type": "rename_session", "payload": ["session_id": sessionId, "name": name]]
         case .updateSessionLabels(let sessionId, let labels):

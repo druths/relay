@@ -562,7 +562,10 @@ export function useRelay() {
 
         case "audio_chunk":
           if (suppressNextAudio.current) break;
-          audioPlayerRef.current.enqueue(event.payload.data, event.payload.sequence);
+          audioPlayerRef.current.enqueue(
+            event.payload.data, event.payload.sequence,
+            event.payload.format, event.payload.sample_rate,
+          );
           break;
 
         case "audio_done":
@@ -1083,7 +1086,9 @@ export function useRelay() {
     audioPlayerRef.current.setMuted(false);
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       ws.current.send(
-        JSON.stringify({ type: "set_live_mode", payload: { enabled: true } }),
+        // `pcm_stream`: our player handles raw PCM chunks, so the server
+        // may speak replies over a streaming TTS connection.
+        JSON.stringify({ type: "set_live_mode", payload: { enabled: true, pcm_stream: true } }),
       );
     }
     setIsLiveMode(true);

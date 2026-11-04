@@ -346,6 +346,19 @@ struct AgentManagementView: View {
             sliderField("Speed", key: "speed", range: 0.25...4.0, step: 0.25, format: "%.2f")
         }
 
+        // Expressivity is a Flux-only (beta) control; Aura voices
+        // ignore it, so it only shows for a Flux voice.
+        if ttsProvider == "deepgram" && (vm.form["voice_id"] ?? "").hasPrefix("flux-") {
+            sectionLabel("Expressivity")
+            pickerMenu("expressivity", options: [
+                ("-2", "−2 · Calm"),
+                ("-1", "−1"),
+                ("0", "0 · Voice default"),
+                ("1", "+1"),
+                ("2", "+2 · Animated"),
+            ])
+        }
+
         // ElevenLabs voice settings
         if ttsProvider == "elevenlabs" {
             sectionLabel("Model")

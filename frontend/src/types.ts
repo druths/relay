@@ -292,8 +292,11 @@ export interface WsAudioChunk {
   payload: {
     speaker: string;
     data: string;
+    /** "mp3" (one decodable file per chunk) or "pcm16" (raw 16-bit
+     *  mono little-endian samples at `sample_rate`, from streaming TTS). */
     format: string;
     sequence: number;
+    sample_rate?: number;
   };
 }
 
