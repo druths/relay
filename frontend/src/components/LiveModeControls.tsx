@@ -103,9 +103,9 @@ export function LiveModeControls({
             <span className="text-gray-300">
               {whisper.error
                 ? "Whisper couldn't load"
-                : whisper.isLoading
+                : whisper.isLoading && !whisper.fromCache
                   ? "Downloading on-device Whisper (one-time)"
-                  : "Starting Whisper…"}
+                  : "Loading on-device Whisper…"}
             </span>
             {!whisper.error && (
               <span className="text-gray-500">{pct}%</span>

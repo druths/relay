@@ -13,13 +13,19 @@ import { pipeline, type AutomaticSpeechRecognitionPipeline } from "@huggingface/
 /// Firefox) the hook surfaces an error and the caller falls back
 /// to a cloud STT provider.
 ///
-/// Model + weights are cached in IndexedDB after first download so
-/// subsequent sessions start instantly.
+/// Model files are kept in the browser's Cache API by transformers.js,
+/// so only the first load hits the network. The loaded pipeline is a
+/// page-wide singleton: live-mode controls mount and unmount with every
+/// mic toggle, and a per-mount pipeline meant re-initialising the model
+/// on the GPU (and leaking the previous one) each time.
 export interface WhisperLocalHandle {
   /** True once the pipeline is loaded and ready to transcribe. */
   isReady: boolean;
   /** True while the model is downloading / initializing. */
   isLoading: boolean;
+  /** True when the model files were already in the browser cache, so
+   *  the load is initialisation only — not a download. */
+  fromCache: boolean;
   /** 0..1 bytes-progress during model download. 1 before load. */
   loadProgress: number;
   /** Last fatal error (WebGPU unavailable, download failed, …). */
@@ -32,119 +38,143 @@ export interface WhisperLocalHandle {
 }
 
 const _MODEL_ID = "onnx-community/whisper-large-v3-turbo";
+/// transformers.js's default `env.cacheKey`.
+const _CACHE_NAME = "transformers-cache";
+
+let _pipe: AutomaticSpeechRecognitionPipeline | null = null;
+let _loading: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
+let _cachedCheck: Promise<boolean> | null = null;
+/// Mounted hooks waiting on the shared load, so each can show progress.
+const _progressListeners = new Set<(p: number) => void>();
+
+/// Whether the model weights are already in the browser cache.
+async function _isCached(): Promise<boolean> {
+  try {
+    const cache = await caches.open(_CACHE_NAME);
+    const keys = await cache.keys();
+    return keys.some((r) => r.url.includes(_MODEL_ID) && r.url.includes("encoder_model"));
+  } catch {
+    return false;
+  }
+}
+
+async function _load(): Promise<AutomaticSpeechRecognitionPipeline> {
+  // WebGPU preflight — transformers.js will fall back to
+  // WASM if WebGPU isn't available, but the latency on CPU is
+  // unacceptable for live-mode so we hard-fail here.
+  if (!("gpu" in navigator)) {
+    throw new Error(
+      "WebGPU not available in this browser — on-device Whisper requires WebGPU.",
+    );
+  }
+  // Progress reports bytes-per-file. The model is split
+  // across several files (encoder, decoder, tokenizer,
+  // config, generation config, …) so a naive per-file
+  // reading snaps back to zero at every file boundary.
+  // Aggregate loaded/total across files so the bar
+  // advances monotonically. The first few files report
+  // small `total`s before the big weights land; the
+  // ratio climbs appropriately once those arrive.
+  const fileProgress = new Map<string, { loaded: number; total: number }>();
+  return await pipeline(
+    "automatic-speech-recognition",
+    _MODEL_ID,
+    {
+      device: "webgpu",
+      // fp16 encoder + q4 decoder. fp32 encoder (~800 MB
+      // uncompressed) overflows Chrome's single-ArrayBuffer
+      // allocation ceiling and the fetch throws RangeError
+      // mid-download. fp16 halves it, fits well under the
+      // limit, and the quality loss on conversational
+      // English is immeasurable at this scale.
+      dtype: {
+        encoder_model: "fp16",
+        decoder_model_merged: "q4",
+      },
+      progress_callback: (p: unknown) => {
+        const prog = p as {
+          status?: string;
+          file?: string;
+          loaded?: number;
+          total?: number;
+        };
+        if (
+          (prog.status === "progress" || prog.status === "done")
+          && typeof prog.file === "string"
+          && typeof prog.loaded === "number"
+          && typeof prog.total === "number"
+          && prog.total > 0
+        ) {
+          fileProgress.set(prog.file, { loaded: prog.loaded, total: prog.total });
+          let loaded = 0;
+          let total = 0;
+          for (const { loaded: l, total: t } of fileProgress.values()) {
+            loaded += l;
+            total += t;
+          }
+          if (total > 0) {
+            const ratio = Math.min(1, loaded / total);
+            for (const listener of _progressListeners) listener(ratio);
+          }
+        }
+      },
+    },
+  );
+}
 
 export function useWhisperLocal(): WhisperLocalHandle {
-  const [isReady, setIsReady] = useState(false);
+  const [isReady, setIsReady] = useState(() => _pipe !== null);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadProgress, setLoadProgress] = useState(0);
+  const [fromCache, setFromCache] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(() => (_pipe ? 1 : 0));
   const [error, setError] = useState<string | null>(null);
-  const pipeRef = useRef<AutomaticSpeechRecognitionPipeline | null>(null);
-  const loadingPromiseRef = useRef<Promise<void> | null>(null);
-  /// Per-file byte totals, keyed by file name. We aggregate across
-  /// all model files so the bar monotonically advances instead of
-  /// snapping back to zero every time transformers.js finishes one
-  /// file and starts the next.
-  const fileProgressRef = useRef<Map<string, { loaded: number; total: number }>>(new Map());
+  /// The shared load outlives this component; don't set state after
+  /// unmount.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const ensureLoaded = useCallback(async () => {
-    if (pipeRef.current) return;
-    if (loadingPromiseRef.current) {
-      await loadingPromiseRef.current;
+    if (_pipe) {
+      setIsReady(true);
+      setLoadProgress(1);
       return;
     }
-    const loadingPromise = (async () => {
-      setIsLoading(true);
-      setError(null);
-      setLoadProgress(0);
-      try {
-        // WebGPU preflight — transformers.js will fall back to
-        // WASM if WebGPU isn't available, but the latency on CPU is
-        // unacceptable for live-mode so we hard-fail here.
-        if (!("gpu" in navigator)) {
-          throw new Error(
-            "WebGPU not available in this browser — on-device Whisper requires WebGPU.",
-          );
-        }
-        const pipe = await pipeline(
-          "automatic-speech-recognition",
-          _MODEL_ID,
-          {
-            device: "webgpu",
-            // fp16 encoder + q4 decoder. fp32 encoder (~800 MB
-            // uncompressed) overflows Chrome's single-ArrayBuffer
-            // allocation ceiling and the fetch throws RangeError
-            // mid-download. fp16 halves it, fits well under the
-            // limit, and the quality loss on conversational
-            // English is immeasurable at this scale.
-            dtype: {
-              encoder_model: "fp16",
-              decoder_model_merged: "q4",
-            },
-            // Progress reports bytes-per-file. The model is split
-            // across several files (encoder, decoder, tokenizer,
-            // config, generation config, …) so a naive per-file
-            // reading snaps back to zero at every file boundary.
-            // Aggregate loaded/total across files so the bar
-            // advances monotonically. The first few files report
-            // small `total`s before the big weights land; the
-            // ratio climbs appropriately once those arrive.
-            progress_callback: (p: unknown) => {
-              const prog = p as {
-                status?: string;
-                file?: string;
-                loaded?: number;
-                total?: number;
-              };
-              if (
-                (prog.status === "progress" || prog.status === "done")
-                && typeof prog.file === "string"
-                && typeof prog.loaded === "number"
-                && typeof prog.total === "number"
-                && prog.total > 0
-              ) {
-                fileProgressRef.current.set(prog.file, {
-                  loaded: prog.loaded,
-                  total: prog.total,
-                });
-                let loaded = 0;
-                let total = 0;
-                for (const { loaded: l, total: t } of fileProgressRef.current.values()) {
-                  loaded += l;
-                  total += t;
-                }
-                if (total > 0) setLoadProgress(Math.min(1, loaded / total));
-              }
-            },
-          },
-        );
-        pipeRef.current = pipe;
+    const onProgress = (p: number) => { if (mounted.current) setLoadProgress(p); };
+    _progressListeners.add(onProgress);
+    setIsLoading(true);
+    setError(null);
+    _cachedCheck ??= _isCached();
+    void _cachedCheck.then((c) => { if (mounted.current) setFromCache(c); });
+    try {
+      _loading ??= _load();
+      _pipe = await _loading;
+      if (mounted.current) {
         setIsReady(true);
         setLoadProgress(1);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
-        pipeRef.current = null;
-      } finally {
-        setIsLoading(false);
       }
-    })();
-    loadingPromiseRef.current = loadingPromise;
-    try {
-      await loadingPromise;
+    } catch (e) {
+      // Let the next attempt retry from scratch.
+      _loading = null;
+      _cachedCheck = null;
+      if (mounted.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      loadingPromiseRef.current = null;
+      _progressListeners.delete(onProgress);
+      if (mounted.current) setIsLoading(false);
     }
   }, []);
 
   const transcribe = useCallback(async (audio: Float32Array): Promise<string> => {
-    if (!pipeRef.current) await ensureLoaded();
-    if (!pipeRef.current) {
+    if (!_pipe) await ensureLoaded();
+    if (!_pipe) {
       throw new Error(error ?? "Whisper not loaded");
     }
     // chunk_length_s=30 is Whisper's native window; our VAD
     // segments are almost always well under that so this is
     // effectively a single pass per segment.
-    const result = await pipeRef.current(audio, {
+    const result = await _pipe(audio, {
       language: "english",
       task: "transcribe",
       chunk_length_s: 30,
@@ -155,13 +185,7 @@ export function useWhisperLocal(): WhisperLocalHandle {
     return text.trim();
   }, [ensureLoaded, error]);
 
-  // Cancel any in-flight load on unmount so a fresh mount doesn't
-  // see the stale loading promise.
-  useEffect(() => () => {
-    loadingPromiseRef.current = null;
-  }, []);
-
-  return { isReady, isLoading, loadProgress, error, ensureLoaded, transcribe };
+  return { isReady, isLoading, fromCache, loadProgress, error, ensureLoaded, transcribe };
 }
 
 /// Decode a base64-encoded WAV (as produced by `useLiveMic`) back
