@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import uuid
+from collections import deque
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
@@ -135,6 +136,11 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
             # Concurrent message loop: races incoming WS messages against active
             # processing so that "interrupt" messages can cancel in-flight LLM/TTS turns.
             active_task: asyncio.Task | None = None
+            # In-flight transcriptions, oldest first. STT runs off the loop
+            # so a slow provider can't block interrupts or leave_session;
+            # results are consumed in arrival order so utterances never
+            # reach the agent out of sequence.
+            stt_tasks: deque[asyncio.Task] = deque()
             recv_task: asyncio.Task = asyncio.create_task(websocket.receive_text())
 
             try:
@@ -142,6 +148,8 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                     watch = {recv_task}
                     if active_task and not active_task.done():
                         watch.add(active_task)
+                    if stt_tasks:
+                        watch.add(stt_tasks[0])
 
                     done, _ = await asyncio.wait(watch, return_when=asyncio.FIRST_COMPLETED)
 
@@ -155,6 +163,31 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                             logger.error("Processing task failed: %s", e)
                         active_task = None
 
+                    while stt_tasks and stt_tasks[0].done():
+                        finished = stt_tasks.popleft()
+                        if finished.cancelled():
+                            continue
+                        text, tz = finished.result()
+                        if not text:
+                            continue
+
+                        # Send transcription back so the UI shows what was heard
+                        await websocket.send_json({
+                            "type": "transcription",
+                            "payload": {"text": text},
+                        })
+
+                        await _cancel_active_task(active_task)
+                        detach_event = asyncio.Event()
+                        active_task = asyncio.create_task(
+                            _handle_text_own_session(
+                                websocket, user_id, text, active_session_id, lobby_history,
+                                voice_mode_instructions if is_live_mode else None,
+                                detach_event=detach_event,
+                                is_live_mode=is_live_mode,
+                                timezone=tz)
+                        )
+
                     # No new message — loop back to wait again
                     if recv_task not in done:
                         continue
@@ -164,6 +197,10 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                     recv_task = asyncio.create_task(websocket.receive_text())
                     data = json.loads(raw)
                     msg_type = data.get("type")
+                    # Turns write through their own sessions; drop anything
+                    # this one cached so reads (e.g. the ark session id for
+                    # stop_session) see those writes.
+                    db.expire_all()
 
                     if msg_type == "interrupt":
                         logger.info("[WS] interrupt received — cancelling active task")
@@ -194,11 +231,12 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                         await _cancel_active_task(active_task)
                         detach_event = asyncio.Event()  # Fresh event for each task
                         active_task = asyncio.create_task(
-                            _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
-                                         voice_mode_instructions if is_live_mode else None,
-                                         detach_event=detach_event,
-                                         is_live_mode=is_live_mode,
-                                         timezone=tz)
+                            _handle_text_own_session(
+                                websocket, user_id, text, active_session_id, lobby_history,
+                                voice_mode_instructions if is_live_mode else None,
+                                detach_event=detach_event,
+                                is_live_mode=is_live_mode,
+                                timezone=tz)
                         )
 
                     elif msg_type == "audio_input":
@@ -214,39 +252,15 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                             })
                             continue
 
-                        try:
-                            audio_bytes = base64.b64decode(audio_data_b64)
-                            threshold_str = await _get_setting(db, "stt_no_speech_threshold")
-                            no_speech_threshold = float(threshold_str) if threshold_str else 0.5
-                            text = await stt.transcribe(audio_bytes, audio_format, no_speech_threshold=no_speech_threshold)
-                        except Exception as exc:
-                            logger.warning("STT transcription failed: %s", exc)
-                            await websocket.send_json({
-                                "type": "error",
-                                "payload": {"message": f"Transcription failed: {exc}"},
-                            })
-                            continue
-
-                        if not text.strip():
-                            continue
-
-                        # Send transcription back so the UI shows what was heard
-                        await websocket.send_json({
-                            "type": "transcription",
-                            "payload": {"text": text},
-                        })
-
-                        await _cancel_active_task(active_task)
-                        detach_event = asyncio.Event()
-                        active_task = asyncio.create_task(
-                            _handle_text(websocket, db, user_id, text, active_session_id, lobby_history,
-                                         voice_mode_instructions if is_live_mode else None,
-                                         detach_event=detach_event,
-                                         is_live_mode=is_live_mode,
-                                         timezone=tz)
-                        )
+                        threshold_str = await _get_setting(db, "stt_no_speech_threshold")
+                        no_speech_threshold = float(threshold_str) if threshold_str else 0.5
+                        stt_tasks.append(asyncio.create_task(
+                            _transcribe(websocket, stt, audio_data_b64, audio_format,
+                                        no_speech_threshold, tz)
+                        ))
 
                     elif msg_type == "leave_session":
+                        _cancel_stt_tasks(stt_tasks)
                         task_still_running = active_task is not None and not active_task.done()
                         if task_still_running:
                             # Signal task to stop sending to WS but finish in background
@@ -297,6 +311,7 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                             })
 
                     elif msg_type == "resume_session":
+                        _cancel_stt_tasks(stt_tasks)
                         target_sid = uuid.UUID(data["payload"]["session_id"])
                         # Detach any in-flight task (let agent finish in background)
                         task_running = active_task is not None and not active_task.done()
@@ -367,6 +382,7 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
                 # stop sending to the (now-closed) WS, and persist the full response.
                 if active_task and not active_task.done():
                     detach_event.set()
+                _cancel_stt_tasks(stt_tasks)
                 recv_task.cancel()
 
     except WebSocketDisconnect:
@@ -391,6 +407,53 @@ async def lobby_ws(websocket: WebSocket, token: str = Query(...)):
             )
         except Exception:
             pass
+
+
+async def _transcribe(
+    websocket: WebSocket,
+    stt,
+    audio_data_b64: str,
+    audio_format: str,
+    no_speech_threshold: float,
+    timezone: str | None,
+) -> tuple[str, str | None]:
+    """Transcribe one audio segment. Returns ("", tz) on failure after
+    telling the client, so the caller only has to skip empty text."""
+    try:
+        audio_bytes = base64.b64decode(audio_data_b64)
+        text = await stt.transcribe(audio_bytes, audio_format, no_speech_threshold=no_speech_threshold)
+    except Exception as exc:
+        logger.warning("STT transcription failed: %r", exc)
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "payload": {"message": f"Transcription failed: {exc!r}"},
+            })
+        except Exception:
+            pass
+        return "", timezone
+    return text.strip(), timezone
+
+
+def _cancel_stt_tasks(stt_tasks: deque[asyncio.Task]) -> None:
+    """Drop pending transcriptions — their text belongs to a context
+    (session) the user has just left."""
+    for t in stt_tasks:
+        t.cancel()
+    stt_tasks.clear()
+
+
+async def _handle_text_own_session(websocket: WebSocket, *args, **kwargs) -> uuid.UUID | None:
+    """Run `_handle_text` on a DB session of its own.
+
+    The task is cancelled on interrupt and may outlive the socket when
+    detached; on the connection's shared session, a cancel mid-query
+    left that session unusable ("Can't reconnect until invalid
+    transaction is rolled back") and the main loop would query it
+    concurrently with the task.
+    """
+    async with websocket.app.state.db_session() as task_db:
+        return await _handle_text(websocket, task_db, *args, **kwargs)
 
 
 async def _cancel_active_task(active_task: asyncio.Task | None) -> None:
