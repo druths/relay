@@ -23,6 +23,8 @@ interface Props {
   /** The scope value we should match against `fileChanges[*].scope`
    * (`project_id` for projects, ark `agent_name` for workspaces). */
   scope: string;
+  /** WebSocket state — a reconnect triggers a re-check of the file. */
+  connected: boolean;
   /** Identifier of the parent's tab entry — passed through to the
    * dirty-change callback so the parent can update the right row without
    * needing a per-tab arrow (which would break referential stability and
@@ -55,17 +57,46 @@ function _hasTextExt(path: string): boolean {
   return TEXT_EXT_ALLOWLIST.has(_extOf(path));
 }
 
-/// SHA-256 hash of a string, as a lowercase hex digest. Used to
-/// distinguish "the file changed because *I* just saved it" from
-/// "the file changed because something else wrote to it" when a
-/// `*_file_changed` event arrives — a match means the on-disk
-/// content is what we sent, so the auto-reload is safe to skip.
-async function _hashText(text: string): Promise<string> {
-  const bytes = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+/// What a read of the file turned up. Image/PDF variants carry an
+/// object URL the caller owns (install it or revoke it).
+type Fetched =
+  | { type: "text"; text: string }
+  | { type: "image"; url: string }
+  | { type: "pdf"; url: string }
+  | { type: "binary" }
+  | { type: "missing" };
+
+async function _fetchFile(
+  kind: Kind, targetId: string, path: string, server?: string,
+): Promise<Fetched> {
+  let resp: Response;
+  try {
+    resp = await readFile(kind, targetId, path, server);
+  } catch (e) {
+    if (String(e).includes("404")) return { type: "missing" };
+    throw e;
+  }
+  const ct = resp.headers.get("content-type") ?? "";
+  const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml") || _hasTextExt(path);
+  const isImage = ct.startsWith("image/") || (!isText && _hasImageExt(path));
+  const isPdf = ct === "application/pdf" || (!isText && !isImage && _hasPdfExt(path));
+  if (isText) return { type: "text", text: await resp.text() };
+  if (isImage) return { type: "image", url: URL.createObjectURL(await resp.blob()) };
+  if (isPdf) {
+    // Force the blob's MIME to application/pdf so the browser routes
+    // it to its built-in PDF renderer inside the iframe. Some ark
+    // paths serve PDFs as `application/octet-stream`.
+    const raw = await resp.blob();
+    const blob = raw.type === "application/pdf"
+      ? raw
+      : new Blob([raw], { type: "application/pdf" });
+    return { type: "pdf", url: URL.createObjectURL(blob) };
+  }
+  return { type: "binary" };
+}
+
+function _discard(f: Fetched) {
+  if (f.type === "image" || f.type === "pdf") URL.revokeObjectURL(f.url);
 }
 
 /// Markdown files get a view/edit toggle in the toolbar. Extension-
@@ -172,7 +203,7 @@ export function isKnownBinaryExt(path: string): boolean {
 }
 
 export function FileEditorTab({
-  kind, targetId, path, server, fileChanges, scope, tabId, onDirtyChange,
+  kind, targetId, path, server, fileChanges, scope, connected, tabId, onDirtyChange,
 }: Props) {
   const [savedContent, setSavedContent] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -228,77 +259,91 @@ export function FileEditorTab({
   // keybinding is wired by CM's `searchKeymap` (included in basicSetup).
   const cmRef = useRef<ReactCodeMirrorRef | null>(null);
 
-  /// SHA-256 hash of the text most recently saved from this editor.
-  /// Compared against the on-disk hash whenever an incoming
-  /// `*_file_changed` event lands: match = ark's echo of our own
-  /// write → skip the reload (which would scroll the viewport to
-  /// the top); mismatch = a genuinely external write → fall through
-  /// to the normal reload path. Cleared after use so the next
-  /// file-change event goes through the normal path.
-  const lastSaveHash = useRef<string | null>(null);
-
   const isDirty = savedContent !== null && draft !== savedContent;
 
   useEffect(() => {
     onDirtyChange(tabId, isDirty);
   }, [isDirty, tabId, onDirtyChange]);
 
+  // Async reads compare against these at resolution time, not at the
+  // time the read started — the user may have typed in between.
+  const draftRef = useRef(draft);
+  const savedRef = useRef(savedContent);
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+  useEffect(() => { savedRef.current = savedContent; }, [savedContent]);
+
+  /// Bumped by every read and by save; a read whose number is no longer
+  /// current lost a race and drops its result.
+  const fetchSeq = useRef(0);
+  const loadingRef = useRef(false);
+
+  /// Make `f` the tab's clean, on-disk state. A missing file keeps the
+  /// draft so Save can recreate it.
+  const install = useCallback((f: Fetched) => {
+    setImageUrl(f.type === "image" ? f.url : null);
+    setPdfUrl(f.type === "pdf" ? f.url : null);
+    setIsBinary(f.type === "binary");
+    setNotOnDisk(f.type === "missing");
+    setStaleBanner(false);
+    if (f.type === "text") {
+      setSavedContent(f.text);
+      setDraft(f.text);
+    } else {
+      setSavedContent(f.type === "missing" ? "" : null);
+    }
+  }, []);
+
+  /// Full load behind the "Loading…" state — first open and explicit
+  /// Reload. Discards the buffer.
   const load = useCallback(async () => {
+    const seq = ++fetchSeq.current;
+    loadingRef.current = true;
     setLoading(true);
     setError(null);
-    setStaleBanner(false);
-    // Revoke any stale blob urls before swapping in new ones.
-    setImageUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
-    setPdfUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
     try {
-      const resp = await readFile(kind, targetId, path, server);
-      const ct = resp.headers.get("content-type") ?? "";
-      const isText = ct.startsWith("text/") || ct.includes("json") || ct.includes("xml") || _hasTextExt(path);
-      const isImage = ct.startsWith("image/") || (!isText && _hasImageExt(path));
-      const isPdf = ct === "application/pdf" || (!isText && !isImage && _hasPdfExt(path));
-      if (isText) {
-        const text = await resp.text();
-        setSavedContent(text);
-        setDraft(text);
-        setIsBinary(false);
-        setNotOnDisk(false);
-      } else if (isImage) {
-        const blob = await resp.blob();
-        setImageUrl(URL.createObjectURL(blob));
-        setIsBinary(false);
-        setSavedContent(null);
-        setNotOnDisk(false);
-      } else if (isPdf) {
-        // Force the blob's MIME to application/pdf so the browser routes
-        // it to its built-in PDF renderer inside the iframe. Some ark
-        // paths serve PDFs as `application/octet-stream`.
-        const raw = await resp.blob();
-        const blob = raw.type === "application/pdf"
-          ? raw
-          : new Blob([raw], { type: "application/pdf" });
-        setPdfUrl(URL.createObjectURL(blob));
-        setIsBinary(false);
-        setSavedContent(null);
-        setNotOnDisk(false);
-      } else {
-        setIsBinary(true);
-        setSavedContent(null);
-        setNotOnDisk(false);
-      }
+      const f = await _fetchFile(kind, targetId, path, server);
+      if (seq !== fetchSeq.current) return _discard(f);
+      install(f);
     } catch (e) {
-      // 404 → treat the tab as a "new file": empty saved state, user's
-      // draft preserved if any. The next save recreates the file on disk.
-      if (String(e).includes("404")) {
-        setSavedContent("");
-        setIsBinary(false);
-        setNotOnDisk(true);
-      } else {
-        setError(String(e));
-      }
+      if (seq === fetchSeq.current) setError(String(e));
     } finally {
-      setLoading(false);
+      if (seq === fetchSeq.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
-  }, [kind, targetId, path, server]);
+  }, [kind, targetId, path, server, install]);
+
+  /// Quiet re-read after the file may have changed (a change event, or
+  /// a reconnect that could have missed one). Never touches unsaved
+  /// edits — it flags them with the stale banner instead — and swaps a
+  /// clean buffer in place so the viewport doesn't jump.
+  const refresh = useCallback(async () => {
+    if (loadingRef.current) return;
+    const seq = ++fetchSeq.current;
+    let f: Fetched;
+    try {
+      f = await _fetchFile(kind, targetId, path, server);
+    } catch {
+      return;  // transient; the next event or reconnect tries again
+    }
+    if (seq !== fetchSeq.current) return _discard(f);
+    if (f.type === "text") {
+      if (f.text === savedRef.current) return;  // nothing new
+      if (f.text === draftRef.current) {
+        // Disk caught up with the buffer — typically our own save.
+        setSavedContent(f.text);
+        setNotOnDisk(false);
+        setStaleBanner(false);
+        return;
+      }
+      if (draftRef.current !== savedRef.current) {
+        setStaleBanner(true);
+        return;
+      }
+    }
+    install(f);
+  }, [kind, targetId, path, server, install]);
 
   // Clean up blob urls when the component unmounts so we don't leak.
   useEffect(() => () => {
@@ -312,9 +357,11 @@ export function FileEditorTab({
     load();
   }, [load]);
 
-  // Track which file-change events we've already reacted to so a single
-  // disk change only triggers one stale-handling decision.
-  const lastSeenTs = useRef(0);
+  // Every change event for this file gets a quiet re-read; `refresh`
+  // decides what it means by comparing disk with the buffer, so our own
+  // save's echo, external writes and deletes all take the same path.
+  // Starts at mount time: anything older is covered by the initial load.
+  const lastSeenTs = useRef(Date.now());
   useEffect(() => {
     const matches = fileChanges
       .filter((e) =>
@@ -322,80 +369,30 @@ export function FileEditorTab({
       );
     if (matches.length === 0) return;
     lastSeenTs.current = Math.max(...matches.map((e) => e.ts));
-    // If the *last* event for our path was a delete, transition to
-    // not-on-disk regardless of dirty state — the user's draft survives
-    // and Save will recreate the file. A later create/modify event will
-    // route through the normal load path and clear the indicator.
-    const last = matches[matches.length - 1];
-    if (last.change === "deleted") {
-      setSavedContent("");
-      setNotOnDisk(true);
-      setStaleBanner(false);
-      return;
-    }
-    if (isDirty) {
-      setStaleBanner(true);
-    } else if (lastSaveHash.current) {
-      // Auto-reload path — but first, check if this is our own
-      // save's echo by hashing the current on-disk content and
-      // comparing to what we just wrote. Match = safe to skip
-      // (viewport stays put). Mismatch = someone else wrote a
-      // different version → install it via the normal reload
-      // path so the user sees the new content.
-      (async () => {
-        try {
-          const resp = await readFile(kind, targetId, path, server);
-          const text = await resp.text();
-          const h = await _hashText(text);
-          if (h === lastSaveHash.current) {
-            lastSaveHash.current = null;
-            return;  // echo confirmed
-          }
-          lastSaveHash.current = null;
-          setSavedContent(text);
-          setDraft(text);
-          setIsBinary(false);
-          setNotOnDisk(false);
-        } catch {
-          // Fetch failed — fall back to the full load path.
-          lastSaveHash.current = null;
-          await load();
-        }
-      })();
-    } else {
-      // Quiet reload — the user is viewing, not editing.
-      load();
-    }
-  }, [fileChanges, kind, scope, path, isDirty, load, targetId, server]);
+    refresh();
+  }, [fileChanges, kind, scope, path, refresh]);
+
+  // Change events sent while the socket was down are lost, so re-check
+  // the file once it's back.
+  const wasConnected = useRef(connected);
+  useEffect(() => {
+    if (connected && !wasConnected.current) refresh();
+    wasConnected.current = connected;
+  }, [connected, refresh]);
 
   const save = async () => {
     setSaving(true);
     setError(null);
-    // Compute and record the hash of what we're about to write BEFORE
-    // the PUT fires, not after. Ark's file-change WS event can arrive
-    // in the gap between the PUT's HTTP response and our post-await
-    // code — if `lastSaveHash` isn't set yet when the file-change
-    // effect runs, we fall through to `load()`, which pushes a fresh
-    // `draft` into CodeMirror and resets the viewport to the top. The
-    // original symptom of the "save pops to top" bug.
-    // `crypto.subtle` requires a secure context — on plain HTTP dev
-    // deploys it may be absent; leave the hash unset and let the
-    // effect fall through to the normal reload path if hashing throws.
+    // Drop any in-flight read: it may predate this write and would
+    // otherwise flag our own save as an external change.
+    fetchSeq.current++;
     const toWrite = draft;
-    try {
-      lastSaveHash.current = await _hashText(toWrite);
-    } catch {
-      lastSaveHash.current = null;
-    }
     try {
       await writeFile(kind, targetId, path, toWrite, server);
       setSavedContent(toWrite);
       setStaleBanner(false);
       setNotOnDisk(false);
     } catch (e) {
-      // Write failed — clear the hash so a stale value doesn't
-      // accidentally suppress a legit external-write reload later.
-      lastSaveHash.current = null;
       setError(String(e));
     } finally {
       setSaving(false);
@@ -517,7 +514,7 @@ export function FileEditorTab({
         <div className="flex items-center gap-3 px-4 py-2 bg-amber-900/30 border-b border-amber-800/60 text-xs text-amber-200">
           <span className="flex-1">File changed on disk while you were editing.</span>
           <button
-            onClick={load}
+            onClick={() => load()}
             className="px-2 py-1 rounded bg-amber-700 hover:bg-amber-600 text-white"
           >
             Reload (discards changes)

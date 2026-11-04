@@ -1042,20 +1042,26 @@ function RelayApp({ onLogout }: { onLogout: () => void }) {
               })}
             </div>
             <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+              {/* Every open tab stays mounted and inactive ones are only
+                  hidden, so switching tabs keeps the draft, scroll and undo
+                  history, and background tabs still see file changes. */}
               {openTabs.map((t) => (
-                activeTabId === t.tabId && (
+                <div
+                  key={t.tabId}
+                  className={activeTabId === t.tabId ? "flex-1 min-h-0 min-w-0 flex flex-col" : "hidden"}
+                >
                   <FileEditorTab
-                    key={t.tabId}
                     kind={t.kind}
                     targetId={t.targetId}
                     path={t.path}
                     server={t.server}
                     scope={t.scope}
                     fileChanges={relay.fileChanges}
+                    connected={relay.connected}
                     tabId={t.tabId}
                     onDirtyChange={setTabDirty}
                   />
-                )
+                </div>
               ))}
             </div>
           </div>
