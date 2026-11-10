@@ -136,13 +136,6 @@ final class RelayViewModel {
     // Suppress the operator greeting sent on every fresh WebSocket connection.
     private var suppressNextGreeting = false
 
-    // Gap detection: fires the thinking tone if no audio_chunk arrives within 300 ms.
-    private var audioGapTask: Task<Void, Never>?
-    /// Whether the operator/agent is currently "thinking" from a status
-    /// perspective. The thinking tone may still be paused while TTS audio is
-    /// playing — see `syncThinkingTone`.
-    private var wantThinkingTone = false
-
     private var isInSession: Bool {
         activeSessionId != nil || pendingSessionId != nil
     }
@@ -163,17 +156,13 @@ final class RelayViewModel {
             onSpeechStarted: { [weak self] in
                 guard let self else { return }
                 guard await self.isLiveMode else { return }
-                // Cancel gap timer and mark any in-progress streaming message as interrupted
+                // Mark any in-progress streaming message as interrupted
                 await MainActor.run {
-                    self.audioGapTask?.cancel()
-                    self.audioGapTask = nil
                     if let idx = self.sessionMessages.indices.last,
                        self.sessionMessages[idx].isStreaming {
                         self.sessionMessages[idx].isStreaming = false
                         self.sessionMessages[idx].isInterrupted = true
                     }
-                    self.wantThinkingTone = false
-                    self.syncThinkingTone()
                 }
                 // Signal backend to cancel the current agent turn
                 print("[Relay] speech detected — sending interrupt")
@@ -283,8 +272,6 @@ final class RelayViewModel {
     // MARK: - Actions
 
     func sendMessage(_ text: String) async {
-        if isLiveMode { ChimeGenerator.play() }
-
         // A follow-up user message implicitly interrupts any in-flight
         // agent turn. Close its streaming bubble locally right now so
         // the "thinking" dots go away immediately — the backend will
@@ -590,10 +577,7 @@ final class RelayViewModel {
                 try? FileManager.default.removeItem(at: fileURL)
 
                 if await self.isLiveMode {
-                    await MainActor.run {
-                        ChimeGenerator.play()
-                        HapticService.impact(.light)
-                    }
+                    await MainActor.run { HapticService.impact(.light) }
                 }
                 await sendMessage(text)
             } catch {
@@ -823,38 +807,16 @@ final class RelayViewModel {
         ])
     }
 
-    /// Re-evaluate whether the thinking tone should be playing right now.
-    /// The tone is gated on `wantThinkingTone` (status-driven) AND the
-    /// absence of active TTS playback (so it never overlaps the agent's
-    /// voice). Safe to call from any context; the work happens in a Task.
-    private func syncThinkingTone() {
-        let want = wantThinkingTone && isLiveMode
-        Task {
-            if want {
-                let playing = await audio.player.isPlaying()
-                if !playing {
-                    await ThinkingToneService.shared.start()
-                    return
-                }
-            }
-            await ThinkingToneService.shared.stop()
-        }
-    }
-
     func exitLiveMode(trigger: String = "user") {
         isLiveMode = false
         // Mirror of `enterLiveMode` — belt-and-suspenders clear of
         // the suppress flag so a user toggling off/on actually
         // resets the state the stuck-audio bug relies on.
         suppressNextGreeting = false
-        audioGapTask?.cancel()
-        audioGapTask = nil
         audio.stopListening()
         audio.stopAudio()
         endLiveActivity()
         Task { await SilentKeepAlive.shared.stop() }
-        wantThinkingTone = false
-        Task { await ThinkingToneService.shared.stop() }
         Task { try? await webSocketService.send(.setLiveMode(enabled: false)) }
         ActivityLog.shared.add("live_mode_exited", context: [
             "trigger": trigger,
@@ -981,14 +943,6 @@ final class RelayViewModel {
             activeSpeaker = payload.activeSpeaker
             status = payload.status
             if isLiveMode { updateLiveActivity() }
-            if isLiveMode {
-                let nowThinking = payload.status == "processing"
-                if nowThinking != wantThinkingTone {
-                    print("[ThinkingTone] status=\(payload.status) → want=\(nowThinking)")
-                }
-                wantThinkingTone = nowThinking
-                syncThinkingTone()
-            }
             // Restore the streaming placeholder (three-dot indicator) when resuming
             // a session whose agent is still working in the background. The placeholder
             // was lost when session_history overwrote sessionMessages.
@@ -1095,8 +1049,6 @@ final class RelayViewModel {
 
         case .sessionLeft(let payload):
             audio.stopAudio()
-            audioGapTask?.cancel()
-            audioGapTask = nil
             let oldSessionId = activeSessionId
             let oldAgentName = activeAgentName
             pendingSessionId = nil
@@ -1194,8 +1146,6 @@ final class RelayViewModel {
 
         case .sessionDeleted(let payload):
             audio.stopAudio()
-            audioGapTask?.cancel()
-            audioGapTask = nil
             sessions.removeAll { $0.sessionId == payload.sessionId }
             if activeSessionId == payload.sessionId {
                 activeSessionId = nil
@@ -1284,8 +1234,6 @@ final class RelayViewModel {
             }
             print("[TTS][relay] audio_start from \(payload.speaker)")
             Task { await audio.player.start() }
-            // TTS playback is starting — sync so the thinking tone steps aside.
-            syncThinkingTone()
 
         case .audioChunk(let payload):
             guard isLiveMode else { break }
@@ -1293,28 +1241,12 @@ final class RelayViewModel {
             // operator-greeting audio when the suppress flag is on;
             // never collateral-damage an agent turn's chunks.
             if suppressNextGreeting && payload.speaker == "operator" { break }
-            // Cancel any pending gap timer; real audio is arriving and the
-            // sync() below will suppress the thinking tone.
-            audioGapTask?.cancel()
-            audioGapTask = nil
             if pendingSessionId != nil {
                 pendingAudioChunks.append(payload)
                 break
             }
             print("[TTS][relay] audio_chunk seq=\(payload.sequence) (\(payload.data.count) b64 chars)")
             Task { await audio.player.enqueue(payload) }
-            syncThinkingTone()
-            // Gap timer: if no chunk arrives within 300 ms, the player will
-            // have drained and sync will restore the thinking tone (only if
-            // we still want it and nothing is actually playing).
-            audioGapTask = Task {
-                try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self.audioGapTask = nil
-                    self.syncThinkingTone()
-                }
-            }
 
         case .audioDone(let payload):
             guard isLiveMode else { break }
@@ -1332,24 +1264,12 @@ final class RelayViewModel {
                 pendingAudioHasDone = true
                 break
             }
-            // Turn is fully done — cancel gap timer so thinking tone doesn't re-arm.
-            audioGapTask?.cancel()
-            audioGapTask = nil
             print("[TTS][relay] audio_done from \(payload.speaker)")
-            Task {
-                await audio.player.done()
-                await audio.player.waitUntilFinished()
-                // Playback fully complete — if status is still "processing"
-                // (mid-turn tool call, etc.), the thinking tone should resume.
-                await MainActor.run { self.syncThinkingTone() }
-            }
+            Task { await audio.player.done() }
 
         case .transcription(let payload):
             print("[STT] transcription received: \"\(payload.text)\"")
-            if isLiveMode {
-                ChimeGenerator.play()
-                HapticService.impact(.light)
-            }
+            if isLiveMode { HapticService.impact(.light) }
             let msg = Message(role: .user, textContent: payload.text, createdAt: Date())
             if isInSession {
                 sessionMessages.append(msg)

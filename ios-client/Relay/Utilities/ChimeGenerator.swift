@@ -6,7 +6,7 @@ enum ChimeGenerator {
     nonisolated(unsafe) private static var liveStartPlayer: AVAudioPlayer?
     nonisolated(unsafe) private static var sessionLeaveEngine: AVAudioEngine?
 
-    /// Plays when the user's response has been received and is being processed.
+    /// Plays when live mode enters an agent's session.
     static func play() {
         playSound("response_received_1", playerRef: &responsePlayer)
     }

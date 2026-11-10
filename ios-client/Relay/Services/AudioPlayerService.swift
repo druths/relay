@@ -7,8 +7,8 @@ import AVFoundation
 /// - "mp3": one decodable file per chunk (per-sentence synthesis), each
 ///   played to completion on its own `AVAudioPlayer`.
 /// - "pcm16": raw 16-bit mono samples from streaming TTS, scheduled
-///   back-to-back on one `AVAudioPlayerNode` so they play gaplessly. A
-///   separate engine from the recorder's, like `ThinkingToneService`.
+///   back-to-back on one `AVAudioPlayerNode` so they play gaplessly, on an
+///   engine separate from the recorder's.
 actor AudioPlayerService {
     private struct Chunk {
         let seq: Int
@@ -103,13 +103,6 @@ actor AudioPlayerService {
         cleanup()
         queue = []
         nextSeq = 0
-    }
-
-    /// True if TTS audio is currently being played — i.e., the user would
-    /// hear it. Used by the thinking-tone gating so we don't play the tone
-    /// over agent speech.
-    func isPlaying() -> Bool {
-        isBusy
     }
 
     /// Returns once all queued audio (including pending) has finished playing.

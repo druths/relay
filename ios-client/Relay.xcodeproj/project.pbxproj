@@ -81,7 +81,6 @@
 		B81D27BE882F438441283A47 /* RelayQuickLaunchWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38FE2FDAE86B55169328875B /* RelayQuickLaunchWidget.swift */; };
 		BD7FCA963D970827354C10EC /* RelayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DA7A3FBBC3B11BBD35A15B /* RelayView.swift */; };
 		BE840CD06FB3F261DFEF5B48 /* PressStart2P-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = B2A4D843321C18FA4239E7A1 /* PressStart2P-Regular.ttf */; };
-		BEDCE5B68A34E5661B0F6C6B /* ThinkingToneService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */; };
 		C43B2D4EC161876BB6394543 /* ProjectManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50167414A32C6226B7563E20 /* ProjectManagerView.swift */; };
 		CD4CA122ED73A6E61C256435 /* AudioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 909727E85D2D35F4161B5F24 /* AudioViewModel.swift */; };
 		D542B8D8116E090123CE96ED /* WebSocketService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36867E74E2DB4F0F89C17EE2 /* WebSocketService.swift */; };
@@ -130,7 +129,6 @@
 		139F18AD293C3DAB5116785B /* SessionFilterMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFilterMenu.swift; sourceTree = "<group>"; };
 		14802FEDA5891387B4D1C15F /* FileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEditorView.swift; sourceTree = "<group>"; };
 		1A668E4C226B3C74D17F6F2D /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
-		1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingToneService.swift; sourceTree = "<group>"; };
 		20F1A7CF1C37E5D68F02F84B /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
 		2F86BB5CB1497564A48F5733 /* RelayWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = RelayWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		317506BA8E6C5F0E9D038348 /* LocalSttSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalSttSettings.swift; sourceTree = "<group>"; };
@@ -271,7 +269,6 @@
 				9692A36756E86694D6DCF64F /* SessionsAPI.swift */,
 				912432D794E9D1FE7165651C /* SilentKeepAlive.swift */,
 				7CBE41AF5C080E5DED126546 /* SpeechRecognitionService.swift */,
-				1D8C314C1736FF70050A7418 /* ThinkingToneService.swift */,
 				36867E74E2DB4F0F89C17EE2 /* WebSocketService.swift */,
 			);
 			path = Services;
@@ -615,7 +612,6 @@
 				1EFFDE00EC63BC6944634598 /* SpeechRecognitionService.swift in Sources */,
 				60324D4F56D4721206FA302D /* StatusIndicator.swift in Sources */,
 				4727621A68E27C6972481B87 /* StatusOrb.swift in Sources */,
-				BEDCE5B68A34E5661B0F6C6B /* ThinkingToneService.swift in Sources */,
 				9455FA9BBCFC1477C6908913 /* UploadItem.swift in Sources */,
 				468A9996AEC058947793A338 /* UploadStrip.swift in Sources */,
 				2ADD40A2159E60D16579813F /* WebSocketEvent.swift in Sources */,
