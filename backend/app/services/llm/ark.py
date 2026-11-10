@@ -100,6 +100,12 @@ class ArkResult:
     output_tokens: int | None = None
     model: str | None = None
     context_window: int | None = None
+    # Latency of the turn's model calls (one per model→tools iteration):
+    # time to first token of the first call — what the user waits on —
+    # and the summed wall-clock of all calls.
+    ttft_ms: float | None = None
+    duration_ms: float | None = None
+    llm_calls: int = 0
 
 
 # Callback signature: receives the raw event dict (which always has
@@ -230,6 +236,7 @@ class ArkClientConnection:
     async def send_user_message(
         self, ark_session_id: str, text: str,
         timezone: str | None = None,
+        speed: str | None = None,
     ) -> int:
         """Open a turn for `ark_session_id` and send the user message. Returns
         the turn generation the caller should use with `iter_turn_events`;
@@ -239,7 +246,10 @@ class ArkClientConnection:
         `timezone` is an optional IANA zone name forwarded verbatim to ark
         on the `user_message` frame — ark uses it for the "today's date"
         env-stanza line and the DateMarker gap detection. Omit (or pass
-        `None`) and ark falls back to UTC."""
+        `None`) and ark falls back to UTC.
+
+        `speed` is an optional per-turn hint (e.g. "fast"); what it does is
+        up to the agent's ark config. Omitted means default routing."""
         await self.ensure_connected()
         async with self._turn_lock:
             gen = self._turn_generation.get(ark_session_id, 0) + 1
@@ -253,6 +263,8 @@ class ArkClientConnection:
         }
         if timezone:
             payload["timezone"] = timezone
+        if speed:
+            payload["speed"] = speed
         await self._ws.send(json.dumps(payload))
         return gen
 
@@ -655,12 +667,13 @@ class ArkProvider(LLMProvider):
         session_context: str | None = None,
         project_id: str | None = None,
         timezone: str | None = None,
+        speed: str | None = None,
     ):
         agent = _agent_name(model)
         user_text = _last_user_text(messages)
         logger.info(
-            "Ark stream: agent=%s, chain=%s, %d chars",
-            agent, previous_session_id is not None, len(user_text),
+            "Ark stream: agent=%s, chain=%s, speed=%s, %d chars",
+            agent, previous_session_id is not None, speed, len(user_text),
         )
 
         ark_session_id = previous_session_id or await self._ensure_session(
@@ -691,13 +704,16 @@ class ArkProvider(LLMProvider):
         # separated by `assistant_message` boundary events around tool calls.
         # Insert a paragraph break before the first delta of each new segment.
         turn_gen = await conn.send_user_message(
-            ark_session_id, user_text, timezone=timezone,
+            ark_session_id, user_text, timezone=timezone, speed=speed,
         )
         saw_segment_end = False
         usage_in: int | None = None
         usage_out: int | None = None
         usage_model: str | None = None
         usage_ctx: int | None = None
+        usage_ttft: float | None = None
+        usage_duration: float | None = None
+        usage_calls = 0
         try:
             async for event in conn.iter_turn_events(ark_session_id, turn_gen):
                 etype = event.get("type")
@@ -724,6 +740,14 @@ class ArkProvider(LLMProvider):
                         usage_ctx = event["context_window"]
                     if isinstance(event.get("model"), str) and event["model"]:
                         usage_model = event["model"]
+                    # Timings are absent from ark servers that predate them.
+                    usage_calls += 1
+                    ttft = event.get("ttft_ms")
+                    if usage_ttft is None and isinstance(ttft, (int, float)):
+                        usage_ttft = float(ttft)
+                    dur = event.get("duration_ms")
+                    if isinstance(dur, (int, float)):
+                        usage_duration = (usage_duration or 0.0) + dur
                 elif etype == "error":
                     # Surface upward so conversation_manager can persist a
                     # `role="error"` marker + broadcast a `session_error`
@@ -778,6 +802,9 @@ class ArkProvider(LLMProvider):
             output_tokens=usage_out,
             model=usage_model,
             context_window=usage_ctx,
+            ttft_ms=usage_ttft,
+            duration_ms=usage_duration,
+            llm_calls=usage_calls,
         )
 
     # ── Helpers ─────────────────────────────────────────────────────

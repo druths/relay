@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Message, FileAttachment } from "../types";
+import type { Message, MessageMetadata, FileAttachment } from "../types";
 import { apiFetch } from "../api";
 import { isPreviewableFile } from "./FileEditorTab";
 
@@ -362,6 +362,22 @@ function _formatTime(iso: string): string {
   return sameDay ? time : `${d.toLocaleDateString()} ${time}`;
 }
 
+function _formatMs(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** "ttft 250ms / total 1.2s over 3 calls · fast", or "" when ark sent no timings. */
+function _formatLatency(usage: NonNullable<MessageMetadata["usage"]>): string {
+  const parts: string[] = [];
+  if (usage.ttft_ms != null) parts.push(`ttft ${_formatMs(usage.ttft_ms)}`);
+  if (usage.duration_ms != null) {
+    const calls = usage.llm_calls && usage.llm_calls > 1 ? ` over ${usage.llm_calls} calls` : "";
+    parts.push(`total ${_formatMs(usage.duration_ms)}${calls}`);
+  }
+  const latency = parts.join(" / ");
+  return [latency, usage.speed].filter(Boolean).join(" · ");
+}
+
 function _formatPercent(used: number, total: number): string {
   const pct = total > 0 ? (used / total) * 100 : 0;
   return pct >= 10 ? `${pct.toFixed(0)}%` : `${pct.toFixed(1)}%`;
@@ -526,6 +542,7 @@ export function ConversationLog({
                   </>
                 ) : null}
                 {usage!.model ? <> · {usage!.model}</> : null}
+                {_formatLatency(usage!) ? <> · {_formatLatency(usage!)}</> : null}
               </span>
             )}
           </div>

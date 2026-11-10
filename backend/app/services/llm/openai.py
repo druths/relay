@@ -45,6 +45,8 @@ class OpenAIProvider(LLMProvider):
         system_prompt: str,
         messages: list[dict],
         model: str,
+        *,
+        extra_body: dict | None = None,
     ) -> str:
         client = _get_client(self._base_url, self._api_key)
         if client is None:
@@ -53,16 +55,17 @@ class OpenAIProvider(LLMProvider):
         llm_messages = [{"role": "system", "content": system_prompt}]
         llm_messages.extend(messages)
 
-        logger.info("OpenAI generate: model=%s, %d messages", model, len(llm_messages))
+        logger.info("OpenAI generate: model=%s, %d messages, extra=%s", model, len(llm_messages), extra_body)
 
         response = await client.chat.completions.create(
             model=model,
             messages=llm_messages,
+            extra_body=extra_body or None,
         )
 
         return response.choices[0].message.content or ""
 
-    async def generate_stream(self, system_prompt, messages, model):
+    async def generate_stream(self, system_prompt, messages, model, *, extra_body=None):
         client = _get_client(self._base_url, self._api_key)
         if client is None:
             raise RuntimeError("OpenAI API key not configured")
@@ -70,12 +73,13 @@ class OpenAIProvider(LLMProvider):
         llm_messages = [{"role": "system", "content": system_prompt}]
         llm_messages.extend(messages)
 
-        logger.info("OpenAI stream: model=%s, %d messages", model, len(llm_messages))
+        logger.info("OpenAI stream: model=%s, %d messages, extra=%s", model, len(llm_messages), extra_body)
 
         response = await client.chat.completions.create(
             model=model,
             messages=llm_messages,
             stream=True,
+            extra_body=extra_body or None,
         )
         async for chunk in response:
             delta = chunk.choices[0].delta.content

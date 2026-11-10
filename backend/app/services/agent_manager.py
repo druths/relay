@@ -199,6 +199,28 @@ async def resolve_tts_config(agent: Agent) -> tuple[str | None, str | None]:
     return base_url, api_key
 
 
+# Used when an OpenRouter agent has never saved a voice setting: voice turns
+# care most about time to first token.
+DEFAULT_VOICE_ROUTING = {"provider": {"sort": "latency"}}
+
+
+def _routing_kwargs(agent: Agent, provider, base_url: str | None, is_live_mode: bool) -> dict:
+    """OpenRouter request options for this turn, as `extra_body` kwargs.
+
+    `agent.llm_routing` holds one body per kind of turn ({"text": ...,
+    "voice": ...}). Only sent to OpenRouter: other OpenAI-compatible
+    endpoints reject fields they don't know."""
+    from app.services.llm.openai import OpenAIProvider
+    if not isinstance(provider, OpenAIProvider) or "openrouter.ai" not in (base_url or ""):
+        return {}
+    routing = agent.llm_routing or {}
+    if is_live_mode:
+        body = routing.get("voice", DEFAULT_VOICE_ROUTING)
+    else:
+        body = routing.get("text")
+    return {"extra_body": body} if body else {}
+
+
 async def _get_platform_setting(key: str) -> str:
     """Read a single platform setting outside any active session — used by
     the LLM/TTS resolution paths."""
@@ -216,6 +238,7 @@ async def generate_response(
     agent: Agent, text: str, context: list[dict],
     voice_instructions: str | None = None,
     session_id: uuid.UUID | None = None,
+    is_live_mode: bool = False,
 ) -> str:
     """Generate a text response from an agent using its configured LLM provider."""
     base_url, api_key = await resolve_llm_config(agent)
@@ -293,7 +316,10 @@ async def generate_response(
             return f"[{agent.name}] Sorry, I encountered an error generating a response. Please try again."
 
     try:
-        result = await provider.generate(system_prompt, messages, agent.llm_model)
+        result = await provider.generate(
+            system_prompt, messages, agent.llm_model,
+            **_routing_kwargs(agent, provider, base_url, is_live_mode),
+        )
         agent_health.set_healthy(agent.agent_id)
         return result
     except Exception as exc:
@@ -307,6 +333,7 @@ async def generate_response_stream(
     voice_instructions: str | None = None,
     session_id: uuid.UUID | None = None,
     timezone: str | None = None,
+    is_live_mode: bool = False,
 ) -> AsyncGenerator[str | ResponseMeta, None]:
     """Stream a text response from an agent using its configured LLM provider."""
     base_url, api_key = await resolve_llm_config(agent)
@@ -387,6 +414,8 @@ async def generate_response_stream(
                 )
                 bound_project_id = _r.scalar_one_or_none()
         final_meta: dict[str, Any] = {}
+        # Voice turns ask ark to bias for time to first token.
+        speed = "fast" if is_live_mode else None
         try:
             async for chunk in provider.generate_stream_with_chain(
                 system_prompt, messages, agent.llm_model,
@@ -395,6 +424,7 @@ async def generate_response_stream(
                 session_context=agent.persona_prompt if not prev_sid else None,
                 project_id=bound_project_id,
                 timezone=timezone,
+                speed=speed,
             ):
                 # Ark surfaces the just-created (or resumed) ark session
                 # id up-front so we can persist it into provider_state
@@ -423,6 +453,15 @@ async def generate_response_stream(
                             usage["context_window"] = chunk.context_window
                         if chunk.model:
                             usage["model"] = chunk.model
+                        if chunk.ttft_ms is not None:
+                            usage["ttft_ms"] = round(chunk.ttft_ms)
+                        if chunk.duration_ms is not None:
+                            usage["duration_ms"] = round(chunk.duration_ms)
+                        if chunk.llm_calls > 1:
+                            usage["llm_calls"] = chunk.llm_calls
+                        # Recorded so fast and default turns can be compared.
+                        if speed:
+                            usage["speed"] = speed
                         final_meta["usage"] = usage
                 else:
                     yield chunk
@@ -436,7 +475,10 @@ async def generate_response_stream(
         return
 
     try:
-        async for chunk in provider.generate_stream(system_prompt, messages, agent.llm_model):
+        async for chunk in provider.generate_stream(
+            system_prompt, messages, agent.llm_model,
+            **_routing_kwargs(agent, provider, base_url, is_live_mode),
+        ):
             yield chunk
         agent_health.set_healthy(agent.agent_id)
     except Exception as exc:

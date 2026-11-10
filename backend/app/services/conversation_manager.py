@@ -917,6 +917,7 @@ async def handle_session_message_stream(
     db: AsyncSession, session_id: uuid.UUID, text: str,
     voice_instructions: str | None = None,
     timezone: str | None = None,
+    is_live_mode: bool = False,
 ) -> AsyncGenerator[dict, None]:
     """Process a message inside an agent session, streaming the response."""
     session = await get_session(db, session_id)
@@ -964,7 +965,10 @@ async def handle_session_message_stream(
     # (b) persist the partial response with matching metadata so history
     # replay preserves the "this turn was stopped" signal.
     stopped_reason: str | None = None
-    async for chunk in agent_manager.generate_response_stream(agent, text, context, voice_instructions, session_id=session_id, timezone=timezone):
+    async for chunk in agent_manager.generate_response_stream(
+        agent, text, context, voice_instructions,
+        session_id=session_id, timezone=timezone, is_live_mode=is_live_mode,
+    ):
         if isinstance(chunk, agent_manager.ResponseMeta):
             response_meta = chunk.metadata
             continue

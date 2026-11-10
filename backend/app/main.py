@@ -120,6 +120,9 @@ async def lifespan(app: FastAPI):
             "UPDATE sessions SET provider_state = jsonb_build_object('openclaw', openclaw_response_id) "
             "WHERE openclaw_response_id IS NOT NULL AND NOT (provider_state ? 'openclaw')"
         ))
+        await conn.execute(text(
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS llm_routing JSONB NOT NULL DEFAULT '{}'::jsonb"
+        ))
         # Distinguishes user-uploaded attachments from agent-shared files in
         # session history replay.
         await conn.execute(text(

@@ -24,5 +24,8 @@ class Agent(Base):
     llm_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     llm_api_key: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     tts_api_key: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    # OpenRouter request options per kind of turn: {"text": {...}, "voice": {...}},
+    # each merged into the chat-completions body. See agent_manager._routing_body.
+    llm_routing: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)

@@ -113,6 +113,8 @@ final class AgentManagementViewModel {
             "similarity_boost": agent.voiceSettings["similarity_boost"]?.stringValue ?? "0.75",
             // Normalised to an integer string: JSON may decode it as a double.
             "expressivity": String(Int(Double(agent.voiceSettings["expressivity"]?.stringValue ?? "0") ?? 0)),
+            "routing_text": Self.routingPreset(agent, kind: "text"),
+            "routing_voice": Self.routingPreset(agent, kind: "voice"),
         ]
         savedForm = form
     }
@@ -137,6 +139,8 @@ final class AgentManagementViewModel {
             "stability": "0.5",
             "similarity_boost": "0.75",
             "expressivity": "0",
+            "routing_text": Self.routingFallback["text"]!,
+            "routing_voice": Self.routingFallback["voice"]!,
         ]
         savedForm = form
     }
@@ -241,6 +245,7 @@ final class AgentManagementViewModel {
                 "tts_api_key": form["tts_api_key"]?.isEmpty == false ? .string(form["tts_api_key"]!) : .null,
                 "voice_id": .string(form["voice_id"] ?? ""),
                 "voice_settings": .dict(voiceSettings),
+                "llm_routing": .dict(buildRouting(selected: nil)),
             ]
             let created: Agent = try await apiClient.request("POST", path: "/v1/agents", body: AgentUpdateBody(values: body))
             isNewAgent = false
@@ -259,6 +264,11 @@ final class AgentManagementViewModel {
                 "voice_settings": .dict(voiceSettings),
             ]
 
+            // Routing only exists for OpenRouter, and isn't applied to the
+            // operator's routing calls, so don't touch it otherwise.
+            if isOpenRouter, selected?.isOperator != true {
+                body["llm_routing"] = .dict(buildRouting(selected: selected))
+            }
             if let selected, !selected.isOperator, form["name"] != selected.name {
                 body["name"] = .string(form["name"] ?? "")
             }
@@ -363,6 +373,43 @@ final class AgentManagementViewModel {
         platformForm["stt_no_speech_threshold"] = String(updated.sttNoSpeechThreshold)
         platformForm["voice_mode_instructions"] = updated.voiceModeInstructions
         savedPlatformForm = platformForm
+    }
+
+    // MARK: - OpenRouter Routing
+
+    /// Each preset maps to a `provider.sort`; "default" sends nothing, and
+    /// "custom" marks a saved body the presets can't express (kept as-is).
+    static let routingSorts: Set<String> = ["price", "latency", "throughput"]
+    /// The server's choice when an agent has never saved one.
+    static let routingFallback = ["text": "default", "voice": "latency"]
+
+    var isOpenRouter: Bool {
+        form["llm_provider"] == "openai" && (form["llm_base_url"] ?? "").contains("openrouter.ai")
+    }
+
+    static func routingPreset(_ agent: Agent, kind: String) -> String {
+        guard let saved = agent.llmRouting[kind] else { return routingFallback[kind]! }
+        guard case .dict(let body) = saved, !body.isEmpty else { return "default" }
+        if body.count == 1, case .dict(let provider)? = body["provider"], provider.count == 1,
+           case .string(let sort)? = provider["sort"], routingSorts.contains(sort) {
+            return sort
+        }
+        return "custom"
+    }
+
+    private func buildRouting(selected: Agent?) -> [String: AnyCodableValue] {
+        var out: [String: AnyCodableValue] = [:]
+        for kind in ["text", "voice"] {
+            switch form["routing_\(kind)"] ?? Self.routingFallback[kind]! {
+            case "custom":
+                if let kept = selected?.llmRouting[kind] { out[kind] = kept }
+            case "default":
+                out[kind] = .dict([:])
+            case let sort:
+                out[kind] = .dict(["provider": .dict(["sort": .string(sort)])])
+            }
+        }
+        return out
     }
 
     // MARK: - Helpers

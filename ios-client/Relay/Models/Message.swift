@@ -40,12 +40,24 @@ struct TokenUsage: Equatable, Codable {
     var outputTokens: Int?
     var contextWindow: Int?
     var model: String?
+    /// Time to first token of the turn's first model call.
+    var ttftMs: Double?
+    /// Summed wall-clock of the turn's model calls.
+    var durationMs: Double?
+    /// Model calls in the turn; present only when more than one.
+    var llmCalls: Int?
+    /// Speed hint the turn was sent with (e.g. "fast").
+    var speed: String?
 
     enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case contextWindow = "context_window"
         case model
+        case ttftMs = "ttft_ms"
+        case durationMs = "duration_ms"
+        case llmCalls = "llm_calls"
+        case speed
     }
 }
 

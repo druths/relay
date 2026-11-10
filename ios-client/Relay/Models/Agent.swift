@@ -12,6 +12,8 @@ struct Agent: Codable, Identifiable, Equatable {
     var llmBaseUrl: String?
     var llmApiKey: String?
     var ttsApiKey: String?
+    /// OpenRouter request options per kind of turn ("text" / "voice").
+    var llmRouting: [String: AnyCodableValue]
     var isOperator: Bool
     var sortOrder: Int
     var status: AgentStatus
@@ -35,6 +37,7 @@ struct Agent: Codable, Identifiable, Equatable {
         case llmBaseUrl = "llm_base_url"
         case llmApiKey = "llm_api_key"
         case ttsApiKey = "tts_api_key"
+        case llmRouting = "llm_routing"
         case isOperator = "is_operator"
         case sortOrder = "sort_order"
         case status
@@ -54,6 +57,7 @@ struct Agent: Codable, Identifiable, Equatable {
         llmBaseUrl = try container.decodeIfPresent(String.self, forKey: .llmBaseUrl)
         llmApiKey = try container.decodeIfPresent(String.self, forKey: .llmApiKey)
         ttsApiKey = try container.decodeIfPresent(String.self, forKey: .ttsApiKey)
+        llmRouting = try container.decodeIfPresent([String: AnyCodableValue].self, forKey: .llmRouting) ?? [:]
         isOperator = try container.decode(Bool.self, forKey: .isOperator)
         sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
         status = try container.decode(AgentStatus.self, forKey: .status)

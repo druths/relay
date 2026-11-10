@@ -1,3 +1,5 @@
+export type RoutingKind = "text" | "voice";
+
 export interface Agent {
   agent_id: string;
   name: string;
@@ -10,6 +12,8 @@ export interface Agent {
   llm_base_url: string | null;
   llm_api_key: string | null;
   tts_api_key: string | null;
+  /** OpenRouter request options per kind of turn, e.g. {voice: {provider: {sort: "latency"}}}. */
+  llm_routing: Partial<Record<RoutingKind, Record<string, unknown>>>;
   is_operator: boolean;
   sort_order: number;
   status: "healthy" | "error" | "unknown";
@@ -136,6 +140,14 @@ export interface MessageMetadata {
     output_tokens?: number;
     context_window?: number;
     model?: string;
+    /** Time to first token of the turn's first model call. */
+    ttft_ms?: number;
+    /** Summed wall-clock of the turn's model calls. */
+    duration_ms?: number;
+    /** Model calls in the turn; present only when more than one. */
+    llm_calls?: number;
+    /** Speed hint the turn was sent with (e.g. "fast"). */
+    speed?: string;
   };
   /** Set on `role: "compaction"` marker rows. Reason strings match
    * ark's: `auto:proactive`, `auto:reactive`, `client-invoked`,

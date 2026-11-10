@@ -38,6 +38,7 @@ class AgentOut(BaseModel):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     tts_api_key: str | None = None
+    llm_routing: dict = {}
     is_operator: bool = False
     status: str = "unknown"
     status_message: str = ""
@@ -57,6 +58,7 @@ class AgentCreate(BaseModel):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     tts_api_key: str | None = None
+    llm_routing: dict = {}
 
 
 class AgentConfigUpdate(BaseModel):
@@ -70,6 +72,7 @@ class AgentConfigUpdate(BaseModel):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     tts_api_key: str | None = None
+    llm_routing: dict | None = None
 
 
 def _agent_out(a) -> AgentOut:
@@ -87,6 +90,7 @@ def _agent_out(a) -> AgentOut:
         llm_base_url=a.llm_base_url,
         llm_api_key=mask_api_key(a.llm_api_key),
         tts_api_key=mask_api_key(a.tts_api_key),
+        llm_routing=a.llm_routing or {},
         is_operator=(a.name == "Operator"),
         sort_order=a.sort_order,
         status=health.status,
@@ -119,6 +123,7 @@ async def create_agent(
         llm_base_url=body.llm_base_url,
         llm_api_key=body.llm_api_key,
         tts_api_key=body.tts_api_key,
+        llm_routing=body.llm_routing or {},
     )
     db.add(agent)
     await db.commit()
@@ -440,6 +445,8 @@ async def update_agent_config(
         agent.llm_model = body.llm_model
     if body.llm_base_url is not None:
         agent.llm_base_url = body.llm_base_url or None
+    if body.llm_routing is not None:
+        agent.llm_routing = body.llm_routing
 
     # API keys: empty string clears (falls back to env var), None means untouched
     if body.llm_api_key is not None:

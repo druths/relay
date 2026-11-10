@@ -593,7 +593,10 @@ async def _handle_text(
     detached_session_id = active_session_id
 
     try:
-        async for event in handle_session_message_stream(db, active_session_id, text, voice_mode_instructions, timezone=timezone):
+        async for event in handle_session_message_stream(
+            db, active_session_id, text, voice_mode_instructions,
+            timezone=timezone, is_live_mode=is_live_mode,
+        ):
             # Check if we've been detached (user left mid-stream)
             if not detached and detach_event and detach_event.is_set():
                 detached = True

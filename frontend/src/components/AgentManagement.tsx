@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Agent, PlatformSettings } from "../types";
+import type { Agent, PlatformSettings, RoutingKind } from "../types";
 import {
   useProviderSchemas,
   findSchema,
@@ -23,6 +23,27 @@ interface Props {
 }
 
 type Tab = "agents" | "defaults" | "stt" | "appearance";
+
+// OpenRouter routing presets. Each maps to a `provider.sort`; "default"
+// sends nothing, and "custom" marks a saved body the presets can't express
+// (kept as-is on save).
+const ROUTING_SORTS = ["price", "latency", "throughput"];
+// The server's choice when an agent has never saved one, per kind of turn.
+const ROUTING_FALLBACK: Record<RoutingKind, string> = { text: "default", voice: "latency" };
+
+function routingPreset(agent: Agent | undefined, kind: RoutingKind): string {
+  const body = agent?.llm_routing?.[kind];
+  if (body === undefined) return ROUTING_FALLBACK[kind];
+  if (body === null || Object.keys(body).length === 0) return "default";
+  const provider = body.provider as Record<string, unknown> | undefined;
+  const onlySort = Object.keys(body).length === 1 && provider
+    && Object.keys(provider).length === 1 && ROUTING_SORTS.includes(provider.sort as string);
+  return onlySort ? (provider.sort as string) : "custom";
+}
+
+function isOpenRouter(form: Record<string, string | null>): boolean {
+  return form.llm_provider === "openai" && (form.llm_base_url ?? "").includes("openrouter.ai");
+}
 
 export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
   const [tab, setTab] = useState<Tab>("agents");
@@ -130,6 +151,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         stability: "0.5",
         similarity_boost: "0.75",
         expressivity: "0",
+        routing_text: ROUTING_FALLBACK.text,
+        routing_voice: ROUTING_FALLBACK.voice,
       });
     } else if (selected) {
       setForm({
@@ -149,6 +172,8 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         stability: String(selected.voice_settings?.stability ?? 0.5),
         similarity_boost: String(selected.voice_settings?.similarity_boost ?? 0.75),
         expressivity: String(selected.voice_settings?.expressivity ?? 0),
+        routing_text: routingPreset(selected, "text"),
+        routing_voice: routingPreset(selected, "voice"),
       });
     }
     setConfirmDelete(false);
@@ -245,6 +270,20 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
         return {};
       };
 
+      const buildRouting = (): Agent["llm_routing"] => {
+        const out: Agent["llm_routing"] = {};
+        for (const kind of ["text", "voice"] as RoutingKind[]) {
+          const preset = form[`routing_${kind}`] ?? ROUTING_FALLBACK[kind];
+          if (preset === "custom") {
+            const kept = selected?.llm_routing?.[kind];
+            if (kept !== undefined) out[kind] = kept;
+          } else {
+            out[kind] = preset === "default" ? {} : { provider: { sort: preset } };
+          }
+        }
+        return out;
+      };
+
       if (isNew) {
         const body: Record<string, unknown> = {
           name: form.name,
@@ -257,6 +296,7 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
           tts_api_key: form.tts_api_key || null,
           voice_id: form.voice_id || "",
           voice_settings: buildVoiceSettings(),
+          llm_routing: buildRouting(),
         };
         const res = await apiFetch(`/v1/agents`, {
           method: "POST",
@@ -277,6 +317,11 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
           voice_id: form.voice_id || "",
           voice_settings: buildVoiceSettings(),
         };
+        // Routing only exists for OpenRouter, and isn't applied to the
+        // operator's routing calls, so don't touch it otherwise.
+        if (isOpenRouter(form) && !selected.is_operator) {
+          body.llm_routing = buildRouting();
+        }
         if (!selected.is_operator && form.name !== selected.name) {
           body.name = form.name;
         }
@@ -562,6 +607,32 @@ export function AgentManagement({ agents, onClose, onAgentsChanged }: Props) {
                     onChange={(v) => setField(field.key, v)}
                   />
                 ))}
+                {/* OpenRouter picks which host serves the model on each
+                    call; voice turns default to the fastest first token. */}
+                {isOpenRouter(form) && !selected?.is_operator && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {(["text", "voice"] as RoutingKind[]).map((kind) => (
+                      <div key={kind}>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          {kind === "text" ? "Text replies" : "Voice replies"}
+                        </label>
+                        <select
+                          value={form[`routing_${kind}`] ?? ROUTING_FALLBACK[kind]}
+                          onChange={(e) => setField(`routing_${kind}`, e.target.value)}
+                          className="w-full bg-gray-800 rounded-lg px-3 py-2 text-sm outline-none"
+                        >
+                          <option value="default">OpenRouter default</option>
+                          <option value="price">Cheapest</option>
+                          <option value="latency">Fastest response</option>
+                          <option value="throughput">Highest throughput</option>
+                          {form[`routing_${kind}`] === "custom" && (
+                            <option value="custom">Custom</option>
+                          )}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </fieldset>
 
               {/* ── TTS Section ── */}

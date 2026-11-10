@@ -65,9 +65,27 @@ struct MessageBubble: View {
                 if let model = u.model, !model.isEmpty {
                     usagePart += " · \(model)"
                 }
+                if let latency = Self.latencyLine(u) {
+                    usagePart += " · \(latency)"
+                }
                 parts.append(usagePart)
             }
         }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// "ttft 250ms / total 1.2s over 3 calls · fast", or nil when ark sent no timings.
+    private static func latencyLine(_ u: TokenUsage) -> String? {
+        func fmt(_ ms: Double) -> String {
+            ms < 1000 ? "\(Int(ms.rounded()))ms" : String(format: "%.1fs", ms / 1000)
+        }
+        var timings: [String] = []
+        if let t = u.ttftMs { timings.append("ttft \(fmt(t))") }
+        if let d = u.durationMs {
+            let calls = (u.llmCalls ?? 0) > 1 ? " over \(u.llmCalls!) calls" : ""
+            timings.append("total \(fmt(d))\(calls)")
+        }
+        let parts = [timings.joined(separator: " / "), u.speed ?? ""].filter { !$0.isEmpty }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

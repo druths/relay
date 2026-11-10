@@ -288,6 +288,20 @@ struct AgentManagementView: View {
             }
         }
 
+        // OpenRouter picks which host serves the model on each call;
+        // voice turns default to the fastest first token.
+        if vm.isOpenRouter && selected?.isOperator != true {
+            ForEach(["text", "voice"], id: \.self) { kind in
+                sectionLabel(kind == "text" ? "Text Replies" : "Voice Replies")
+                pickerMenu("routing_\(kind)", options: [
+                    ("default", "OpenRouter default"),
+                    ("price", "Cheapest"),
+                    ("latency", "Fastest response"),
+                    ("throughput", "Highest throughput"),
+                ] + (vm.form["routing_\(kind)"] == "custom" ? [("custom", "Custom")] : []))
+            }
+        }
+
         // TTS Provider
         sectionTitle("TTS PROVIDER")
         providerPicker("tts_provider", options: catalog.tts.map { ($0.id, $0.label) })
