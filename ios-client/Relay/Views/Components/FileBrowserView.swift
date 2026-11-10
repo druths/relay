@@ -199,6 +199,8 @@ private struct FileTreeView: View {
     /// Set when a probe classified the tapped file as binary; drives an
     /// alert instead of opening a preview or tab.
     @State private var binaryOpenAttempt: String? = nil
+    /// Set while an upload waits on the user's answer about name clashes.
+    @State private var uploadConflict: UploadConflict? = nil
 
     /// Key used in `relay.fileTreeExpanded` so different projects /
     /// workspaces have independent persisted state.
@@ -366,6 +368,17 @@ private struct FileTreeView: View {
             Button("Cancel", role: .cancel) { pathToDelete = nil }
         } message: {
             Text(pathToDelete.map { "Delete \($0)?" } ?? "")
+        }
+        .confirmationDialog(
+            uploadConflictTitle,
+            isPresented: uploadConflictPresented,
+            titleVisibility: .visible,
+        ) {
+            Button("Replace", role: .destructive) { resolveUploadConflict(.replace) }
+            Button("Keep Both") { resolveUploadConflict(.keepBoth) }
+            Button("Skip", role: .cancel) { resolveUploadConflict(.skip) }
+        } message: {
+            Text(uploadConflictMessage)
         }
         .alert("Can't preview", isPresented: Binding(
             get: { binaryOpenAttempt != nil },
@@ -568,6 +581,7 @@ private struct FileTreeView: View {
         // the state var could get overwritten mid-upload by another
         // menu action.
         let targetDir = pendingUploadDir
+        var files: [(name: String, data: Data, mime: String)] = []
         for url in urls {
             guard url.startAccessingSecurityScopedResource() else { continue }
             defer { url.stopAccessingSecurityScopedResource() }
@@ -575,18 +589,55 @@ private struct FileTreeView: View {
                 let data = try Data(contentsOf: url)
                 let mime = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.preferredMIMEType)
                     ?? "application/octet-stream"
-                // Progress-aware version — feeds the shared uploads
-                // registry rendered by UploadStrip at the top of the
-                // file browser. Errors land in the row's status; no
-                // panel-level error banner needed for the routine case.
-                _ = await relay.uploadBrowserFile(
-                    kind: kind, targetId: targetId, targetDir: targetDir,
-                    filename: url.lastPathComponent,
-                    data: data, mimeType: mime, server: server,
-                )
+                files.append((url.lastPathComponent, data, mime))
             } catch {
                 self.error = String(describing: error)
             }
+        }
+
+        // Settle name clashes before anything is written. The listing is
+        // read fresh: the tree's copy may be stale or never loaded.
+        let taken: Set<String>
+        do {
+            let listing = try await relay.apiClient.listDir(kind, id: targetId, path: targetDir, server: server)
+            taken = Set(listing.entries.map(\.name))
+        } catch APIClient.APIError.httpError(404) {
+            taken = []  // Folder doesn't exist yet: nothing to clash with.
+        } catch {
+            self.error = String(describing: error)
+            return
+        }
+        let clashes = files.map(\.name).filter { taken.contains($0) }
+        if !clashes.isEmpty {
+            let choice = await withCheckedContinuation { cont in
+                uploadConflict = UploadConflict(names: clashes, folder: targetDir, continuation: cont)
+            }
+            switch choice {
+            case .replace:
+                break
+            case .skip:
+                files.removeAll { taken.contains($0.name) }
+            case .keepBoth:
+                // Rename clashes, also steering clear of names this batch claims.
+                var claimed = taken.union(files.map(\.name))
+                for i in files.indices where taken.contains(files[i].name) {
+                    let name = uniqueUploadName(files[i].name, taken: claimed)
+                    claimed.insert(name)
+                    files[i].name = name
+                }
+            }
+        }
+
+        for file in files {
+            // Progress-aware version — feeds the shared uploads
+            // registry rendered by UploadStrip at the top of the
+            // file browser. Errors land in the row's status; no
+            // panel-level error banner needed for the routine case.
+            _ = await relay.uploadBrowserFile(
+                kind: kind, targetId: targetId, targetDir: targetDir,
+                filename: file.name,
+                data: file.data, mimeType: file.mime, server: server,
+            )
         }
         // Refresh the directory we uploaded into. Root uploads
         // reload the whole tree; sub-folder uploads refresh just
@@ -597,6 +648,32 @@ private struct FileTreeView: View {
         } else {
             load(path: targetDir)
         }
+    }
+
+    private var uploadConflictTitle: String {
+        guard let c = uploadConflict else { return "" }
+        return c.names.count > 1 ? "\(c.names.count) files already exist" : "File already exists"
+    }
+
+    private var uploadConflictMessage: String {
+        guard let c = uploadConflict else { return "" }
+        let names = c.names.prefix(5).joined(separator: ", ") + (c.names.count > 5 ? ", …" : "")
+        let folder = c.folder.isEmpty ? "the root folder" : c.folder
+        return "\(names) in \(folder). Keep Both uploads under a new name, like “report (1).pdf”."
+    }
+
+    private var uploadConflictPresented: Binding<Bool> {
+        Binding(
+            get: { uploadConflict != nil },
+            // Dismissed without a choice counts as Skip.
+            set: { if !$0 { resolveUploadConflict(.skip) } },
+        )
+    }
+
+    private func resolveUploadConflict(_ choice: UploadConflict.Choice) {
+        guard let pending = uploadConflict else { return }
+        uploadConflict = nil
+        pending.continuation.resume(returning: choice)
     }
 
     /// Called from a row tap. Probes the file first — if the backend
@@ -1070,3 +1147,23 @@ private func _presentShareSheet(url: URL) {}
 struct _DownloadRef: Identifiable { let url: URL; var id: String { url.absoluteString } }
 struct _ShareSheet: View { let url: URL; var body: some View { EmptyView() } }
 #endif
+
+/// Upload names that already exist in the target folder, waiting on the
+/// user's choice. One choice covers the whole batch.
+private struct UploadConflict {
+    enum Choice { case replace, keepBoth, skip }
+    let names: [String]
+    let folder: String
+    let continuation: CheckedContinuation<Choice, Never>
+}
+
+/// `name` with " (n)" before the extension, using the lowest n not in
+/// `taken`: "report.pdf" → "report (1).pdf", "Makefile" → "Makefile (1)".
+private func uniqueUploadName(_ name: String, taken: Set<String>) -> String {
+    let dot = name.lastIndex(of: ".").flatMap { $0 > name.startIndex ? $0 : nil }
+    let stem = dot.map { String(name[..<$0]) } ?? name
+    let ext = dot.map { String(name[$0...]) } ?? ""
+    var n = 1
+    while taken.contains("\(stem) (\(n))\(ext)") { n += 1 }
+    return "\(stem) (\(n))\(ext)"
+}

@@ -11,6 +11,7 @@ import {
 } from "../api";
 import { isKnownBinaryExt } from "./FileEditorTab";
 import { UploadProgressStrip } from "./UploadProgressStrip";
+import { UploadConflictDialog, uniqueName, type ConflictChoice } from "./UploadConflictDialog";
 
 type Kind = "project" | "workspace";
 
@@ -213,6 +214,10 @@ function FileTreeView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  /// Open while an upload waits on the user's answer about name clashes.
+  const [conflict, setConflict] = useState<{
+    names: string[]; folder: string; resolve: (c: ConflictChoice) => void;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadRoot = useCallback(async () => {
@@ -281,11 +286,48 @@ function FileTreeView({
 
   // ── actions ─────────────────────────────────────────────
 
-  const handleUpload = async (files: FileList | null, targetDir: string) => {
-    if (!files || files.length === 0) return;
+  /// Names already taken in `dir`, read fresh: the panel's own listing
+  /// may be stale or missing (a drop onto a collapsed folder). A folder
+  /// that doesn't exist yet has nothing to clash with.
+  const takenNames = async (dir: string): Promise<Set<string>> => {
+    try {
+      const listing = await listDir(kind, id, dir, server);
+      return new Set(listing.entries.map((e) => e.name));
+    } catch (e) {
+      if (String(e).includes("404")) return new Set();
+      throw e;
+    }
+  };
+
+  /// Settle name clashes before anything is written: ask once for the
+  /// whole batch, then drop or rename the clashing files as chosen.
+  const resolveConflicts = async (files: File[], targetDir: string): Promise<File[]> => {
+    const taken = await takenNames(targetDir);
+    const clashes = files.filter((f) => taken.has(f.name));
+    if (clashes.length === 0) return files;
+    const choice = await new Promise<ConflictChoice>((resolve) => {
+      setConflict({ names: clashes.map((f) => f.name), folder: targetDir, resolve });
+    });
+    setConflict(null);
+    if (choice === "replace") return files;
+    if (choice === "skip") return files.filter((f) => !taken.has(f.name));
+    // Keep both: rename clashes, also steering clear of names this batch claims.
+    const claimed = new Set([...taken, ...files.map((f) => f.name)]);
+    return files.map((f) => {
+      if (!taken.has(f.name)) return f;
+      const name = uniqueName(f.name, claimed);
+      claimed.add(name);
+      return new File([f], name, { type: f.type, lastModified: f.lastModified });
+    });
+  };
+
+  const handleUpload = async (fileList: FileList | null, targetDir: string) => {
+    if (!fileList || fileList.length === 0) return;
     setUploading(true);
     setError(null);
     try {
+      const files = await resolveConflicts(Array.from(fileList), targetDir);
+      if (files.length === 0) return;
       // Progress + cancel routes through the shared registry. Errors
       // land in the per-row `status: "failed"` state instead of
       // panel-level `error` — the strip surfaces them next to the
@@ -552,6 +594,14 @@ function FileTreeView({
       {/* Live upload progress — browser-origin rows targeting this
           tab (project or workspace, matching id). Same visual + set
           of controls as the chat-side strip. */}
+      {conflict && (
+        <UploadConflictDialog
+          names={conflict.names}
+          folder={conflict.folder}
+          onChoose={conflict.resolve}
+        />
+      )}
+
       <UploadProgressStrip
         uploads={uploads}
         onCancel={onCancelUpload}
